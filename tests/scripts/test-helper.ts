@@ -421,6 +421,10 @@ export class TestHelper {
 						},
 						mkdir: async (path: any, ...args: any[]) => (memfs.promises.mkdir as Function)(path, ...args),
 						rm: async (path: any, ...args: any[]) => (memfs.promises.rm as Function)(path, ...args),
+						access: async (path: any, ...args: any[]) => {
+							if (!shouldFallback(path.toString())) return (memfs.promises.access as Function)(path, ...args);
+							return (realFs.access as Function)(path, ...args);
+						},
 					};
 				}
 
@@ -499,6 +503,10 @@ export class TestHelper {
 						},
 						mkdir: async (path: any, ...args: any[]) => (memfs.promises.mkdir as Function)(path, ...args),
 						rm: async (path: any, ...args: any[]) => (memfs.promises.rm as Function)(path, ...args),
+						access: async (path: any, ...args: any[]) => {
+							if (!shouldFallback(path.toString())) return (memfs.promises.access as Function)(path, ...args);
+							return (realFs.promises.access as Function)(path, ...args);
+						},
 					}
 				};
 			});

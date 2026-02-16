@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { swcDecoratorMetadataPlugin } from '../../src/plugins/decorator-metadata';
 import type { OnLoadArgs, OnLoadResult, PluginBuild } from 'esbuild';
-import * as swc from '@swc/core';
 import { Encoding } from '../../src/constants';
 import { TestHelper } from '../scripts/test-helper';
 
-vi.mock('@swc/core');
+vi.mock('@swc/core', () => ({
+	transformFile: vi.fn(),
+}));
+
+const swc = await import('@swc/core');
+const { swcDecoratorMetadataPlugin } = await import('../../src/plugins/decorator-metadata');
 
 describe('swcDecoratorMetadataPlugin', () => {
 	let mockBuild: PluginBuild;
