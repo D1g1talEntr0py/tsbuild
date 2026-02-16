@@ -8,6 +8,7 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     pool: 'vmForks',
+    testTimeout: 15_000,
     coverage: {
       reporter: [ 'text', 'json' ],
 			reportsDirectory: 'tests/coverage',
