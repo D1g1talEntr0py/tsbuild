@@ -36,6 +36,10 @@
     "type": "git",
     "url": "git+https://github.com/D1g1talEntr0py/tsbuild.git"
   },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "bugs": {
     "url": "https://github.com/D1g1talEntr0py/tsbuild/issues"
   },
