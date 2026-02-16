@@ -1,6 +1,7 @@
 {
   "name": "@d1g1tal/tsbuild",
   "version": "1.0.0",
+  "packageManager": "pnpm@10.29.3",
   "description": "A fast, ESM-only TypeScript build tool combining the TypeScript API for type checking and declaration generation, esbuild for bundling, and SWC for decorator metadata.",
   "type": "module",
   "exports": {
