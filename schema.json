@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tsbuild",
+  "version": 1.0,
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "tsbuild": {
+      "$ref": "#/definitions/options"
+    }
+  },
+  "definitions": {
+    "options": {
+      "type": "object",
+      "markdownDescription": "Configuration options for [tsbuild]",
+      "additionalProperties": false,
+      "properties": {
+        "entryPoints": {
+          "markdownDescription": "Files that each serve as an input to the bundling algorithm. Can be an array of paths or an object mapping output names to input paths.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "platform": {
+          "description": "Target platform. Auto-detected from tsconfig lib (DOM = browser, no DOM = node). Override if needed.",
+          "type": "string",
+          "enum": [
+            "node",
+            "browser",
+            "neutral"
+          ]
+        },
+        "bundle": {
+          "description": "Whether to bundle source files together. When false, each file is output separately.",
+          "type": "boolean",
+          "default": true
+        },
+        "clean": {
+          "description": "Remove all files from the output directory before building. Defaults to true.",
+          "type": "boolean",
+          "default": true
+        },
+        "packages": {
+          "description": "Default behavior for node_modules dependencies. 'bundle' includes them in output, 'external' keeps them as imports. When omitted, tsbuild auto-selects based on platform and noExternal.",
+          "type": "string",
+          "enum": [
+            "bundle",
+            "external"
+          ]
+        },
+        "external": {
+          "description": "Specific dependencies to externalize (don't bundle). In tsconfig.json this must be strings (RegExp patterns are only supported via the programmatic API).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "noExternal": {
+          "description": "Specific dependencies to bundle (overrides packages setting). In tsconfig.json this must be strings (RegExp patterns are only supported via the programmatic API).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dts": {
+          "markdownDescription": "Generate TypeScript declaration files.\n\n---\n**Note**: By default, external types from `node_modules` are kept as import statements and not bundled.",
+          "type": "object",
+          "properties": {
+            "entryPoints": {
+              "type": "array",
+              "description": "Names of the project's entryPoints to be used to generate the DTS files",
+              "items": {
+                "type": "string"
+              }
+            },
+            "resolve": {
+              "type": "boolean",
+              "description": "Bundle external types from node_modules into declaration files. When false, external imports remain as import statements. Defaults to false for 'node' platform, true for 'browser' and 'neutral' platforms."
+            }
+          },
+          "additionalProperties": false
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables to define (accessible via import.meta.env)",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "minify": {
+          "type": "boolean",
+          "description": "When enabled, the generated code will be minified instead of pretty-printed."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Force a full rebuild, bypassing incremental compilation cache. Useful when build artifacts are corrupted."
+        },
+        "sourceMap": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": ["inline", "external", "both"]
+            }
+          ],
+          "description": "Generate source maps. Options: true/false, 'inline', 'external', or 'both'. Overrides tsconfig.json compilerOptions.sourceMap."
+        },
+        "splitting": {
+          "type": "boolean",
+          "description": "Enable code splitting for better caching and parallel loading"
+        },
+        "banner": {
+          "type": "object",
+          "description": "Insert content at the beginning of generated files (e.g., shebang for CLI tools)",
+          "properties": {
+            "js": {
+              "type": "string",
+              "description": "Banner text for JavaScript files"
+            },
+            "css": {
+              "type": "string",
+              "description": "Banner text for CSS files"
+            }
+          },
+          "additionalProperties": false
+        },
+        "footer": {
+          "type": "object",
+          "description": "Insert content at the end of generated files (e.g., copyright notices)",
+          "properties": {
+            "js": {
+              "type": "string",
+              "description": "Footer text for JavaScript files"
+            },
+            "css": {
+              "type": "string",
+              "description": "Footer text for CSS files"
+            }
+          },
+          "additionalProperties": false
+        },
+        "watch": {
+          "type": "object",
+          "description": "Watch mode configuration (enabled via --watch CLI flag)",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable watch mode. Prefer using the --watch CLI flag."
+            },
+            "recursive": {
+              "type": "boolean",
+              "description": "Watch directories recursively."
+            },
+            "persistent": {
+              "type": "boolean",
+              "description": "Keep the process running while watching."
+            },
+            "encoding": {
+              "type": "string",
+              "description": "Character encoding for file contents (watchr option)."
+            },
+            "debounce": {
+              "type": "number",
+              "description": "Debounce delay in milliseconds (watchr option)."
+            },
+            "ignoreInitial": {
+              "type": "boolean",
+              "description": "Ignore initial add events."
+            },
+            "renameTimeout": {
+              "type": "number",
+              "description": "Timeout for rename events in milliseconds (watchr option)."
+            },
+            "ignore": {
+              "type": "array",
+              "description": "Glob patterns for files to ignore during watch",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

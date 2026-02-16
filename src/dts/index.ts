@@ -1,0 +1,1 @@
+export { bundleDeclarations } from './declaration-bundler';

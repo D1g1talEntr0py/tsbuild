@@ -1,0 +1,14 @@
+{
+	"typescript.tsdk": "node_modules/typescript/lib",
+	"json.schemas": [
+
+		{
+			"url": "./schema.json",
+			"fileMatch": [ "/tsconfig.json", "/package.json" ]
+		}
+	],
+	"editor.formatOnSave": false,
+	"editor.codeActionsOnSave": {
+		"source.fixAll.eslint": "never"
+	}
+}

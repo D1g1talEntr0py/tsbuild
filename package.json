@@ -1,0 +1,66 @@
+{
+  "name": "@d1g1tal/tsbuild",
+  "version": "1.0.0",
+  "description": "A fast, ESM-only TypeScript build tool combining the TypeScript API for type checking and declaration generation, esbuild for bundling, and SWC for decorator metadata.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "./dist",
+    "./schema.json"
+  ],
+  "bin": {
+    "tsbuild": "./dist/tsbuild.js"
+  },
+  "scripts": {
+    "build": "tsx ./src/tsbuild.ts",
+    "build:watch": "tsx ./src/tsbuild.ts --watch",
+    "type-check": "tsx ./src/tsbuild.ts --noEmit",
+    "lint": "eslint ./src",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "pnpm lint && pnpm build"
+  },
+  "keywords": ["typescript", "build", "bundler", "esbuild", "declarations", "dts", "esm"],
+  "author": "D1g1talEntr0py",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.16.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/D1g1talEntr0py/tsbuild.git"
+  },
+  "bugs": {
+    "url": "https://github.com/D1g1talEntr0py/tsbuild/issues"
+  },
+  "homepage": "https://github.com/D1g1talEntr0py/tsbuild#readme",
+  "dependencies": {
+    "@d1g1tal/watchr": "1.0.0",
+    "esbuild": "^0.27.3",
+    "magic-string": "^0.30.21"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.55.0",
+    "@typescript-eslint/parser": "^8.55.0",
+    "@vitest/coverage-v8": "4.0.18",
+    "eslint": "^10.0.0",
+    "eslint-plugin-jsdoc": "^62.5.5",
+    "fs-monkey": "^1.1.0",
+    "memfs": "^4.56.10",
+    "tsx": "^4.21.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.55.0",
+    "vitest": "^4.0.18"
+  },
+  "optionalDependencies": {
+    "@swc/core": "^1.15.11",
+    "@swc/types": "^0.1.25"
+  }
+}
