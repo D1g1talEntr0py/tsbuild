@@ -18,6 +18,7 @@
     "tsbuild": "./dist/tsbuild.js"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "tsx ./src/tsbuild.ts",
     "build:watch": "tsx ./src/tsbuild.ts --watch",
     "type-check": "tsx ./src/tsbuild.ts --noEmit",
