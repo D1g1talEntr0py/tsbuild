@@ -1,5 +1,13 @@
 # tsbuild
 
+[![npm version](https://img.shields.io/npm/v/%40d1g1tal/tsbuild?color=blue)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
+[![npm downloads](https://img.shields.io/npm/dm/%40d1g1tal/tsbuild)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
+[![CI](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/ci.yml/badge.svg)](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/D1g1talEntr0py/tsbuild/graph/badge.svg)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
+[![License: MIT](https://img.shields.io/github/license/D1g1talEntr0py/tsbuild)](https://github.com/D1g1talEntr0py/tsbuild/blob/main/LICENSE)
+[![Node.js](https://img.shields.io/node/v/%40d1g1tal/tsbuild)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 A self-hosting TypeScript build tool that combines the best of three worlds: **TypeScript's type system**, **esbuild's speed**, and **SWC's decorator metadata support**. tsbuild is designed for modern ESM-only projects targeting Node.js 20.16.0+.
 
 > **⚠️ Note:** This is an experimental project for personal use. For production use, consider [tsup](https://tsup.egoist.dev/) instead, which is mature, battle-tested, and widely adopted. Or check out the new [tsdown](https://tsdown.dev/) by [void(0)](https://voidzero.dev/).
@@ -29,6 +37,24 @@ This separation of concerns ensures TypeScript handles correctness, esbuild hand
 
 ## Installation
 
+### Global Installation (Recommended for CLI usage)
+
+Installing globally makes the `tsbuild` command available in your terminal across all projects:
+
+```bash
+# pnpm
+pnpm add -g @d1g1tal/tsbuild
+
+# npm
+npm install -g @d1g1tal/tsbuild
+```
+
+With a global install, your projects can use `tsbuild` in `package.json` scripts without adding it as a dependency.
+
+### Local Installation (Per-project)
+
+Install as a dev dependency for per-project version pinning (recommended for CI/CD environments):
+
 ```bash
 # pnpm - no SWC dependency (optional for decorator metadata)
 pnpm add -D @d1g1tal/tsbuild --no-optional
@@ -42,6 +68,8 @@ npm install -D @d1g1tal/tsbuild
 # yarn
 yarn add -D @d1g1tal/tsbuild
 ```
+
+> **Note:** When installed only as a local dev dependency, the `tsbuild` command is not available directly in your terminal. Use it through `package.json` scripts (e.g., `pnpm build`) or invoke it explicitly with `pnpm exec tsbuild` / `npx tsbuild`.
 
 ### Requirements
 
