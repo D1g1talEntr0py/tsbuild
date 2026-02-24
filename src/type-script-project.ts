@@ -33,6 +33,7 @@ export class TypeScriptProject implements Closable {
 	private readonly buildConfiguration: ProjectBuildConfiguration;
 	private readonly pendingChanges: PendingFileChange[] = [];
 	private readonly buildDependencies: Set<RelativePath> = new Set();
+	private dependencyPaths?: Promise<string[]>;
 
 	/**
 	 * Creates a TypeScript project and prepares it for building/bundling.
@@ -74,7 +75,7 @@ export class TypeScriptProject implements Closable {
 			const processes: Array<Promise<WrittenFile[]>> = [];
 			const filesWereEmitted = await this.typeCheck();
 
-			if (filesWereEmitted && (!this.configuration.compilerOptions.noEmit || this.configuration.tsbuild.force)) {
+			if ((filesWereEmitted || this.configuration.tsbuild.force) && !this.configuration.compilerOptions.noEmit) {
 				// Clean output directory if configured and there are changes to emit
 				if (this.configuration.clean) { await this.clean() }
 
@@ -316,10 +317,12 @@ export class TypeScriptProject implements Closable {
 				const index = rootNames.indexOf(path);
 				if (index !== -1) { rootNames.splice(index, 1, nextPath) }
 			} else {
-				// Only remove from rootNames if it's an unlink event
+				// Only remove from rootNames if it's an unlink event; push new files on add
 				const index = rootNames.indexOf(path);
 				if (event === Watchr.FileEvent.unlink && index !== -1) {
 					rootNames.splice(index, 1);
+				} else if (event === Watchr.FileEvent.add && index === -1) {
+					rootNames.push(path);
 				}
 			}
 		}
@@ -327,7 +330,7 @@ export class TypeScriptProject implements Closable {
 		this.pendingChanges.length = 0;
 
 		// Recreate program with incremental support if configured
-		this.builderProgram = createIncrementalProgram({ rootNames, options: this.configuration.compilerOptions, projectReferences: this.configuration.projectReferences });
+		this.builderProgram = createIncrementalProgram({ rootNames, options: this.configuration.compilerOptions, projectReferences: this.configuration.projectReferences, configFileParsingDiagnostics: this.configuration.configFileParsingDiagnostics });
 
 		// build() handles its own errors - no need to catch here
 		await this.build();
@@ -376,8 +379,7 @@ export class TypeScriptProject implements Closable {
 			compilerOptions: {
 				...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, incremental: true, tsBuildInfoFile: Paths.join(cacheDirectory, buildInfoFile), lib: [] },
 				...configResult.config.compilerOptions,
-				...typeScriptOptions.compilerOptions,
-				...compilerOptionOverrides
+				...typeScriptOptions.compilerOptions
 			}
 		};
 
@@ -425,13 +427,15 @@ export class TypeScriptProject implements Closable {
 	}
 
 	/**
-	 * Gets the project dependency paths.
+	 * Gets the project dependency paths, cached after first call.
 	 * @returns A promise that resolves to an array of project dependency paths.
 	 */
-	private async getProjectDependencyPaths(): Promise<string[]> {
-		const { dependencies = {}, peerDependencies = {} } = Json.parse(await Files.read<JsonString<ProjectDependencies>>(Paths.absolute(this.directory, 'package.json')));
-
-		return [ ...new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]) ];
+	private getProjectDependencyPaths(): Promise<string[]> {
+		return this.dependencyPaths ??= Files.read<JsonString<ProjectDependencies>>(Paths.absolute(this.directory, 'package.json'))
+			.then((content) => {
+				const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
+				return [ ...new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]) ];
+			});
 	}
 
 	/**

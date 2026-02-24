@@ -6,6 +6,7 @@ import { TypeScriptProject } from '../src/type-script-project';
 import { Logger } from '../src/logger';
 import { Paths } from '../src/paths';
 import { bundleDeclarations } from '../src/dts/declaration-bundler';
+import { createIncrementalProgram } from 'typescript';
 import type { TypeScriptOptions } from '../src/@types';
 
 // Mock node:fs and node:fs/promises with memfs
@@ -360,6 +361,22 @@ describe('TypeScriptProject', () => {
 				expect(bundleDeclarations).not.toHaveBeenCalled();
 				expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
 			});
+
+			it('should run full build when --force even if no changes detected by incremental', async () => {
+				const projectPath = await TestHelper.createTestProject({
+					tsconfig: { compilerOptions: { declaration: true, incremental: true } }
+				});
+				const project = createProject(projectPath, { tsbuild: { force: true } });
+
+				// Mock emit to NOT write any files (simulating no changes detected by TypeScript)
+				mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
+
+				await project.build();
+
+				// --force must bypass the filesWereEmitted gate
+				expect(bundleDeclarations).toHaveBeenCalled();
+				expect(esbuildMocks.buildMock).toHaveBeenCalled();
+			});
 		});
 	});
 
@@ -377,6 +394,72 @@ describe('TypeScriptProject', () => {
 
 			const output = vol.readFileSync(join(projectPath, 'dist/index.js'), 'utf8') as string;
 			expect(output).toContain('"https://api.example.com"');
+		});
+	});
+
+	describe('triggerRebuild', () => {
+		it('should add new files to rootNames on FileEvent.add (regression: new-file silently ignored)', async () => {
+			const projectPath = await TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: false } }
+			});
+			const project = createProject(projectPath);
+			const newFilePath = join(projectPath, 'src/new-module.ts');
+
+			// Clear previous constructor call to createIncrementalProgram
+			vi.mocked(createIncrementalProgram).mockClear();
+
+			// The mock getProgram().getRootFileNames() returns [] so newFilePath is not in rootNames yet
+			(project as any).pendingChanges.push({ event: 'add', path: newFilePath });
+
+			// Await the debounced triggerRebuild (fires after 100ms)
+			await (project as any).triggerRebuild();
+
+			// createIncrementalProgram should have been called with rootNames that include the new file
+			const lastCall = vi.mocked(createIncrementalProgram).mock.calls.at(-1);
+			expect(lastCall?.[0].rootNames).toContain(newFilePath);
+		});
+
+		it('should NOT add a file that is already in rootNames on FileEvent.add', async () => {
+			const projectPath = await TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: false } }
+			});
+			const project = createProject(projectPath);
+			const existingPath = join(projectPath, 'src/index.ts');
+
+			// Mock getRootFileNames to include the file already
+			vi.mocked(createIncrementalProgram).mockReturnValueOnce({
+				getCompilerOptions: () => ({}),
+				getRootFileNames: () => [ existingPath ],
+				emit: mocks.emitMock,
+				getProgram: () => ({
+					getRootFileNames: () => [ existingPath ],
+					getSourceFiles: () => [],
+					emit: mocks.emitMock,
+					getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
+				})
+			} as any);
+			// Recreate to pick up the new mock return value
+			vi.mocked(createIncrementalProgram).mockClear();
+			// Manually set the builderProgram mock that returns existingPath
+			(project as any).builderProgram = {
+				getCompilerOptions: () => ({}),
+				getRootFileNames: () => [ existingPath ],
+				emit: mocks.emitMock,
+				getProgram: () => ({
+					getRootFileNames: () => [ existingPath ],
+					getSourceFiles: () => [],
+					emit: mocks.emitMock,
+					getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
+				})
+			};
+
+			(project as any).pendingChanges.push({ event: 'add', path: existingPath });
+			await (project as any).triggerRebuild();
+
+			const lastCall = vi.mocked(createIncrementalProgram).mock.calls.at(-1);
+			// rootNames should contain existingPath exactly once (not duplicated)
+			const rootNames = lastCall?.[0].rootNames ?? [];
+			expect(rootNames.filter((n: string) => n === existingPath)).toHaveLength(1);
 		});
 	});
 });
