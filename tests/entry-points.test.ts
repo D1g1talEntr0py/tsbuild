@@ -8,20 +8,12 @@ describe('entry-points', () => {
 			expect(outputToSourcePath('./dist/index.js', 'dist', 'src')).toBe('./src/index.ts');
 		});
 
-		it('should convert a .mjs output path to a .ts source path', () => {
-			expect(outputToSourcePath('./dist/utils.mjs', 'dist', 'src')).toBe('./src/utils.ts');
-		});
-
 		it('should convert a .jsx output path to a .tsx source path', () => {
 			expect(outputToSourcePath('./dist/app.jsx', 'dist', 'src')).toBe('./src/app.tsx');
 		});
 
 		it('should convert a .d.ts output path to a .ts source path', () => {
 			expect(outputToSourcePath('./dist/types.d.ts', 'dist', 'src')).toBe('./src/types.ts');
-		});
-
-		it('should convert a .d.mts output path to a .ts source path', () => {
-			expect(outputToSourcePath('./dist/types.d.mts', 'dist', 'src')).toBe('./src/types.ts');
 		});
 
 		it('should handle nested output paths', () => {
@@ -241,7 +233,7 @@ describe('entry-points', () => {
 
 		it('should fall back to module field', () => {
 			const pkg: PackageJson = {
-				module: './dist/index.mjs',
+				module: './dist/index.js',
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
 			expect(result).toEqual({ index: './src/index.ts' });
@@ -305,7 +297,24 @@ describe('entry-points', () => {
 				exports: { '.': { import: './dist/index.mjs' } },
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ 'my-pkg': './src/index.ts' });
+			expect(result).toBeUndefined();
+		});
+
+		it('should strip scope prefix from scoped package names', () => {
+			const pkg: PackageJson = {
+				name: '@scope/my-pkg',
+				exports: {
+					'.': { import: './dist/index.js' },
+					'./utils': { import: './dist/utils.js' },
+				},
+				bin: { cli: './dist/cli.js' },
+			};
+			const result = inferEntryPoints(pkg, 'dist', 'src');
+			expect(result).toEqual({
+				'my-pkg': './src/index.ts',
+				utils: './src/utils.ts',
+				cli: './src/cli.ts',
+			});
 		});
 
 		it('should skip string exports that cannot be reverse-mapped', () => {
