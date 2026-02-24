@@ -16,7 +16,7 @@
       "additionalProperties": false,
       "properties": {
         "entryPoints": {
-          "markdownDescription": "Files that each serve as an input to the bundling algorithm. Can be an array of paths or an object mapping output names to input paths.",
+          "markdownDescription": "Files that each serve as an input to the bundling algorithm. Can be an array of paths or an object mapping output names to input paths.\n\nWhen omitted, tsbuild auto-infers entry points from the `exports`, `bin`, `main`, or `module` fields in `package.json` by reverse-mapping output paths to source paths.",
           "oneOf": [
             {
               "type": "array",

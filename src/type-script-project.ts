@@ -12,11 +12,12 @@ import { debounce } from './decorators/debounce';
 import { BuildError, ConfigurationError, TypeCheckError } from './errors';
 import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
+import { inferEntryPoints, type PackageJson } from './entry-points';
 import { build as esbuild, formatMessages } from 'esbuild';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
 import type { BuilderProgram, Diagnostic, FormatDiagnosticsHost } from 'typescript';
-import type { Closable, ProjectDependencies, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString } from './@types';
+import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString } from './@types';
 
 const globCharacters = /[*?\\[\]!].*$/;
 const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
@@ -34,6 +35,7 @@ export class TypeScriptProject implements Closable {
 	private readonly pendingChanges: PendingFileChange[] = [];
 	private readonly buildDependencies: Set<RelativePath> = new Set();
 	private dependencyPaths?: Promise<string[]>;
+	private packageJson?: PackageJson;
 
 	/**
 	 * Creates a TypeScript project and prepares it for building/bundling.
@@ -352,6 +354,21 @@ export class TypeScriptProject implements Closable {
 		const platform = configResult.config.compilerOptions?.lib?.some(domPredicate) ? Platform.BROWSER : Platform.NODE;
 		const noExternal = typeScriptOptions.tsbuild?.noExternal ?? configResult.config.tsbuild?.noExternal ?? [];
 
+		const hasExplicitEntryPoints = typeScriptOptions.tsbuild?.entryPoints !== undefined || configResult.config.tsbuild?.entryPoints !== undefined;
+
+		// When no entry points are explicitly configured, try to infer them from package.json
+		let inferredEntryPoints: EntryPoints<RelativePath> | undefined;
+		if (!hasExplicitEntryPoints && bundle) {
+			const packageJsonContent = sys.readFile(Paths.join(directory, 'package.json'));
+			if (packageJsonContent) {
+				try {
+					const pkgJson = JSON.parse(packageJsonContent) as PackageJson;
+					const outDir = typeScriptOptions.compilerOptions?.outDir ?? configResult.config.compilerOptions?.outDir ?? defaultOutDirectory;
+					inferredEntryPoints = inferEntryPoints(pkgJson, outDir);
+				} catch { /* ignore malformed package.json */ }
+			}
+		}
+
 		const defaultTsbuildConfig: BuildConfiguration = {
 			splitting: bundle,
 			minify: false,
@@ -363,7 +380,7 @@ export class TypeScriptProject implements Closable {
 			platform,
 			dts: { resolve: platform !== Platform.NODE, entryPoints: bundle ? undefined : [] },
 			watch: { enabled: false, recursive: true, ignoreInitial: true, persistent: true },
-			entryPoints: bundle ? { [defaultEntryPoint]: defaultEntryFile } : { src: defaultSourceDirectory }
+			entryPoints: inferredEntryPoints ?? (bundle ? { [defaultEntryPoint]: defaultEntryFile } : { src: defaultSourceDirectory })
 		};
 
 		const baseConfig = {
@@ -428,12 +445,15 @@ export class TypeScriptProject implements Closable {
 
 	/**
 	 * Gets the project dependency paths, cached after first call.
+	 * Reads package.json and caches it for reuse.
 	 * @returns A promise that resolves to an array of project dependency paths.
 	 */
 	private getProjectDependencyPaths(): Promise<string[]> {
-		return this.dependencyPaths ??= Files.read<JsonString<ProjectDependencies>>(Paths.absolute(this.directory, 'package.json'))
+		return this.dependencyPaths ??= Files.read<JsonString<PackageJson>>(Paths.absolute(this.directory, 'package.json'))
 			.then((content) => {
-				const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
+				const packageJson = Json.parse(content);
+				this.packageJson = packageJson;
+				const { dependencies = {}, peerDependencies = {} } = packageJson;
 				return [ ...new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]) ];
 			});
 	}
