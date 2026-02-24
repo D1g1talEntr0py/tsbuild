@@ -1,3 +1,51 @@
+## [1.2.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.3...v1.2.0) (2026-02-24)
+
+### Features
+
+* **entry-points:** add unscoped name support and drop .mjs mapping (d11c55e994b6ca780b52e67ad7c8c6dda26c8a9b)
+- Removes .mjs and .d.mts from the output-to-source extension map since the project is ESM-only and only emits .js
+- Adds an unscope() helper to strip npm scope prefixes (e.g. @scope/pkg → pkg) so scoped package names produce clean entry point keys
+- Applies unscoping when deriving entry point names from the root export (.) and when using package.json name as a fallback key
+- Enables tsconfig.json to rely on auto-inferred entry points by commenting out the explicit entryPoints config, exercising the zero-config path
+
+
+### Code Refactoring
+
+* **type-script-project:** remove unused packageJson field (96c5659ac9e9617feea3454414880b8ebb23f466)
+- Drops the cached packageJson instance field that was read but never used outside of the dependency resolution method
+- Simplifies the class by eliminating unnecessary state that was populated as a side-effect of reading dependencies
+
+
+### Documentation
+
+* update README with new features and revised benchmarks (2f3141830cca6d7dc3d2ecea5efae87a6cdd56a6)
+- Documents the zero-config entry point auto-inference feature including resolution order and constraints
+- Documents circular dependency detection behavior in the declaration bundler
+- Adds the zero-config entry point feature to the feature highlights list
+- Updates build time benchmarks to reflect current measured performance
+
+
+### Miscellaneous Chores
+
+* consolidate agent guidelines into copilot-instructions (0830c1c47b583fac5ce3d472f52694cc073b1f33)
+- Removes the standalone AGENTS.md file to reduce documentation fragmentation
+- Inlines the core principles, coding rules, testing rules, and workflow rules directly into .github/copilot-instructions.md
+- Condenses verbose guidelines into concise bullet points while preserving all essential constraints
+- Ensures Copilot and other agents read a single authoritative source of truth
+
+* **release:** make all commit types visible in changelog (f884bcf888927bb9c273aa52962de1cd742b91c3)
+- Removes the hidden:true flag from docs, style, chore, test, build, and ci commit types in .releaserc.json
+- All commit types will now appear in generated changelogs regardless of semantic-release conventions
+
+
+### Tests
+
+* **entry-points:** update tests for .mjs removal and scoped names (1eba92d4ed914182bf0445684ec415c17b4dba7b)
+- Removes test cases for .mjs and .d.mts extension mappings that no longer exist in the source
+- Updates the module field fallback test to use .js instead of .mjs
+- Corrects the expectation for .mjs exports to be undefined (unmappable) rather than resolving
+- Adds a new test covering scoped package name stripping across exports, bin, and the root export key
+
 ## [1.1.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.2...v1.1.3) (2026-02-24)
 
 ### Bug Fixes
