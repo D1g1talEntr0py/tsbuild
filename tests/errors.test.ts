@@ -92,5 +92,15 @@ describe('errors', () => {
       const error = new UnsupportedSyntaxError(fakeNode);
       expect(error.message).toContain('Unknown(99999)');
     });
+
+    it('should be an instance of BundleError with exit code 2', () => {
+      const source = createSourceFile('test.ts', 'const x = 1;', ScriptTarget.Latest, true);
+      const node = source.statements[0];
+      const error = new UnsupportedSyntaxError(node);
+      expect(error).toBeInstanceOf(BundleError);
+      expect(error).toBeInstanceOf(BuildError);
+      expect(error.code).toBe(2);
+      expect(error.name).toBe('UnsupportedSyntaxError');
+    });
   });
 });

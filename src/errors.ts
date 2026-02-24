@@ -64,8 +64,8 @@ export class ConfigurationError extends BuildError {
 	}
 }
 
-/** Error thrown when encountering unsupported syntax during processing */
-export class UnsupportedSyntaxError extends Error {
+/** Error thrown when encountering unsupported syntax during DTS processing */
+export class UnsupportedSyntaxError extends BundleError {
 	/**
 	 * Creates an instance of UnsupportedSyntaxError.
 	 * @param node The node with unsupported syntax
@@ -75,6 +75,7 @@ export class UnsupportedSyntaxError extends Error {
 		const syntaxKindName = SyntaxKind[node.kind] ?? `Unknown(${node.kind})`;
 		const nodeText = node.getText ? node.getText().slice(0, 100) : '<no text>';
 		super(`${message}: ${syntaxKindName} - "${nodeText}"`);
+		this.name = 'UnsupportedSyntaxError';
 	}
 }
 
