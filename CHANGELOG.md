@@ -1,3 +1,59 @@
+## [1.1.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.0.3...v1.1.0) (2026-02-24)
+
+### Features
+
+* **entry-points:** infer entry points from package.json when none configured (a3c73da481e4e59416e2f6e4483e932c525d0968)
+- add src/entry-points.ts with inferEntryPoints() that reverse-maps output paths
+  from exports, bin, main, and module fields back to source files
+- add PackageJson type covering exports, bin, main, module, dependencies,
+  and peerDependencies fields
+- integrate inferEntryPoints into TypeScriptProject.readConfiguration() so
+  projects with no explicit entryPoints config auto-infer from package.json
+- update schema.json markdownDescription for entryPoints to document the
+  auto-inference behaviour
+- replace ProjectDependencies with PackageJson in getProjectDependencyPaths()
+  and cache the parsed package.json on the instance for reuse
+- add tests/entry-points.test.ts covering all inference paths
+
+
+### Bug Fixes
+
+* **dts:** fix modifier removal eating next token's leading character (7a0f90321ca00879557ec55e2464b72d97bfe528)
+- replace hard-coded '+ 1' offset in fixModifiers with a call to the
+  existing getTrailingWhitespaceLength() helper so that only actual
+  whitespace after the modifier keyword is consumed, not the first
+  character of the following token
+- add tests covering export modifier at end of line, export default, and
+  export with multiple trailing spaces
+
+* **dts:** separate external declarations, fix rename collisions, warn on circular deps (5daeb0a227b502a6fda29f24d756dfc1f1fb7df6)
+- introduce externalDeclarationFiles Map separate from declarationFiles so
+  externally-resolved node_modules .d.ts files never pollute the project map
+- update moduleResolutionHost.fileExists and readFile to check both maps
+- store disk-loaded external declarations in externalDeclarationFiles instead
+  of declarationFiles to prevent memory accumulation across entry points
+- add clearExternalFiles() method and call it after all bundling completes to
+  free memory used by externally-resolved declarations
+- expand buildDependencyGraph and topological-sort visit() to look up cached
+  declarations in both maps
+- fix rename collision detection: iterate with an incrementing suffix and
+  skip candidates already present in declarationSources instead of always
+  using sequential indices
+- emit a Logger.warn() message when a circular dependency is detected rather
+  than silently returning
+- replace TODO comment on posix.normalize with an accurate explanation
+- add tests for circular dependency warning, rename collision avoidance,
+  and external-file cleanup path
+
+* **errors:** make UnsupportedSyntaxError extend BundleError with exit code 2 (ee239c97a05b0f2fb58e911ab83cd90519ffd3b8)
+- change UnsupportedSyntaxError base class from Error to BundleError so
+  it carries exit code 2 and participates in the standard error hierarchy
+- set this.name to 'UnsupportedSyntaxError' for correct identification
+  after instanceof checks across prototype chains
+- update JSDoc to clarify it is thrown during DTS processing
+- add test asserting instanceof BundleError, instanceof BuildError,
+  exit code 2, and correct name
+
 ## [1.0.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.0.2...v1.0.3) (2026-02-24)
 
 ### Bug Fixes
