@@ -246,6 +246,8 @@ When asked to commit, create commits, or compose commits, use the GitLens Commit
   - `build` — Build system changes (no release)
   - `ci` — CI configuration changes (no release)
   - `chore` — Maintenance tasks (no release)
+- The type determines the version bump. Only `feat`, `fix`, `refactor`, `perf`, and `revert` trigger releases. Types like `docs`, `style`, `test`, `build`, `ci`, and `chore` do NOT trigger releases
+- The type reflects the **intent** of the change (what you did), and the scope reflects the **area** (where you did it). For example: `fix(ci)`, `feat(plugins)`, `refactor(bundler)`, `fix(build)`, `fix(docs)`. NEVER use a non-releasing type (`ci`, `build`, `docs`, `test`, etc.) when the change is a fix, feature, or refactor — those MUST use `fix`, `feat`, or `refactor` as the type with the area as the scope
 - Scope is optional but encouraged (e.g., `fix(bundler): ...`, `feat(plugins): ...`)
 - Description must be lowercase, imperative mood, no trailing period
 - For breaking changes, append `!` after the type/scope: `feat!: drop Node 18 support`
