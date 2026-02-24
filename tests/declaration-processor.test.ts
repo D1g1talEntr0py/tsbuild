@@ -394,4 +394,34 @@ describe('DeclarationProcessor', () => {
 			expect(error.message).toContain('InterfaceDeclaration');
 		});
 	});
+
+	describe('modifier removal whitespace handling', () => {
+		it('should not eat into next token when removing export modifier at end of line', () => {
+			const sourceText = 'export\nclass MyClass {}';
+			const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
+
+			expect(result.code).toContain('declare class MyClass {}');
+			// Should not eat the 'c' in 'class'
+			expect(result.code).not.toContain('declare lass');
+		});
+
+		it('should properly handle export default modifier removal with trailing whitespace', () => {
+			const sourceText = 'export default class Foo {}';
+			const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
+
+			expect(result.code).toContain('declare class Foo {}');
+			// The export/default modifiers should be removed from the class declaration itself
+			// (preProcess generates a separate `export default Foo;` line, so we check the declaration line)
+			expect(result.code).not.toMatch(/^export default class/m);
+		});
+
+		it('should handle export modifier with multiple spaces after it', () => {
+			const sourceText = 'export   function myFn(): void;';
+			const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
+
+			expect(result.code).toContain('declare function myFn(): void');
+			// The export modifier should be removed from the declaration itself
+			expect(result.code).not.toMatch(/^export\s+function/m);
+		});
+	});
 });

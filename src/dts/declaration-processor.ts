@@ -233,8 +233,7 @@ export class DeclarationProcessor {
 
 			for (const modifier of node.modifiers ?? []) {
 				if (modifier.kind === SyntaxKind.DefaultKeyword || modifier.kind === SyntaxKind.ExportKeyword) {
-					// TODO: be careful about that `+ 1`
-					code.remove(modifier.getStart(), modifier.getEnd() + 1);
+					code.remove(modifier.getStart(), modifier.getEnd() + getTrailingWhitespaceLength(modifier.getEnd(), node.getEnd()));
 				} else if (modifier.kind === SyntaxKind.DeclareKeyword) {
 					hasDeclare = true;
 				}
