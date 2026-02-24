@@ -23,7 +23,7 @@
 	},
 	"include": [ "src/" ],
   "tsbuild": {
-		"entryPoints": { "tsbuild": "./src/tsbuild.ts", "index": "./src/index.ts" },
+		// "entryPoints": { "tsbuild": "./src/tsbuild.ts", "index": "./src/index.ts" },
 		"env": { "tsbuild_version": "${process.env.npm_package_version}" }
   }
 }

@@ -6,10 +6,8 @@ const importConditions = ['import', 'default'] as const;
 /** Output → source file extension mapping */
 const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
 	['.js', '.ts'],
-	['.mjs', '.ts'],
 	['.jsx', '.tsx'],
 	['.d.ts', '.ts'],
-	['.d.mts', '.ts'],
 ]);
 
 type PackageJsonExports = string | Record<string, string | PackageJsonConditionalExport>;
@@ -27,6 +25,16 @@ type PackageJson = {
 	peerDependencies?: Record<string, string>;
 	optionalDependencies?: Record<string, string>;
 };
+
+/**
+ * Strips the npm scope prefix from a package name (e.g., `'@scope/pkg'` → `'pkg'`).
+ * @param name The package name, optionally scoped
+ * @returns The unscoped name
+ */
+function unscope(name: string): string {
+	const slash = name.indexOf('/');
+	return slash === -1 ? name : name.slice(slash + 1);
+}
 
 /**
  * Converts an output file path to its corresponding source file path by reversing the outDir → rootDir mapping and swapping the file extension.
@@ -76,7 +84,7 @@ function resolveConditionalExport(exportValue: string | PackageJsonConditionalEx
  * @returns The derived entry point name (e.g., `"index"`, `"foo"`), or the package name for the root export if subpath is `"."`
  */
 function subpathToEntryName(subpath: string, packageName?: string): string {
-	if (subpath === '.') { return packageName ?? 'index' }
+	if (subpath === '.') { return packageName !== undefined ? unscope(packageName) : 'index' }
 
 	const withoutPrefix = subpath.replace(/^\.\//, '');
 	const lastSegment = withoutPrefix.lastIndexOf('/');
@@ -97,7 +105,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	if (packageJson.exports !== undefined) {
 		if (typeof packageJson.exports === 'string') {
 			const sourcePath = outputToSourcePath(packageJson.exports, outDir, sourceDir);
-			if (sourcePath) { entryPoints[packageJson.name ?? 'index'] = sourcePath }
+			if (sourcePath) { entryPoints[packageJson.name !== undefined ? unscope(packageJson.name) : 'index'] = sourcePath }
 		} else {
 			for (const [subpath, exportValue] of Object.entries(packageJson.exports)) {
 				if (subpath.includes('*')) { continue }
