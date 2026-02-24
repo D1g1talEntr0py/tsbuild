@@ -18,10 +18,10 @@ type RemoveIndex<T> = { [K in keyof T as string extends K ? never : number exten
 type PrettyModify<T, R extends Partial<Record<keyof T, unknown>>> = Prettify<Omit<T, keyof R> & R>;
 
 type Optional<T> = T | undefined | void;
-type OptionalReturn<T extends TypedFunction<T>> = Optional<ReturnType<T>>;
+type OptionalReturn<T extends (...args: any[]) => any> = Optional<ReturnType<T>>;
 
 type Function<P = any, R = any> = (...args: P[]) => R;
-type TypedFunction<T extends (...args: Parameters<T>) => ReturnType<T>> = (...args: Parameters<T>) => ReturnType<T>;
+type TypedFunction<T extends (...args: any[]) => any> = (...args: Parameters<T>) => ReturnType<T>;
 type InferredFunction<T = Function> = T extends (...args: infer P) => infer R ? (...args: P) => R : never;
 /**
  * Type representing a method function signature with typed this, arguments, and return type.
@@ -83,9 +83,6 @@ type Path = AbsolutePath | RelativePath;
 type ConditionalPath<T extends string | Path> = T extends AbsolutePath ? AbsolutePath : T extends RelativePath ? RelativePath : Path;
 
 // JSON types
-type JsonArray<T> = JsonValue<T>[];
-type JsonObject<T> = { [K in keyof T as[JsonObject<T[K]>] extends [never] ? never : K]: JsonValue<T[K]> }
-type JsonValue<T> = T extends string | number | boolean | null ? T : T extends { toJSON: () => infer R } ? R : T extends undefined | ((...args: any[]) => any) ? never : T extends JsonObject<T> ? JsonObject<T> : T extends JsonArray<T> ? JsonArray<T> : never;
 type JsonString<T> = Brand<string, T>;
 
 type DtsOptions = {

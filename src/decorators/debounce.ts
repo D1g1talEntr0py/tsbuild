@@ -1,6 +1,6 @@
 import { castError } from 'src/errors';
 import { closeOnExit } from './close-on-exit';
-import type { Function, Closable, MethodFunction, OptionalReturn, TypedFunction, InferredFunction } from 'src/@types';
+import type { Function, Closable, MethodFunction, OptionalReturn, InferredFunction } from 'src/@types';
 
 /**
  * Factory class to create debounced functions and ensure they are cleaned up on exit.
@@ -15,7 +15,7 @@ class DebounceManager implements Closable {
 	 * @param wait - The number of milliseconds to wait before invoking the function.
 	 * @returns A debounced version of the function that returns a Promise.
 	 */
-	debounce<T extends TypedFunction<T>>(func: T, wait: number): InferredFunction {
+	debounce<T extends (...args: unknown[]) => OptionalReturn<T> | PromiseLike<OptionalReturn<T>>>(func: T, wait: number): InferredFunction {
 		let timeoutId: NodeJS.Timeout | undefined;
 		let pendingResolve: Function<OptionalReturn<T>, void> | undefined;
 

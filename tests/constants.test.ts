@@ -5,7 +5,6 @@ import {
 	Platform,
 	BuildMessageType,
 	DependencyEntryType,
-	NodeType,
 	FileExtension,
 	format,
 	newLine,
@@ -64,28 +63,6 @@ describe('Constants', () => {
 
 		it('should define PEER_DEPENDENCIES as "peerDependencies"', () => {
 			expect(DependencyEntryType.PEER_DEPENDENCIES).toBe('peerDependencies');
-		});
-	});
-
-	describe('NodeType', () => {
-		it('should define Program as "Program"', () => {
-			expect(NodeType.Program).toBe('Program');
-		});
-
-		it('should define Identifier as "Identifier"', () => {
-			expect(NodeType.Identifier).toBe('Identifier');
-		});
-
-		it('should define ImportDeclaration as "ImportDeclaration"', () => {
-			expect(NodeType.ImportDeclaration).toBe('ImportDeclaration');
-		});
-
-		it('should define ExportNamedDeclaration as "ExportNamedDeclaration"', () => {
-			expect(NodeType.ExportNamedDeclaration).toBe('ExportNamedDeclaration');
-		});
-
-		it('should define FunctionDeclaration as "FunctionDeclaration"', () => {
-			expect(NodeType.FunctionDeclaration).toBe('FunctionDeclaration');
 		});
 	});
 

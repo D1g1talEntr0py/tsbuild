@@ -64,29 +64,6 @@ const toEsTarget = (target: ScriptTarget): EsTarget => scriptTargetToEsTarget[ta
  */
 const toJsxRenderingMode = (jsxEmit?: JsxEmit): JsxRenderingMode | undefined => jsxEmit !== undefined ? jsxEmitMap[jsxEmit] : undefined;
 
-const NodeType = {
-	Program: 'Program',
-	Identifier: 'Identifier',
-	Literal: 'Literal',
-	ImportSpecifier: 'ImportSpecifier',
-	ImportNamespaceSpecifier: 'ImportNamespaceSpecifier',
-	ImportDeclaration: 'ImportDeclaration',
-	ImportDefaultSpecifier: 'ImportDefaultSpecifier',
-	ExportSpecifier: 'ExportSpecifier',
-	ExportNamedDeclaration: 'ExportNamedDeclaration',
-	ExportAllDeclaration: 'ExportAllDeclaration',
-	ExportDefaultDeclaration: 'ExportDefaultDeclaration',
-	FunctionDeclaration: 'FunctionDeclaration',
-	FunctionExpression: 'FunctionExpression',
-	MemberExpression: 'MemberExpression',
-	ArrayExpression: 'ArrayExpression',
-	CallExpression: 'CallExpression',
-	ExpressionStatement: 'ExpressionStatement',
-	BlockStatement: 'BlockStatement',
-	ReturnStatement: 'ReturnStatement',
-	AssignmentPattern: 'AssignmentPattern'
-} as const;
-
 const FileExtension = {
 	JS: '.js',
 	DTS: '.d.ts',
@@ -129,7 +106,6 @@ export {
 	Platform,
 	BuildMessageType,
 	DependencyEntryType,
-	NodeType,
 	sourceScriptExtensionExpression,
 	typeScriptExtensionExpression,
 	processEnvExpansionPattern,
