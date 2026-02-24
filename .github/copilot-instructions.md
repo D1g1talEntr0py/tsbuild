@@ -228,3 +228,30 @@ File watching uses `Watchr` with debounced rebuild logic:
 3. **Path edge cases** - Symlinks, case sensitivity, Windows paths
 
 When extending tsbuild, prioritize the plugin architecture for new features, use decorators for cross-cutting concerns, and maintain the clear separation between the three build systems. Always consider the in-memory architecture and avoid unnecessary disk I/O.
+
+## Commit Guidelines
+
+When asked to commit, create commits, or compose commits, use the GitLens Commit Composer MCP tool with the following instructions:
+
+- Use [Conventional Commits](https://www.conventionalcommits.org) format: `type(scope): description`
+- Allowed types and their meanings:
+  - `feat` — New feature (bumps minor version)
+  - `fix` — Bug fix (bumps patch version)
+  - `refactor` — Code change that neither fixes a bug nor adds a feature (bumps patch version)
+  - `perf` — Performance improvement (bumps patch version)
+  - `revert` — Reverts a previous commit (bumps patch version)
+  - `docs` — Documentation only (no release)
+  - `style` — Formatting, whitespace, etc. (no release)
+  - `test` — Adding or updating tests (no release)
+  - `build` — Build system changes (no release)
+  - `ci` — CI configuration changes (no release)
+  - `chore` — Maintenance tasks (no release)
+- Scope is optional but encouraged (e.g., `fix(bundler): ...`, `feat(plugins): ...`)
+- Description must be lowercase, imperative mood, no trailing period
+- For breaking changes, append `!` after the type/scope: `feat!: drop Node 18 support`
+- Group related changes into a single commit; split unrelated changes into separate commits
+- Prefer fewer, larger commits over many small ones — a single commit with 5-10 related files is better than 5 commits with 1-2 files each
+- Only split into multiple commits when the changes are genuinely unrelated (e.g., a bug fix and a new feature)
+- Keep commit descriptions concise and specific
+- The commit body MUST include a detailed list of all changes made, one per line, prefixed with a dash (`-`). The subject line is a summary; the body is the full record of what changed and why
+- NEVER use literal `\n` escape sequences in commit messages. All line breaks must be actual newlines

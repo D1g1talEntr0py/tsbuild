@@ -56,10 +56,10 @@ With a global install, your projects can use `tsbuild` in `package.json` scripts
 Install as a dev dependency for per-project version pinning (recommended for CI/CD environments):
 
 ```bash
-# pnpm - no SWC dependency (optional for decorator metadata)
+# pnpm - no SWC dependency (Optional. For legacy decorator metadata. Native ESM decorators are supported without SWC)
 pnpm add -D @d1g1tal/tsbuild --no-optional
 
-# pnpm - with SWC dependency (for decorator metadata)
+# pnpm - with SWC dependency (For legacy decorator metadata)
 pnpm add -D @d1g1tal/tsbuild
 
 # npm
