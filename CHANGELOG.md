@@ -1,3 +1,13 @@
+## [1.1.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.2...v1.1.3) (2026-02-24)
+
+### Bug Fixes
+
+* **dts:** improve circular dependency detection with full cycle path (b5bbb2bf6028eca05cdf13d6d7eb24058917a0f6)
+- Tracks the current visit stack so the exact cycle can be reconstructed
+- Reports the full chain of modules involved in the cycle instead of just the entry point
+- Properly cleans up visiting state and stack when a module is not found
+- Updates the test assertion to verify the full cycle path is reported
+
 ## [1.1.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.1...v1.1.2) (2026-02-24)
 
 ### Bug Fixes
