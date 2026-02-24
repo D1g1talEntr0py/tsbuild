@@ -39,7 +39,7 @@
       "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
     }],
     ["@semantic-release/github", {
-      "assets": [{ "path": "d1g1tal-tsbuild-${nextRelease.version}.tgz", "label": "d1g1tal-tsbuild-${nextRelease.version}.tgz" }]
+      "assets": [{ "path": "d1g1tal-tsbuild-*.tgz" }]
     }]
   ]
 }
