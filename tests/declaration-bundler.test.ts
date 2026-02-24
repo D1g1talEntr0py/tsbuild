@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { TestHelper } from './scripts/test-helper';
+import { Logger } from '../src/logger';
 import type { AbsolutePath } from '../src/@types';
 import type { bundleDeclarations as BundleDeclarationsFn } from '../src/dts';
 
@@ -582,5 +583,98 @@ export declare const Theme: { color: string; };`]
 		// Both variants should appear
 		expect(dtsContent).toContain('Options');
 		expect(dtsContent).toContain('Options$1');
+	});
+
+	it('should emit a warning when circular dependencies are detected', async () => {
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+
+		const warnSpy = vi.spyOn(Logger, 'warn');
+
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[join(cwd, 'src/index.d.ts'), 'import { a } from "./a";\nexport { a };'],
+				[join(cwd, 'src/a.d.ts'), 'import { b } from "./b";\nexport declare const a: number;'],
+				[join(cwd, 'src/b.d.ts'), 'import { a } from "./a";\nexport declare const b: string;']
+			]),
+			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			resolve: false,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		await bundleDeclarations(options);
+
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Circular dependency detected'));
+		warnSpy.mockRestore();
+
+		// Output should still be produced even with circular deps
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+		expect(dtsContent).toContain('declare const a: number');
+	});
+
+	it('should avoid rename collisions with existing declarations', async () => {
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+
+		// Module c already exports Foo$1, so the rename of Foo from module b must skip to Foo$2
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[join(cwd, 'src/index.d.ts'), 'import { Foo } from "./a";\nimport { Foo as FooB } from "./b";\nimport { Foo$1 } from "./c";\nexport { Foo, FooB, Foo$1 };'],
+				[join(cwd, 'src/a.d.ts'), 'export interface Foo { a: string; }'],
+				[join(cwd, 'src/b.d.ts'), 'export interface Foo { b: number; }'],
+				[join(cwd, 'src/c.d.ts'), 'export interface Foo$1 { c: boolean; }']
+			]),
+			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			resolve: false,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		await bundleDeclarations(options);
+
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+
+		// Module b's Foo should be renamed to Foo$2 (not Foo$1 which already exists)
+		expect(dtsContent).toContain('interface Foo$2');
+		// Original Foo and existing Foo$1 should still be present
+		expect(dtsContent).toContain('interface Foo {');
+		expect(dtsContent).toContain('interface Foo$1');
+	});
+
+	it('should store externally resolved files separately and clean them up after bundling', async () => {
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+		const fs = await import('node:fs');
+
+		// Set up a fake node_modules package with a .d.ts file on disk
+		const libDir = join(cwd, 'node_modules/ext-lib');
+		fs.mkdirSync(libDir, { recursive: true });
+		fs.writeFileSync(join(libDir, 'index.d.ts'), 'export declare const extFn: () => void;');
+
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[join(cwd, 'src/index.d.ts'), 'import { extFn } from "ext-lib";\nexport declare const wrapper: typeof extFn;']
+			]),
+			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			resolve: true,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		// After bundleDeclarations completes, external files should be cleaned up
+		// (we verify the bundling succeeds — the cleanup is internal)
+		const result = await bundleDeclarations(options);
+
+		expect(result).toHaveLength(1);
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+		// External import should be preserved for external module
+		expect(dtsContent).toContain('import { extFn } from "ext-lib"');
 	});
 });

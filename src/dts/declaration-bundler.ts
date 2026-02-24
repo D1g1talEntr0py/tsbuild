@@ -3,6 +3,7 @@ import MagicString from 'magic-string';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, posix } from 'node:path';
 import { BundleError } from 'src/errors';
+import { Logger } from 'src/logger';
 import { DeclarationProcessor } from './declaration-processor';
 import { defaultDirOptions, Encoding, sourceScriptExtensionExpression, FileExtension, newLine } from 'src/constants';
 import {
@@ -98,8 +99,11 @@ function mergeImports(imports: string[]): string[] {
  * - Complex tree-shaking (keep it simple)
  */
 class DeclarationBundler {
-	/** d.ts Bundle Options (internally mutable for caching - stores pre-processed declarations) */
+	/** Project declaration files from in-memory FileManager */
 	private readonly declarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
+
+	/** External declaration files resolved from disk (node_modules) when resolve is enabled */
+	private readonly externalDeclarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
 
 	/** d.ts Bundle Options */
 	private readonly options: DtsBundleOptions;
@@ -116,22 +120,22 @@ class DeclarationBundler {
 	// Create a proper module resolution host that supports both in-memory files and disk files
 	private readonly moduleResolutionHost: ModuleResolutionHost = {
 		fileExists: (fileName: AbsolutePath) => {
-			// Check in-memory declarations first, then disk when resolve is enabled
-			return this.declarationFiles.has(fileName) || this.options.resolve && sys.fileExists(fileName);
+			// Check in-memory declarations first (both project and external), then disk when resolve is enabled
+			return this.declarationFiles.has(fileName) || this.externalDeclarationFiles.has(fileName) || this.options.resolve && sys.fileExists(fileName);
 		},
 		readFile: (fileName: AbsolutePath): string | undefined => {
-			const cached = this.declarationFiles.get(fileName);
+			const cached = this.declarationFiles.get(fileName) ?? this.externalDeclarationFiles.get(fileName);
 			// Return the code from the CachedDeclaration
 			if (cached) { return cached.code }
 
 			if (!this.options.resolve) { return undefined }
 
-			// When resolve is enabled, read from disk and pre-process
+			// When resolve is enabled, read from disk and pre-process into the external map
 			const rawContent = sys.readFile(fileName, Encoding.utf8);
 			if (rawContent !== undefined) {
 				// Pre-process external files loaded from disk
 				const preProcessOutput = DeclarationProcessor.preProcess(createSourceFile(fileName, rawContent, ScriptTarget.Latest, true));
-				this.declarationFiles.set(fileName, preProcessOutput);
+				this.externalDeclarationFiles.set(fileName, preProcessOutput);
 
 				return preProcessOutput.code;
 			}
@@ -175,6 +179,15 @@ class DeclarationBundler {
 	}
 
 	/**
+	 * Clears external declaration files and module resolution cache to free memory.
+	 * Called after all entry points have been bundled.
+	 */
+	clearExternalFiles(): void {
+		this.externalDeclarationFiles.clear();
+		this.moduleResolutionCache.clear();
+	}
+
+	/**
 	 * Convert a source file path to its corresponding declaration file path
 	 * @param sourcePath - Absolute path to a source file (.ts, .tsx)
 	 * @returns The corresponding .d.ts path, or undefined if not found
@@ -185,7 +198,8 @@ class DeclarationBundler {
 
 		if (rootDir) {
 			// With explicit rootDir, calculate relative path and append to outDir
-			// TODO - Why are we using posix here?
+			// posix.normalize is required because TypeScript internally uses POSIX-style forward slashes
+			// for module resolution paths regardless of the host platform
 			const dtsPath = posix.normalize(Paths.join(outDir, Paths.relative(rootDir, sourceWithoutExt) + FileExtension.DTS)) as AbsolutePath;
 			return this.declarationFiles.has(dtsPath) ? dtsPath : sourcePath;
 		}
@@ -308,7 +322,7 @@ class DeclarationBundler {
 
 			visited.add(path);
 
-			const cached = this.declarationFiles.get(path);
+			const cached = this.declarationFiles.get(path) ?? this.externalDeclarationFiles.get(path);
 
 			// File not in our declaration map - it's external
 			if (cached === undefined) { return }
@@ -336,7 +350,7 @@ class DeclarationBundler {
 				// Skip node_modules packages unless they're in noExternal list
 				if (resolvedPath?.includes(nodeModules) && !this.matchesPattern(specifier, this.options.noExternal)) { continue }
 
-				if (resolvedPath && this.declarationFiles.has(resolvedPath)) {
+				if (resolvedPath && (this.declarationFiles.has(resolvedPath) || this.externalDeclarationFiles.has(resolvedPath))) {
 					module.imports.add(resolvedPath);
 					// Track the original specifier
 					bundledSpecs.push(specifier);
@@ -370,8 +384,12 @@ class DeclarationBundler {
 		 * @param path - Module path to visit
 		 */
 		const visit = (path: string): void => {
-			// Circular dependency - not ideal but we'll handle it
-			if (visited.has(path) || visiting.has(path)) { return }
+			if (visited.has(path)) { return }
+
+			if (visiting.has(path)) {
+				Logger.warn(`Circular dependency detected: ${Paths.relative(this.options.currentDirectory, path)}`);
+				return;
+			}
 
 			visiting.add(path);
 
@@ -588,9 +606,14 @@ class DeclarationBundler {
 			if (sourcesSet.size > 1) {
 				const sources = Array.from(sourcesSet);
 				// First module keeps original name, subsequent modules get $1, $2, etc.
-				sources.slice(1).forEach((modulePath, index) => {
-					renameMap.set(`${name}:${modulePath}`, `${name}$${index + 1}`);
-				});
+				// Each candidate is verified against all known declarations to avoid collisions
+				let suffix = 1;
+				for (const modulePath of sources.slice(1)) {
+					let candidate = `${name}$${suffix}`;
+					while (declarationSources.has(candidate)) { candidate = `${name}$${++suffix}` }
+					renameMap.set(`${name}:${modulePath}`, candidate);
+					suffix++;
+				}
 			}
 		}
 
@@ -771,5 +794,10 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 		return { path: Paths.relative(options.currentDirectory, outPath), size: content.length };
 	});
 
-	return Promise.all(bundleTasks);
+	const results = await Promise.all(bundleTasks);
+
+	// Free memory used by externally-resolved declaration files (node_modules)
+	dtsBundler.clearExternalFiles();
+
+	return results;
 }
