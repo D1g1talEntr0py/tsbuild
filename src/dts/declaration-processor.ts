@@ -31,9 +31,7 @@ import ts, {
 import MagicString from 'magic-string';
 import { UnsupportedSyntaxError } from 'src/errors';
 import { FileExtension, newLine, typeMatcher, inlineTypePattern } from 'src/constants';
-import type { CodeTransformation, NameRange, PreProcessOutput } from './@types';
-
-const codeTransformationComparator = (a: CodeTransformation, b: CodeTransformation): number => b.start - a.start;
+import type { NameRange, PreProcessOutput } from './@types';
 
 /**
  * Processes TypeScript declaration files before and after bundling.
@@ -506,18 +504,17 @@ export class DeclarationProcessor {
 	 * @returns The processed source code
 	 */
 	static postProcess(sourceFile: SourceFile): string {
-		let code = sourceFile.getFullText();
-		const transformations: CodeTransformation[] = [];
+		const magic = new MagicString(sourceFile.getFullText());
 
 		/**
-		 * Visit a node and collect any necessary code transformations.
+		 * Visit a node and apply code transformations using MagicString for O(1) edits.
 		 * Handles empty statements, import/export path fixes, and redundant namespace export elements.
 		 * @param node The AST node to visit
 		 */
 		function visitNode(node: Node) {
 			// Remove empty statements (spurious semicolons)
 			if (isEmptyStatement(node)) {
-				transformations.push({ start: node.getStart(), end: node.getEnd() });
+				magic.remove(node.getStart(), node.getEnd());
 				return; // nothing else to do for this node
 			}
 
@@ -527,11 +524,7 @@ export class DeclarationProcessor {
 				if (text.startsWith('.') && text.endsWith(FileExtension.DTS)) {
 					// Replace .d.ts or .d.tsx with .js (faster than regex)
 					const replacement = text.endsWith('.d.tsx') ? text.slice(0, -6) + FileExtension.JS : text.slice(0, -5) + FileExtension.JS;
-					transformations.push({
-						start: node.moduleSpecifier.getStart() + 1,
-						end: node.moduleSpecifier.getEnd() - 1,
-						replacement,
-					});
+					magic.overwrite(node.moduleSpecifier.getStart() + 1, node.moduleSpecifier.getEnd() - 1, replacement);
 				}
 			}
 
@@ -541,7 +534,7 @@ export class DeclarationProcessor {
 					if (isExportDeclaration(bodyStatement) && bodyStatement.exportClause && !isNamespaceExport(bodyStatement.exportClause)) {
 						for (const { name, propertyName } of bodyStatement.exportClause.elements) {
 							if (propertyName && isIdentifier(propertyName) && isIdentifier(name) && propertyName.getText() === name.getText()) {
-								transformations.push({ start: propertyName.getStart(), end: name.getStart() });
+								magic.remove(propertyName.getStart(), name.getStart());
 							}
 						}
 					}
@@ -554,11 +547,6 @@ export class DeclarationProcessor {
 
 		visitNode(sourceFile);
 
-		// Apply transformations in reverse order (end to start) to avoid position shifts
-		for (const { start, end, replacement = '' } of transformations.sort(codeTransformationComparator)) {
-			code = code.slice(0, start) + replacement + code.slice(end);
-		}
-
-		return code;
+		return magic.toString();
 	}
 }

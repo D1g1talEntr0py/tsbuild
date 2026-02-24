@@ -550,4 +550,37 @@ export declare const Theme: { color: string; };`]
 		expect(indexContent).toContain('export { a };');
 		expect(utilsContent).toContain('export { b };');
 	});
+
+	it('should preserve whitespace when renaming conflicting identifiers (regression: node.pos → node.getStart())', async () => {
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+
+		// Two modules both export `type Options = ...`. The second must be renamed to `Options$1`.
+		// With the bug (node.pos), the space between `type` and `Options` was eaten, producing `typeOptions$1`.
+		// With the fix (node.getStart()), only the identifier token is replaced, producing `type Options$1`.
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[join(cwd, 'src/index.d.ts'), 'import { Options as OptsA } from "./a";\nimport { Options as OptsB } from "./b";\nexport { OptsA, OptsB };'],
+				[join(cwd, 'src/a.d.ts'), 'export type Options = { value: string; };'],
+				[join(cwd, 'src/b.d.ts'), 'export type Options = { count: number; };']
+			]),
+			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			resolve: false,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		await bundleDeclarations(options);
+
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+
+		// Renamed identifier must be separated from the preceding keyword by a space
+		expect(dtsContent).toContain('type Options$1');
+		expect(dtsContent).not.toContain('typeOptions$1');
+		// Both variants should appear
+		expect(dtsContent).toContain('Options');
+		expect(dtsContent).toContain('Options$1');
+	});
 });

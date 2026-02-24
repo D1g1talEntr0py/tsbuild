@@ -17,7 +17,6 @@ import {
 	isFunctionDeclaration,
 	isClassDeclaration,
 	isVariableStatement,
-	isModuleBlock,
 	isModuleDeclaration,
 	isNamedExports,
 	isIdentifier,
@@ -111,6 +110,9 @@ class DeclarationBundler {
 	/** Module resolution cache for this bundler instance */
 	private readonly moduleResolutionCache = new Map<string, AbsolutePath>();
 
+	/** Pre-computed set of directory prefixes from declaration file paths for O(1) directoryExists lookups */
+	private readonly declarationDirs: Set<string> = new Set();
+
 	// Create a proper module resolution host that supports both in-memory files and disk files
 	private readonly moduleResolutionHost: ModuleResolutionHost = {
 		fileExists: (fileName: AbsolutePath) => {
@@ -138,14 +140,9 @@ class DeclarationBundler {
 			return undefined;
 		},
 		directoryExists: (dirName: AbsolutePath) => {
-			// Check if any file in our declarations starts with this directory
-			const normalizedDir = dirName.endsWith('/') ? dirName : dirName + '/' as AbsolutePath;
-			for (const filePath of this.declarationFiles.keys()) {
-				if (filePath.startsWith(normalizedDir)) { return true }
-			}
-
-			// When resolve is enabled, check disk
-			return this.options.resolve ? sys.directoryExists(dirName) : false;
+			// O(1) Set lookup using pre-computed directory prefixes
+			const normalizedDir = dirName.endsWith('/') ? dirName.slice(0, -1) : dirName;
+			return this.declarationDirs.has(normalizedDir) || (this.options.resolve ? sys.directoryExists(dirName) : false);
 		},
 		getCurrentDirectory: () => this.options.currentDirectory,
 		/* v8 ignore next */
@@ -161,6 +158,17 @@ class DeclarationBundler {
 		// This handles cases where paths may be relative or use different separators
 		for (const [ filePath, cachedDecl ] of dtsBundleOptions.declarationFiles) {
 			this.declarationFiles.set(sys.resolvePath(filePath) as AbsolutePath, cachedDecl);
+		}
+
+		// Pre-compute all ancestor directory prefixes for O(1) directoryExists lookups
+		for (const filePath of this.declarationFiles.keys()) {
+			let dir = filePath.lastIndexOf('/') !== -1 ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
+			while (dir.length > 0) {
+				if (this.declarationDirs.has(dir)) { break }
+				this.declarationDirs.add(dir);
+				const nextSlash = dir.lastIndexOf('/');
+				dir = nextSlash !== -1 ? dir.slice(0, nextSlash) : '';
+			}
 		}
 
 		this.options = dtsBundleOptions;
@@ -328,17 +336,6 @@ class DeclarationBundler {
 				// Skip node_modules packages unless they're in noExternal list
 				if (resolvedPath?.includes(nodeModules) && !this.matchesPattern(specifier, this.options.noExternal)) { continue }
 
-				// If resolved and not already in memory, load it from disk when resolve is enabled
-				if (resolvedPath && !this.declarationFiles.has(resolvedPath)) {
-					if (this.options.resolve && sys.fileExists(resolvedPath)) {
-						const rawContent = sys.readFile(resolvedPath, Encoding.utf8);
-						if (rawContent !== undefined) {
-							// Pre-process external files loaded from disk
-							this.declarationFiles.set(resolvedPath, DeclarationProcessor.preProcess(createSourceFile(resolvedPath, rawContent, ScriptTarget.Latest, true)));
-						}
-					}
-				}
-
 				if (resolvedPath && this.declarationFiles.has(resolvedPath)) {
 					module.imports.add(resolvedPath);
 					// Track the original specifier
@@ -434,9 +431,6 @@ class DeclarationBundler {
 				for (const { name } of statement.declarationList.declarations) {
 					if (isIdentifier(name)) { values.add(name.text) }
 				}
-			} else if (isModuleBlock(statement)) {
-				// Recurse into module blocks
-				collectNestedIdentifiers(statement.statements);
 			} else if (isModuleDeclaration(statement)) {
 				// Module/namespace declarations are values
 				if (statement.name && isIdentifier(statement.name)) { values.add(statement.name.text) }
@@ -542,7 +536,7 @@ class DeclarationBundler {
 				if (isIdentifier(node)) {
 					const renamed = moduleRenames.get(node.text);
 					// Rename the identifier
-					if (renamed) { magic.overwrite(node.pos, node.end, renamed) }
+					if (renamed) { magic.overwrite(node.getStart(), node.end, renamed) }
 				}
 				forEachChild(node, visit);
 			};
