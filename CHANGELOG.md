@@ -1,3 +1,14 @@
+## [1.1.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.1...v1.1.2) (2026-02-24)
+
+### Bug Fixes
+
+* **bundler:** flatten qualified names from bundled namespace imports (883c4a4e47df1d2de7e91e549e37cae0c09753e8)
+- Adds tracking of namespace aliases created from bundled `import * as Alias` statements
+- When a bundled module is inlined, its namespace import is stripped, so all `Alias.X` qualified references must be rewritten to plain `X` to avoid broken output
+- Fixes identifier re-insertion bug where the rename visitor was walking import/export declarations that had already been removed via magic.remove(), causing overwrite() to reinsert removed text and produce corrupted output like `};Json$1JsonPrimitive$1`
+- Restricts the rename visitor to declaration statements only, skipping import/export declarations
+- Imports two new TypeScript AST helpers needed for the above fixes
+
 ## [1.1.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.0...v1.1.1) (2026-02-24)
 
 ### Bug Fixes
