@@ -21,6 +21,8 @@ import {
 	isModuleDeclaration,
 	isNamedExports,
 	isIdentifier,
+	isNamespaceImport,
+	isQualifiedName,
 	resolveModuleName,
 	isExportAssignment,
 	forEachChild
@@ -500,6 +502,11 @@ class DeclarationBundler {
 			if (renamed) { moduleRenames.set(name, renamed) }
 		}
 
+		// Namespace aliases from bundled `import * as Alias` statements.
+		// When a namespace import is bundled (inlined), all `Alias.Name` qualified
+		// references must be flattened to plain `Name` since the alias is removed.
+		const bundledNamespaceAliases = new Set<string>();
+
 		// Process all statements using the source file AST
 		for (const statement of sourceFile.statements) {
 			if (isImportDeclaration(statement)) {
@@ -513,6 +520,10 @@ class DeclarationBundler {
 				if (this.isExternal(moduleSpecifier) || !bundledImportPaths.includes(moduleSpecifier)) {
 					// Keep external imports - extract the text
 					externalImports.push(code.substring(statement.pos, statement.end).trim());
+				} else if (statement.importClause?.namedBindings && isNamespaceImport(statement.importClause.namedBindings)) {
+					// Bundled namespace import: `import * as Alias from './bundled'`
+					// Record alias so qualified references (Alias.X) can be flattened to X
+					bundledNamespaceAliases.add(statement.importClause.namedBindings.name.text);
 				}
 				// Otherwise it was bundled - don't keep it as external, it's in the combined code
 
@@ -555,7 +566,11 @@ class DeclarationBundler {
 			}
 		}
 
-		// Apply renaming to all identifier occurrences in the code
+		// Apply renaming to all identifier occurrences in the code.
+		// IMPORTANT: Only visit declaration statements, NOT import/export declarations.
+		// Import and export declarations are removed via magic.remove() above.
+		// Calling magic.overwrite() on an already-removed range reinserts the text,
+		// which produces corrupted output like `};Json$1JsonPrimitive$1`.
 		if (moduleRenames.size > 0) {
 			const visit = (node: Node): void => {
 				if (isIdentifier(node)) {
@@ -566,7 +581,26 @@ class DeclarationBundler {
 				forEachChild(node, visit);
 			};
 
-			forEachChild(sourceFile, visit);
+			for (const statement of sourceFile.statements) {
+				if (!isImportDeclaration(statement) && !isExportDeclaration(statement) && !isExportAssignment(statement)) {
+					visit(statement);
+				}
+			}
+		}
+
+		// Flatten qualified names that came from bundled namespace imports.
+		// e.g. `import * as ___http_error from './http-error'` is bundled and removed,
+		// so every `___http_error.HttpError` reference must become plain `HttpError`.
+		if (bundledNamespaceAliases.size > 0) {
+			const visitQualified = (node: Node): void => {
+				if (isQualifiedName(node) && isIdentifier(node.left) && bundledNamespaceAliases.has(node.left.text)) {
+					// Remove "Alias." — from the start of the left identifier up to (not including) the right identifier
+					magic.remove(node.left.getStart(), node.right.getStart());
+				}
+				forEachChild(node, visitQualified);
+			};
+
+			forEachChild(sourceFile, visitQualified);
 		}
 
 		// Value exports take precedence - remove any types that are also values
