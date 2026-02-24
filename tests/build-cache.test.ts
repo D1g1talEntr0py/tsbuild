@@ -113,6 +113,28 @@ describe('BuildCache', () => {
 			expect(target.size).toBe(0);
 		});
 
+		it('should not restore cache after invalidate() is called (race condition fix)', async () => {
+			const cacheDir = join(tempDir, '.tsbuild');
+			await mkdir(cacheDir, defaultDirOptions);
+
+			// Save cache with data
+			const cache1 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			await cache1.save(new Map([['stale.d.ts', createDecl('export const stale: true;')]]));
+
+			// Create a new instance which immediately starts pre-loading the cache
+			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+
+			// Call invalidate() before restore() - simulates --clearCache scenario
+			// Even if the pre-load already read the file, the invalidated flag must prevent restoration
+			cache2.invalidate();
+
+			const target = new Map<string, CachedDeclaration>();
+			await cache2.restore(target);
+
+			// Cache should NOT be restored despite the pre-loaded data
+			expect(target.size).toBe(0);
+		});
+
 		it('should restore cache with multiple files', async () => {
 			const cacheDir = join(tempDir, '.tsbuild');
 			await mkdir(cacheDir, defaultDirOptions);

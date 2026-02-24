@@ -246,6 +246,38 @@ export declare const Theme: { color: string; };`]
 		expect(dtsContent).toContain("import 'some-side-effect-module';");
 	});
 
+	it('should prefer shortest relative path when multiple d.ts paths match (stale cache scenario)', async () => {
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+
+		// Simulate stale cache: stale entry is DEEPER (dist/src/index.d.ts), inserted FIRST so it would
+		// be returned first by the original code, producing wrong output.
+		// Correct entry is SHALLOWER (dist/index.d.ts), inserted second.
+		// Both suffix-match 'src/index.ts', but the bundler must prefer the shorter relative path.
+		const staleEntryPath = join(outDir, 'src/index.d.ts') as AbsolutePath;
+		const correctEntryPath = join(outDir, 'index.d.ts') as AbsolutePath;
+
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[staleEntryPath, 'export declare const version: "stale";'],
+				[correctEntryPath, 'export declare const version: "correct";']
+			]),
+			entryPoints: { index: join(cwd, 'src/index.ts') as AbsolutePath },
+			resolve: false,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		await bundleDeclarations(options);
+
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+		// Must use the correct (shorter) path, not the stale (longer) one
+		expect(dtsContent).toContain('"correct"');
+		expect(dtsContent).not.toContain('"stale"');
+	});
+
 	it('should handle explicit rootDir in sourceToDeclarationPath', async () => {
 		const cwd = process.cwd() as AbsolutePath;
 		const outDir = join(cwd, 'dist') as AbsolutePath;

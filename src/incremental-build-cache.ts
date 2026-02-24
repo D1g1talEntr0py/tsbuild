@@ -16,6 +16,8 @@ export class IncrementalBuildCache implements BuildCache {
 	private readonly cacheFilePath: AbsolutePath;
 	/** Pre-loading promise started in constructor for async cache restoration */
 	private readonly cacheLoaded: Promise<VersionedCache | undefined>;
+	/** Set to true when invalidate() is called to prevent stale cache from being restored */
+	private invalidated = false;
 
 	/**
 	 * Creates a new build cache instance and begins pre-loading the cache asynchronously.
@@ -54,6 +56,9 @@ export class IncrementalBuildCache implements BuildCache {
 	 * @param target - The map to populate with cached declarations
 	 */
 	async restore(target: Map<string, CachedDeclaration>): Promise<void> {
+		// If the cache was invalidated, skip restoration even if the pre-load completed before invalidation
+		if (this.invalidated) { return }
+
 		const cache = await this.cacheLoaded;
 
 		if (cache === undefined) { return }
@@ -74,6 +79,7 @@ export class IncrementalBuildCache implements BuildCache {
 
 	/** Invalidates the build cache by removing the cache directory. */
 	invalidate(): void {
+		this.invalidated = true;
 		try { rmSync(this.cacheDirectoryPath, defaultCleanOptions) } catch { /* Ignore */ }
 	}
 

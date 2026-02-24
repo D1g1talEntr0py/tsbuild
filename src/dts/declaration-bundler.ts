@@ -208,6 +208,12 @@ class DeclarationBundler {
 		// TypeScript preserves directory structure, so /path/to/project/src/foo/bar.ts
 		// becomes /path/to/project/dist/foo/bar.d.ts
 		// We can match by checking if they share the same relative path structure
+		// When multiple paths match (e.g. stale cache entries from old builds with different rootDir),
+		// prefer the shortest relative path — TypeScript strips rootDir from output paths, so the
+		// correct current path is always at least as short as any stale path from a shallower rootDir.
+		let bestMatch: AbsolutePath | undefined;
+		let bestRelativeLength = Infinity;
+
 		for (const dtsPath of this.declarationFiles.keys()) {
 			if (!dtsPath.endsWith(FileExtension.DTS)) { continue }
 
@@ -219,12 +225,13 @@ class DeclarationBundler {
 
 			// Check if source path ends with the same relative path structure
 			// Ensure it's a complete path segment match by checking for '/' before the match
-			if (sourceWithoutExt === relativeDtsPath || sourceWithoutExt.endsWith('/' + relativeDtsPath)) {
-				return dtsPath;
+			if ((sourceWithoutExt === relativeDtsPath || sourceWithoutExt.endsWith('/' + relativeDtsPath)) && relativeDtsPath.length < bestRelativeLength) {
+				bestRelativeLength = relativeDtsPath.length;
+				bestMatch = dtsPath;
 			}
 		}
 
-		return sourcePath;
+		return bestMatch ?? sourcePath;
 	}
 
 	/**
