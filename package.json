@@ -61,8 +61,8 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.3.0",
-    "@typescript-eslint/eslint-plugin": "^8.56.0",
-    "@typescript-eslint/parser": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
     "@vitest/coverage-v8": "4.0.18",
     "eslint": "^10.0.1",
     "eslint-plugin-jsdoc": "^62.7.0",
@@ -70,11 +70,11 @@
     "memfs": "^4.56.10",
     "tsx": "^4.21.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "^8.56.0",
+    "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
   },
   "optionalDependencies": {
-    "@swc/core": "^1.15.11",
+    "@swc/core": "^1.15.13",
     "@swc/types": "^0.1.25"
   }
 }
