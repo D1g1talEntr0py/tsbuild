@@ -709,4 +709,94 @@ export declare const Theme: { color: string; };`]
 		// External import should be preserved for external module
 		expect(dtsContent).toContain('import { extFn } from "ext-lib"');
 	});
+
+	it('should flatten bundled namespace alias qualified names from inline import() types', async () => {
+		// Reproduces: TypeScript may emit inline `import('./module').Type` references in .d.ts files.
+		// DeclarationProcessor.preProcess converts these to `import * as __alias from './module'` +
+		// `__alias.Type` qualified references. When that module is bundled (inlined), the namespace
+		// import is stripped — the bundler must also flatten `__alias.Type` → `Type` everywhere.
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[
+					join(cwd, 'src/index.d.ts'),
+					// Simulates TypeScript output with inline import() type references
+					'type BeforeErrorHook = (error: import("./http-error").HttpError) => import("./http-error").HttpError | void;\nexport type { BeforeErrorHook };'
+				],
+				[
+					join(cwd, 'src/http-error.d.ts'),
+					'export declare class HttpError extends Error { status: number; }'
+				]
+			]),
+			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			resolve: true,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		await bundleDeclarations(options);
+
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+
+		// The bundled module's namespace alias must not appear in the output
+		expect(dtsContent).not.toMatch(/___http_error\./);
+		// The plain type name must remain
+		expect(dtsContent).toContain('HttpError');
+		// The hook type must be present and use plain HttpError (not aliased)
+		expect(dtsContent).toContain('BeforeErrorHook');
+		// No dangling namespace import should remain
+		expect(dtsContent).not.toMatch(/import \* as ___http_error/);
+	});
+
+	it('should not reinsert renamed identifiers that appear in removed export clauses (regression)', async () => {
+		// Reproduces: when two modules both declare e.g. `type Json = ...`, the second is renamed
+		// to `Json$1`. If that module also has `export { Json }`, the bundler removes the export
+		// statement via magic.remove() but then the rename visitor calls magic.overwrite() on the
+		// already-removed range, which reinserts the text. This produced output like:
+		//   };Json$1JsonPrimitive$1
+		// instead of keeping the export clause fully removed.
+		const cwd = process.cwd() as AbsolutePath;
+		const outDir = join(cwd, 'dist') as AbsolutePath;
+
+		const options = {
+			currentDirectory: cwd,
+			declarationFiles: TestHelper.createDeclarationFilesMap([
+				[
+					join(cwd, 'src/index.d.ts'),
+					'import { PublishOptions } from "./events";\nimport { Json } from "./json";\nexport { PublishOptions, Json };'
+				],
+				[
+					join(cwd, 'src/events.d.ts'),
+					// This module has its own local `type Json` — causes a conflict with src/json.d.ts
+					'import { Json } from "./json";\ndeclare type Json = string | number | boolean | null;\ndeclare type PublishOptions = {\n    name: string;\n    data?: Json;\n};\nexport { PublishOptions, Json };'
+				],
+				[
+					join(cwd, 'src/json.d.ts'),
+					'declare type Json = string | number | boolean | null | object;\nexport { Json };'
+				]
+			]),
+			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			resolve: false,
+			external: [] as (string | RegExp)[],
+			noExternal: [] as (string | RegExp)[],
+			compilerOptions: { outDir }
+		};
+
+		await bundleDeclarations(options);
+
+		const dtsContent = TestHelper.readFile(join(outDir, 'index.d.ts'));
+
+		// Renamed identifier must NOT appear naked / concatenated directly after a closing brace
+		expect(dtsContent).not.toMatch(/\}Json/);
+		// Renamed type should still exist as a proper declaration
+		expect(dtsContent).toContain('type Json$1');
+		// Original type should also exist
+		expect(dtsContent).toContain('type Json');
+		// PublishOptions should reference the renamed Json
+		expect(dtsContent).toContain('PublishOptions');
+	});
 });
