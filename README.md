@@ -24,6 +24,7 @@ A self-hosting TypeScript build tool that combines the best of three worlds: **T
 - 🎯 **ESM-Only** - Pure ESM project with no CommonJS support by design
 - 🧹 **Clean Builds** - Optional output directory cleaning before builds
 - 📊 **Performance Metrics** - Built-in performance logging with detailed timing information
+- 🔎 **Zero-Config Entry Points** - Auto-infers entry points from `package.json` when none are configured
 
 ## Why tsbuild?
 
@@ -177,6 +178,14 @@ tsbuild supports a comprehensive set of options (full schema available in [`sche
 
 If a directory is provided, all files within will be used as entry points.
 
+When `entryPoints` is omitted entirely, tsbuild automatically infers entry points from `package.json` by reverse-mapping output paths back to their source files. Resolution order:
+
+1. **`exports`** - Subpath export map (wildcard patterns are skipped; `import`/`default` conditions are tried in order)
+2. **`bin`** - Binary entry points
+3. **`main`** / **`module`** - Legacy fallback (only used when `exports` and `bin` produce no results)
+
+> **Note:** Auto-inference requires that your `package.json` output paths fall inside the `outDir` declared in `tsconfig.json` and that the corresponding source files exist under `src/`.
+
 ### Declaration Bundling
 
 ```jsonc
@@ -322,6 +331,8 @@ The declaration bundling system (`src/dts/declaration-bundler.ts`) is a custom i
 
 This custom bundler works entirely with in-memory declaration files, avoiding the overhead of duplicate TypeScript Program creation with some other bundlers.
 
+When a circular dependency is detected between declaration files, tsbuild emits a warning with the full cycle path (e.g., `a.d.ts -> b.d.ts -> a.d.ts`) rather than failing silently or crashing.
+
 ## Performance
 
 tsbuild is designed for speed:
@@ -332,9 +343,9 @@ tsbuild is designed for speed:
 - **Smart caching** - Leverages `.tsbuildinfo` for TypeScript incremental compilation
 
 Typical build times for the tsbuild project itself:
-- Full build: ~400-600ms
-- Incremental rebuild: ~100-200ms
-- Type-check only: ~50-100ms
+- Full build: ~450-500ms
+- Incremental rebuild (no changes): ~5ms
+- Type-check only: ~10-15ms
 
 ## Acknowledgments
 
