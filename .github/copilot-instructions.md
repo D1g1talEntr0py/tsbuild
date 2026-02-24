@@ -1,6 +1,28 @@
 # tsbuild - AI Coding Agent Instructions
 
-> **Note**: All AI coding agents working on this project must also read and follow the guidelines in `AGENTS.md`, which defines core principles, coding standards, testing protocols, and workflow requirements.
+## Agent Guidelines
+
+### Core Principles
+- **Clarity and Brevity:** All responses, comments, and documentation must be concise, clear, and easy to understand.
+- **Performance First:** Always prioritize performance. Seek the simplest solution first — simplicity often equals performance. Complexity should only arise from necessity.
+- **Language:** All code, comments, and documentation must be written in English.
+- **ESM-Only:** No CommonJS. All relative imports use `.js` extensions (per `rewriteRelativeImportExtensions`).
+
+### Coding Rules
+- **Do not change the formatting of existing code.** Adhere strictly to the established style.
+- **Line wrapping is unacceptable.** Keep lines within the established limits.
+- **Do not use `any`.** Use specific types to ensure compile-time correctness.
+- **Use `.js` extensions** for all relative imports in source files.
+
+### Testing Rules
+- Do **not** mock internal/private methods or implementation details. Test the public contract.
+- When fixing a failing test, do **not** modify implementation code. If a bug is found, report it clearly instead.
+- Use `memfs` for file system mocking when needed.
+- Coverage target is 100%. If a gap requires complex mocking, note it and move on.
+
+### Workflow Rules
+- Do **not** prefix terminal commands with `cd`. Assume commands run from the repo root.
+- Do **not** add new dependencies unless no native or existing solution is feasible.
 
 ## Project Overview
 tsbuild is a self-hosting TypeScript build tool that combines three systems: **TypeScript API** (type checking + declarations), **esbuild** (bundling), and **SWC** (decorator metadata). **ESM-only by design** - no CommonJS support. Targets Node.js 20.16.0+ with pnpm 9+.
