@@ -1,3 +1,28 @@
+## [1.1.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.0...v1.1.1) (2026-02-24)
+
+### Bug Fixes
+
+* **dts:** correct scoped package name in DTS output (9c40f48a896d5dab7d05c130eb624d288d0f6967)
+Two bugs caused scoped npm package imports (e.g. `@d1g1tal/watchr`) to be
+emitted as unscoped names (`watchr`) in the bundled declaration output.
+
+- Race condition in `IncrementalBuildCache`: `loadCache()` starts reading
+  the cache file asynchronously in the constructor, but `invalidate()` is
+  called afterward; the I/O read could complete before `rmSync` deleted the
+  file, so stale cache data was returned by `restore()` even after
+  `--clearCache`; fixed by adding an `invalidated` flag that makes
+  `restore()` bail out immediately when set
+- Ambiguous path matching in `sourceToDeclarationPath`: when both a stale
+  cache entry (`dist/src/@types/index.d.ts` from an old build) and the
+  correct current entry (`dist/@types/index.d.ts`) exist in
+  `declarationFiles`, the stale one (inserted earlier from `restore()`) was
+  returned first; fixed by selecting the match with the shortest relative
+  path since TypeScript strips `rootDir` from output paths
+- Add test for the `invalidated` flag race-condition fix in
+  `tests/build-cache.test.ts`
+- Add test for shortest-path preference in
+  `tests/declaration-bundler.test.ts`
+
 ## [1.1.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.0.3...v1.1.0) (2026-02-24)
 
 ### Features
