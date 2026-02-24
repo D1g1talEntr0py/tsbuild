@@ -639,7 +639,7 @@ export declare const Theme: { color: string; };`]
 
 		await bundleDeclarations(options);
 
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Circular dependency detected'));
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/Circular dependency detected: .+ -> .+ -> .+/));
 		warnSpy.mockRestore();
 
 		// Output should still be produced even with circular deps

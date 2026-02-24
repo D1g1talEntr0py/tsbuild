@@ -387,6 +387,7 @@ class DeclarationBundler {
 		const sorted: ModuleInfo[] = [];
 		const visited = new Set<string>();
 		const visiting = new Set<string>();
+		const visitStack: string[] = [];
 
 		/**
 		 * Visit a module and its dependencies in topological order
@@ -396,19 +397,26 @@ class DeclarationBundler {
 			if (visited.has(path)) { return }
 
 			if (visiting.has(path)) {
-				Logger.warn(`Circular dependency detected: ${Paths.relative(this.options.currentDirectory, path)}`);
+				const cyclePath = [ ...visitStack.slice(visitStack.indexOf(path)), path ].map((p) => Paths.relative(this.options.currentDirectory, p)).join(' -> ');
+				Logger.warn(`Circular dependency detected: ${cyclePath}`);
 				return;
 			}
 
 			visiting.add(path);
+			visitStack.push(path);
 
 			const module = modules.get(path);
-			if (!module) { return }
+			if (!module) {
+				visiting.delete(path);
+				visitStack.pop();
+				return;
+			}
 
 			// Visit dependencies first
 			for (const importPath of module.imports) { visit(importPath) }
 
 			visiting.delete(path);
+			visitStack.pop();
 			visited.add(path);
 			sorted.push(module);
 		};
