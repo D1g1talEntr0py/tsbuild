@@ -35,7 +35,6 @@ export class TypeScriptProject implements Closable {
 	private readonly pendingChanges: PendingFileChange[] = [];
 	private readonly buildDependencies: Set<RelativePath> = new Set();
 	private dependencyPaths?: Promise<string[]>;
-	private packageJson?: PackageJson;
 
 	/**
 	 * Creates a TypeScript project and prepares it for building/bundling.
@@ -452,7 +451,6 @@ export class TypeScriptProject implements Closable {
 		return this.dependencyPaths ??= Files.read<JsonString<PackageJson>>(Paths.absolute(this.directory, 'package.json'))
 			.then((content) => {
 				const packageJson = Json.parse(content);
-				this.packageJson = packageJson;
 				const { dependencies = {}, peerDependencies = {} } = packageJson;
 				return [ ...new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]) ];
 			});
