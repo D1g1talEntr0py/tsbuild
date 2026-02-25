@@ -113,7 +113,7 @@ describe('entry-points', () => {
 				exports: './dist/index.js',
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ 'my-pkg': './src/index.ts' });
+			expect(result).toEqual({ index: './src/index.ts' });
 		});
 
 		it('should use "index" as name when no package name for string exports', () => {
@@ -134,7 +134,7 @@ describe('entry-points', () => {
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
 			expect(result).toEqual({
-				'my-pkg': './src/index.ts',
+				index: './src/index.ts',
 				utils: './src/utils.ts',
 			});
 		});
@@ -149,7 +149,7 @@ describe('entry-points', () => {
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
 			expect(result).toEqual({
-				'my-pkg': './src/index.ts',
+				index: './src/index.ts',
 				helpers: './src/helpers.ts',
 			});
 		});
@@ -164,7 +164,7 @@ describe('entry-points', () => {
 				},
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ 'my-pkg': './src/index.ts' });
+			expect(result).toEqual({ index: './src/index.ts' });
 		});
 
 		it('should infer from string bin field', () => {
@@ -199,15 +199,26 @@ describe('entry-points', () => {
 			expect(result).toEqual({ cli: './src/cli.ts' });
 		});
 
-		it('should not override exports entries with bin entries', () => {
+		it('should combine exports and bin when names differ', () => {
 			const pkg: PackageJson = {
 				name: 'my-pkg',
 				exports: { '.': './dist/index.js' },
 				bin: { 'my-pkg': './dist/bin.js' },
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
-			// exports provides "my-pkg", bin should not override it
-			expect(result).toEqual({ 'my-pkg': './src/index.ts' });
+			// exports '.' uses file stem 'index'; bin 'my-pkg' is a different name — both included
+			expect(result).toEqual({ index: './src/index.ts', 'my-pkg': './src/bin.ts' });
+		});
+
+		it('should infer both exports and bin when bin key matches package name', () => {
+			// Mirrors the tsbuild package: exports '.' -> index.js, bin 'tsbuild' -> tsbuild.js
+			const pkg: PackageJson = {
+				name: '@d1g1tal/tsbuild',
+				exports: { '.': { import: './dist/index.js' } },
+				bin: { tsbuild: './dist/tsbuild.js' },
+			};
+			const result = inferEntryPoints(pkg, 'dist', 'src');
+			expect(result).toEqual({ index: './src/index.ts', tsbuild: './src/tsbuild.ts' });
 		});
 
 		it('should combine exports and bin entries', () => {
@@ -218,7 +229,7 @@ describe('entry-points', () => {
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
 			expect(result).toEqual({
-				'my-pkg': './src/index.ts',
+				index: './src/index.ts',
 				cli: './src/cli.ts',
 			});
 		});
@@ -250,6 +261,7 @@ describe('entry-points', () => {
 
 		it('should not use main/module fallback when exports provides entries', () => {
 			const pkg: PackageJson = {
+				name: 'my-pkg',
 				exports: { '.': './dist/index.js' },
 				main: './dist/main.js',
 			};
@@ -276,7 +288,7 @@ describe('entry-points', () => {
 				name: 'my-pkg',
 			};
 			const result = inferEntryPoints(pkg, 'dist');
-			expect(result).toEqual({ 'my-pkg': './src/index.ts' });
+			expect(result).toEqual({ index: './src/index.ts' });
 		});
 
 		it('should skip conditional export entries that resolve to undefined', () => {
@@ -300,7 +312,7 @@ describe('entry-points', () => {
 			expect(result).toBeUndefined();
 		});
 
-		it('should strip scope prefix from scoped package names', () => {
+		it('should use file stem for root export and package name for other subpaths', () => {
 			const pkg: PackageJson = {
 				name: '@scope/my-pkg',
 				exports: {
@@ -311,7 +323,7 @@ describe('entry-points', () => {
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
 			expect(result).toEqual({
-				'my-pkg': './src/index.ts',
+				index: './src/index.ts',
 				utils: './src/utils.ts',
 				cli: './src/cli.ts',
 			});
