@@ -1,7 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Paths } from '../src/paths';
 import { resolve, relative, join } from 'node:path';
+import { vol } from 'memfs';
 import { TestHelper } from './scripts/test-helper';
+
+vi.mock('node:fs', async () => {
+	const memfs: typeof import('memfs') = await vi.importActual('memfs');
+	return memfs.fs;
+});
+
+vi.mock('node:fs/promises', async () => {
+	const memfs: typeof import('memfs') = await vi.importActual('memfs');
+	return memfs.fs.promises;
+});
 
 describe('Paths', () => {
 	beforeEach(async () => {
@@ -99,6 +110,38 @@ describe('Paths', () => {
 			expect(Paths.isPath('c:/file')).toBe(false);
 			// Drive letter without proper separator
 			expect(Paths.isPath('C:file')).toBe(false);
+		});
+	});
+
+	describe('isDirectory', () => {
+		it('should return true for an existing directory', async () => {
+			vol.mkdirSync('/test-dir', { recursive: true });
+			expect(await Paths.isDirectory('/test-dir')).toBe(true);
+		});
+
+		it('should return false for an existing file', async () => {
+			vol.writeFileSync('/test-file.ts', 'content');
+			expect(await Paths.isDirectory('/test-file.ts')).toBe(false);
+		});
+
+		it('should return false for a non-existent path', async () => {
+			expect(await Paths.isDirectory('/non-existent')).toBe(false);
+		});
+	});
+
+	describe('isFile', () => {
+		it('should return true for an existing file', async () => {
+			vol.writeFileSync('/test-file.ts', 'content');
+			expect(await Paths.isFile('/test-file.ts')).toBe(true);
+		});
+
+		it('should return false for an existing directory', async () => {
+			vol.mkdirSync('/test-dir', { recursive: true });
+			expect(await Paths.isFile('/test-dir')).toBe(false);
+		});
+
+		it('should return false for a non-existent path', async () => {
+			expect(await Paths.isFile('/non-existent')).toBe(false);
 		});
 	});
 });

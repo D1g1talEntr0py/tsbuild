@@ -38,20 +38,28 @@ export class Paths {
 
 	/**
 	 * Checks if the given path is a directory.
+	 * Returns false if the path does not exist.
 	 * @param path - The path to check
 	 * @returns True if the path is a directory, false otherwise
 	 */
 	static async isDirectory<T extends Path>(path: T | string): Promise<boolean> {
-		return (await lstat(path)).isDirectory();
+		try { return (await lstat(path)).isDirectory() } catch (error) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return false }
+			throw error;
+		}
 	}
 
 	/**
 	 * Checks if the given path is a file.
+	 * Returns false if the path does not exist.
 	 * @param path - The path to check
 	 * @returns True if the path is a file, false otherwise
 	 */
 	static async isFile<T extends Path>(path: T | string): Promise<boolean> {
-		return (await lstat(path)).isFile();
+		try { return (await lstat(path)).isFile() } catch (error) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return false }
+			throw error;
+		}
 	}
 
 	/**
