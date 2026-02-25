@@ -53,7 +53,10 @@ export class TypeScriptProject implements Closable {
 		// Initialize file manager for tracking emissions
 		this.fileManager = new FileManager(buildCache);
 		this.builderProgram = createIncrementalProgram({ rootNames, options: this.configuration.compilerOptions, projectReferences, configFileParsingDiagnostics });
-		this.buildConfiguration = { entryPoints: this.getEntryPoints(entryPoints), target: toEsTarget(target), outDir, ...tsbuildOptions };
+		const entryPointsPromise = this.getEntryPoints(entryPoints);
+		// Suppress unhandled rejection warning - the rejection is handled when awaited in build()
+		entryPointsPromise.catch(() => {});
+		this.buildConfiguration = { entryPoints: entryPointsPromise, target: toEsTarget(target), outDir, ...tsbuildOptions };
 	}
 
 	/**
@@ -434,8 +437,10 @@ export class TypeScriptProject implements Closable {
 
 					if (await Paths.isFile(filePath)) { expandedEntryPoints[Paths.parse(file).name] = filePath }
 				}
-			} else {
+			} else if (await Paths.isFile(resolvedPath)) {
 				expandedEntryPoints[name] = resolvedPath;
+			} else {
+				throw new ConfigurationError(`Entry point does not exist: ${entryPoint}`);
 			}
 		}
 
@@ -450,8 +455,7 @@ export class TypeScriptProject implements Closable {
 	private getProjectDependencyPaths(): Promise<string[]> {
 		return this.dependencyPaths ??= Files.read<JsonString<PackageJson>>(Paths.absolute(this.directory, 'package.json'))
 			.then((content) => {
-				const packageJson = Json.parse(content);
-				const { dependencies = {}, peerDependencies = {} } = packageJson;
+				const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
 				return [ ...new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]) ];
 			});
 	}

@@ -166,6 +166,21 @@ describe('TypeScriptProject', () => {
 	});
 
 	describe('build', () => {
+		it('should set exit code 3 when entry point does not exist', async () => {
+			const projectPath = await TestHelper.createTestProject({
+				tsconfig: {
+					tsbuild: { entryPoints: { index: './src/missing.ts' } }
+				},
+				files: { 'src/index.ts': 'export const hello = "world";' }
+			});
+			const project = createProject(projectPath);
+
+			await project.build();
+
+			expect(process.exitCode).toBe(3);
+			process.exitCode = undefined;
+		});
+
 		it('should skip transpile when noEmit is true', async () => {
 			const projectPath = await TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { noEmit: true } }
