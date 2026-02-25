@@ -3,6 +3,17 @@ import type { EntryPoints, RelativePath } from './@types/index.js';
 /** Conditional export keys tried in priority order */
 const importConditions = ['import', 'default'] as const;
 
+/**
+ * Extracts the filename stem from a path (e.g., `'./src/index.ts'` → `'index'`).
+ * @param filePath A file path
+ * @returns The stem of the filename
+ */
+function stemOf(filePath: string): string {
+	const base = filePath.split('/').at(-1) ?? '';
+	const dot = base.indexOf('.');
+	return dot === -1 ? base : base.slice(0, dot);
+}
+
 /** Output → source file extension mapping */
 const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
 	['.js', '.ts'],
@@ -105,7 +116,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	if (packageJson.exports !== undefined) {
 		if (typeof packageJson.exports === 'string') {
 			const sourcePath = outputToSourcePath(packageJson.exports, outDir, sourceDir);
-			if (sourcePath) { entryPoints[packageJson.name !== undefined ? unscope(packageJson.name) : 'index'] = sourcePath }
+			if (sourcePath) { entryPoints[stemOf(sourcePath)] = sourcePath }
 		} else {
 			for (const [subpath, exportValue] of Object.entries(packageJson.exports)) {
 				if (subpath.includes('*')) { continue }
@@ -114,7 +125,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 				if (outputPath === undefined) { continue }
 
 				const sourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
-				if (sourcePath) { entryPoints[subpathToEntryName(subpath, packageJson.name)] = sourcePath }
+				if (sourcePath) { entryPoints[subpath === '.' ? stemOf(sourcePath) : subpathToEntryName(subpath, packageJson.name)] = sourcePath }
 			}
 		}
 	}
