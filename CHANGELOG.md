@@ -1,3 +1,21 @@
+## [1.2.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.0...v1.2.1) (2026-02-25)
+
+### Bug Fixes
+
+* **paths:** return false for non-existent paths in type checks (393856cfff44dedffa1e63b3f5fa5a9b3863d023)
+- Handle ENOENT in isDirectory and isFile instead of throwing
+- Re-throw any unexpected errors to preserve error visibility
+- Update JSDoc to document non-existence behavior
+- Add unit tests covering existing directory, existing file, and non-existent path cases for both methods
+- Mock node:fs and node:fs/promises with memfs for isolated in-memory testing
+
+* **type-script-project:** validate entry points exist and suppress unhandled rejection (758be0311f505f9f0417036912a35a186dfa96fc)
+- Throw a ConfigurationError when an entry point path does not exist as a file or directory
+- Suppress the unhandled rejection warning on the entry points promise since the rejection is handled when awaited in build()
+- Inline a single-use variable in dependency path parsing for clarity
+- Remove stale commented-out entry points from tsconfig.json
+- Add a test asserting that a missing entry point causes exit code 3 during build
+
 ## [1.2.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.1.3...v1.2.0) (2026-02-24)
 
 ### Features
