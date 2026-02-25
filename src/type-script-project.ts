@@ -467,8 +467,14 @@ export class TypeScriptProject implements Closable {
 	 * @param error - The error to handle
 	 */
 	private handleBuildError(error: unknown): void {
-		// BuildError subclasses (TypeCheckError, BundleError, etc.) are expected build failures
-		// that have already been logged - just set the exit code
+		// ConfigurationError is not logged before being thrown, so log it here
+		if (error instanceof ConfigurationError) {
+			Logger.error(error.message);
+			if (!this.buildConfiguration.watch.enabled) { process.exitCode = error.code }
+			return;
+		}
+
+		// TypeCheckError and BundleError are already logged when they occur - just set the exit code
 		if (error instanceof BuildError) {
 			if (!this.buildConfiguration.watch.enabled) { process.exitCode = error.code }
 			return;
