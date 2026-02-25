@@ -1,3 +1,48 @@
+## [1.2.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.1...v1.2.2) (2026-02-25)
+
+### Bug Fixes
+
+* **build:** log configuration errors before exiting (7a2497ae68be5924f19c61aab3936d0f0805453a)
+ConfigurationError was being thrown but never logged, leaving the user
+with no visible feedback about what went wrong during the build.
+
+- Handles ConfigurationError separately from other BuildError subclasses
+  in the build error handler
+- Logs the error message via the logger before setting the exit code
+- Clarifies the comment for TypeCheckError and BundleError, which are
+  already logged at the point they are thrown
+
+* **entry-points:** use file stem instead of package name for root export (f641c1f0f6e20d79ac9566297b204458d4c37699)
+Previously, the root export ('.') used the unscoped package name as the
+entry point key, which could conflict with bin entries and was
+unpredictable when the source file name differed from the package name.
+
+- Adds a `stemOf` helper to extract the filename stem from a path
+- Uses the file stem of the resolved source path as the entry key for
+  the root export ('.') and for string exports
+- Non-root subpath exports continue to use the subpath-derived name
+- Fixes a bug where bin entries with different names were silently
+  dropped because they collided with the package-name-based export key
+
+
+### Tests
+
+* **entry-points:** update tests to reflect file-stem entry naming (38c296d1441ecfb435e6b7fd69493ab936be11fc)
+Follows up on the change that uses file stems instead of package names
+for root export entry point keys.
+
+- Updates all test expectations that previously expected the unscoped
+  package name (e.g., 'my-pkg') as the root entry key to now expect the
+  file stem (e.g., 'index')
+- Renames a test to better describe the new behaviour of combining
+  exports and bin when their names differ
+- Adds a new test that mirrors the real-world tsbuild package layout,
+  where exports '.' resolves to index.ts and bin resolves to tsbuild.ts,
+  verifying both are included as separate entries
+- Adds a missing `name` field to a test fixture that requires it
+- Updates a test description to reflect that file stem is used for root
+  exports while subpath names are used for other exports
+
 ## [1.2.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.0...v1.2.1) (2026-02-25)
 
 ### Bug Fixes
