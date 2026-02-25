@@ -1,3 +1,9 @@
+## [1.2.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.2...v1.2.3) (2026-02-25)
+
+### Bug Fixes
+
+* **deps:** update minimatch (958d33ffed3a53997b260afe6e2dc40b9553681a)
+
 ## [1.2.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.1...v1.2.2) (2026-02-25)
 
 ### Bug Fixes
