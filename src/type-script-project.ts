@@ -7,13 +7,14 @@ import { bundleDeclarations } from './dts/declaration-bundler';
 import { outputPlugin } from './plugins/output';
 import { externalModulesPlugin } from './plugins/external-modules';
 import { closeOnExit } from './decorators/close-on-exit';
-import { logPerformance } from './decorators/performance-logger';
+import { logPerformance, addPerformanceStep } from './decorators/performance-logger';
 import { debounce } from './decorators/debounce';
 import { BuildError, ConfigurationError, TypeCheckError } from './errors';
 import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
 import { inferEntryPoints, type PackageJson } from './entry-points';
 import { build as esbuild, formatMessages } from 'esbuild';
+import { performance } from 'node:perf_hooks';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
 import type { BuilderProgram, Diagnostic, FormatDiagnosticsHost } from 'typescript';
@@ -128,17 +129,25 @@ export class TypeScriptProject implements Closable {
 		await this.fileManager.initialize();
 
 		// For incremental builds, we need to call emit() to save the .tsbuildinfo file, even in type-check-only mode.
+		performance.mark('emit:start');
 		const { diagnostics: emitDiagnostics } = this.builderProgram.emit(undefined, this.fileManager.fileWriter, undefined, true);
+		addPerformanceStep('Emit', TypeScriptProject.elapsed('emit:start'));
 
 		// Collect semantic diagnostics explicitly — emit() only returns emit-phase diagnostics
 		// and silently ignores semantic errors such as TS2307 (Cannot find module).
-		const allDiagnostics = [...this.builderProgram.getSemanticDiagnostics(), ...emitDiagnostics];
+		performance.mark('diagnostics:start');
+		const allDiagnostics = [ ...this.builderProgram.getSemanticDiagnostics(), ...emitDiagnostics];
+		addPerformanceStep('Diagnostics', TypeScriptProject.elapsed('diagnostics:start'));
 
 		if (allDiagnostics.length > 0) {
 			TypeScriptProject.handleTypeErrors('Type-checking failed', allDiagnostics, this.directory);
 		}
 
-		return this.fileManager.finalize();
+		performance.mark('finalize:start');
+		const result = this.fileManager.finalize();
+		addPerformanceStep('Finalize', TypeScriptProject.elapsed('finalize:start'));
+
+		return result;
 	}
 
 	/**
@@ -533,5 +542,19 @@ export class TypeScriptProject implements Closable {
 
 		// Throw to signal build failure - handleBuildError will set the exit code
 		throw new TypeCheckError(message, formatDiagnostics(diagnostics, diagnosticsHost));
+	}
+
+	/**
+	 * Calculates elapsed time since a performance mark and clears the mark.
+	 * @param markName - The name of the performance mark to measure from
+	 * @returns Formatted elapsed time string (e.g., '42ms')
+	 */
+	private static elapsed(markName: string): string {
+		const endMark = performance.mark(`${markName}:end`);
+		const duration = endMark.startTime - performance.getEntriesByName(markName, 'mark')[0].startTime;
+		performance.clearMarks(markName);
+		performance.clearMarks(endMark.name);
+
+		return `${~~duration}ms`;
 	}
 }
