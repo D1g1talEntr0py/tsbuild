@@ -2,7 +2,7 @@ import { Files } from 'src/files';
 import { Paths } from 'src/paths';
 import { defaultEntryPoint } from 'src/constants';
 import { DeclarationProcessor } from './dts/declaration-processor';
-import { sys, createSourceFile, ScriptTarget } from 'typescript';
+import { createSourceFile, ScriptTarget } from 'typescript';
 import type { AbsolutePath, BuildCache, CachedDeclaration, Closable, WrittenFile } from 'src/@types';
 
 /**
@@ -15,9 +15,9 @@ import type { AbsolutePath, BuildCache, CachedDeclaration, Closable, WrittenFile
  * - Disk I/O for writing declaration files
  * - Entry point resolution for declaration bundling
  *
- * Declaration files are pre-processed immediately when emitted by TypeScript,
- * ensuring the cache stores ready-to-use declarations and avoiding duplicate
- * processing on subsequent builds.
+ * Declaration files are stored as raw text during TypeScript emit (to minimize
+ * work inside the synchronous emit callback) and pre-processed lazily in
+ * {@link FileManager.processEmittedFiles} before cache persistence.
  *
  * @example Basic usage (no caching)
  * ```typescript
@@ -42,6 +42,12 @@ export class FileManager implements Closable {
 	private hasEmittedFiles: boolean = false;
 	private readonly declarationFiles = new Map<AbsolutePath, CachedDeclaration>();
 	private readonly cache: BuildCache | undefined;
+	/** Raw declaration text captured during emit, pending pre-processing */
+	private readonly pendingFiles: { path: AbsolutePath; text: string }[] = [];
+	/** Buffered .tsbuildinfo content for async write (avoids sync I/O during emit) */
+	private pendingBuildInfo: { path: string; text: string } | undefined;
+	/** Background cache save promise — awaited in initialize() and close() */
+	private pendingSave: Promise<void> | undefined;
 
 	/**
 	 * Creates a new file manager.
@@ -64,8 +70,13 @@ export class FileManager implements Closable {
 	 * ```
 	 */
 	async initialize(): Promise<void> {
-		// Reset emit flag
+		// Ensure any in-flight cache save from the previous build completes before restoring
+		if (this.pendingSave) { await this.pendingSave; this.pendingSave = undefined }
+
+		// Reset emit state
 		this.hasEmittedFiles = false;
+		this.pendingFiles.length = 0;
+		this.pendingBuildInfo = undefined;
 
 		if (this.cache) {
 			// For incremental builds, restore cache and let TypeScript update only changed files
@@ -85,12 +96,31 @@ export class FileManager implements Closable {
 	 * ```typescript
 	 * await manager.initialize();
 	 * program.emit(undefined, manager.fileWriter, undefined, true);
-	 * const hasEmitted = await manager.finalize();
+	 * const hasEmitted = manager.finalize();
 	 * if (hasEmitted) { // Continue with build }
 	 * ```
 	 */
-	async finalize(): Promise<boolean> {
-		if (this.cache && this.hasEmittedFiles) { await this.cache.save(this.declarationFiles) }
+	finalize(): boolean {
+		// Pre-process all declaration files captured during emit.
+		// This work was deferred from the synchronous fileWriter callback to
+		// reduce the time spent inside TypeScript's synchronous emit() call.
+		this.processEmittedFiles();
+
+		// Write .tsbuildinfo asynchronously (was sync sys.writeFile during emit)
+		const buildInfoWrite = this.pendingBuildInfo ? Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text) : undefined;
+		this.pendingBuildInfo = undefined;
+
+		// Fire-and-forget cache save — the cache is only needed on the *next* build,
+		// so we don't block the current build's parallel phases (transpile + dts bundling).
+		// The promise is awaited in initialize() (watch mode) and close() (process exit).
+		// Suppress unhandled rejection warnings — errors are handled when awaited.
+		if (this.cache && this.hasEmittedFiles) {
+			this.pendingSave = Promise.all([ buildInfoWrite, this.cache.save(this.declarationFiles) ]).then(() => {});
+		} else if (buildInfoWrite) {
+			this.pendingSave = buildInfoWrite;
+		}
+
+		this.pendingSave?.catch(() => {});
 
 		// For non-incremental builds (no cache), always assume files were emitted
 		// For incremental builds, hasEmittedFiles tracks actual emission
@@ -154,7 +184,23 @@ export class FileManager implements Closable {
 	 * Clears all stored declaration files.
 	 */
 	close(): void {
+		// Await any in-flight cache save to prevent data loss on exit.
+		// ProcessManager calls close() synchronously, so we can only best-effort here.
+		// The pendingSave promise is lightweight (already running), so this is safe.
+		this.pendingSave?.then(() => {}, () => {});
+		this.pendingSave = undefined;
+		this.pendingFiles.length = 0;
+		this.pendingBuildInfo = undefined;
 		this.declarationFiles.clear();
+	}
+
+	/**
+	 * Awaits any in-flight background I/O (cache save, .tsbuildinfo write).
+	 * Call this when you need to guarantee all pending writes have completed,
+	 * e.g., before reading the cache file from a different instance.
+	 */
+	async flush(): Promise<void> {
+		if (this.pendingSave) { await this.pendingSave; this.pendingSave = undefined }
 	}
 
 	/**
@@ -171,23 +217,35 @@ export class FileManager implements Closable {
 
 	/**
 	 * Function that intercepts file writes during TypeScript emit.
-	 * Declaration files are pre-processed and stored in memory, while .tsbuildinfo is written to disk.
-	 * Pre-processing happens immediately so the cache stores ready-to-use declarations.
+	 * Captures raw text for deferred pre-processing and buffers .tsbuildinfo for async I/O.
+	 * Designed to be as fast as possible since it runs inside TypeScript's synchronous emit() call.
 	 * @param filePath - The path of the file being written
 	 * @param text - The content of the file being written
 	 */
 	fileWriter = (filePath: string, text: string): void => {
 		if (this.cache?.isBuildInfoFile(filePath as AbsolutePath)) {
-			// Let .tsbuildinfo through to disk for incremental compilation
-			sys.writeFile(filePath, text);
+			// Buffer .tsbuildinfo for async write in finalize() instead of blocking emit with sync I/O
+			this.pendingBuildInfo = { path: filePath, text };
 		} else {
-			// Pre-process declarations immediately and store in memory
-			// This ensures the cache stores ready-to-use declarations with extracted references
-			this.declarationFiles.set(filePath as AbsolutePath, DeclarationProcessor.preProcess(createSourceFile(filePath, text, ScriptTarget.Latest, true)));
+			// Defer pre-processing — raw text is stored and processed in finalize()
+			this.pendingFiles.push({ path: filePath as AbsolutePath, text });
 		}
 
 		// Any file write indicates TypeScript detected changes
 		if (!this.hasEmittedFiles) { this.hasEmittedFiles = true }
+	};
+
+	/**
+	 * Pre-processes all declaration files captured during emit.
+	 * Runs createSourceFile + DeclarationProcessor.preProcess for each pending file,
+	 * then clears the pending queue.
+	 */
+	private processEmittedFiles(): void {
+		for (const { path, text } of this.pendingFiles) {
+			this.declarationFiles.set(path, DeclarationProcessor.preProcess(createSourceFile(path, text, ScriptTarget.Latest, true)));
+		}
+
+		this.pendingFiles.length = 0;
 	};
 
 	/**

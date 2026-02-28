@@ -80,6 +80,7 @@ describe('FileManager', () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('test.d.ts', 'content');
+			manager.finalize();
 			expect(manager.getDeclarationFiles().size).toBe(1);
 
 			// Second initialize should clear files
@@ -93,12 +94,12 @@ describe('FileManager', () => {
 			// First emit
 			await manager.initialize();
 			manager.fileWriter('file1.d.ts', 'content1');
-			let hasEmitted = await manager.finalize();
+			let hasEmitted = manager.finalize();
 			expect(hasEmitted).toBe(true);
 
 			// Second initialize should reset flag
 			await manager.initialize();
-			hasEmitted = await manager.finalize();
+			hasEmitted = manager.finalize();
 			expect(hasEmitted).toBe(true); // Non-incremental always returns true
 		});
 
@@ -111,8 +112,9 @@ describe('FileManager', () => {
 			const manager1 = new FileManager(cache1);
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			const hasEmitted = await manager1.finalize();
+			const hasEmitted = manager1.finalize();
 			expect(hasEmitted).toBe(true);
+			await manager1.flush();
 
 			// Second manager: should load from cache
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -156,7 +158,7 @@ describe('FileManager', () => {
 			manager.fileWriter('file1.d.ts', 'content1');
 			manager.fileWriter('file2.d.ts', 'content2');
 
-			const hasEmitted = await manager.finalize();
+			const hasEmitted = manager.finalize();
 			expect(hasEmitted).toBe(true);
 		});
 
@@ -165,7 +167,7 @@ describe('FileManager', () => {
 			await manager.initialize();
 
 			// Non-incremental (no cache) always returns true
-			const hasEmitted = await manager.finalize();
+			const hasEmitted = manager.finalize();
 			expect(hasEmitted).toBe(true);
 		});
 
@@ -178,7 +180,7 @@ describe('FileManager', () => {
 			await manager.initialize();
 
 			// Incremental build with no files written should return false
-			const hasEmitted = await manager.finalize();
+			const hasEmitted = manager.finalize();
 			expect(hasEmitted).toBe(false);
 		});
 
@@ -191,8 +193,9 @@ describe('FileManager', () => {
 			const manager1 = new FileManager(cache1);
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			let hasEmitted = await manager1.finalize();
+			let hasEmitted = manager1.finalize();
 			expect(hasEmitted).toBe(true);
+			await manager1.flush();
 
 			// Verify cache was saved by loading in new instance
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -213,16 +216,18 @@ describe('FileManager', () => {
 			const manager1 = new FileManager(cache1);
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			let hasEmitted = await manager1.finalize();
+			let hasEmitted = manager1.finalize();
 			expect(hasEmitted).toBe(true);
+			await manager1.flush();
 
 			// Second emit with updated content
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager2 = new FileManager(cache2);
 			await manager2.initialize();
 			manager2.fileWriter('test.d.ts', 'export const hello: number;');
-			hasEmitted = await manager2.finalize();
+			hasEmitted = manager2.finalize();
 			expect(hasEmitted).toBe(true);
+			await manager2.flush();
 
 			// Verify updated content
 			const cache3 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -241,7 +246,7 @@ describe('FileManager', () => {
 			manager.fileWriter('test.d.ts', 'content');
 
 			// finalize calls saveCache which should early return
-			const hasEmitted = await manager.finalize();
+			const hasEmitted = manager.finalize();
 			expect(hasEmitted).toBe(true);
 		});
 	});
@@ -257,6 +262,7 @@ describe('FileManager', () => {
 			await manager.initialize();
 			manager.fileWriter('file1.d.ts', 'content1');
 			manager.fileWriter('file2.d.ts', 'content2');
+			manager.finalize();
 
 			const files = manager.getDeclarationFiles();
 			expect(files.size).toBe(2);
@@ -273,6 +279,7 @@ describe('FileManager', () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('test.d.ts', 'export const hello: string;');
+			manager.finalize();
 
 			expect(manager.getDeclarationFiles().size).toBe(1);
 			const cached = manager.getDeclarationFiles().get('test.d.ts') as CachedDeclaration;
@@ -287,6 +294,7 @@ describe('FileManager', () => {
 			manager.fileWriter('test.js', 'console.log("hello")');
 			manager.fileWriter('test.d.ts', 'export const hello: string;');
 			manager.fileWriter('tsconfig.tsbuildinfo', '{}');
+			manager.finalize();
 
 			expect(manager.getDeclarationFiles().size).toBe(3);
 			expect(manager.getDeclarationFiles().has('test.js')).toBe(true);
