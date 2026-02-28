@@ -1,3 +1,33 @@
+## [1.2.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.4...v1.2.5) (2026-02-28)
+
+### Bug Fixes
+
+* **decorator-metadata:** make @swc/core a true optional dep (69d35717e6f941cf9591097629b51858d3d282f0)
+The static import of @swc/core was removed in an earlier commit that
+made it an optional peer dependency, but the plugin still used a
+static import at the top of the file, causing the now-working
+type-checker to surface a TS2307 resolution error.
+
+Converts the import to a dynamic import inside the onLoad callback so
+it is only resolved when the plugin is actually used. Adds a minimal
+ambient module declaration so TypeScript can resolve the shape of the
+dynamic import without requiring @swc/core to be installed.
+
+Changed files:
+- src/@types/swc.d.ts
+- src/plugins/decorator-metadata.ts
+
+* **type-check:** include semantic diagnostics in type-check (2a3400a73aef2a6b6ac6c3e29ad56369c666ea6a)
+Previously, only emit-phase diagnostics were checked, causing all
+semantic errors (e.g. TS2307, TS2322) to be silently ignored.
+
+Fixes this by explicitly calling getSemanticDiagnostics() and merging
+the result with emit diagnostics before checking for errors.
+
+Changed files:
+- src/type-script-project.ts
+- tests/type-script-project.test.ts
+
 ## [1.2.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.3...v1.2.4) (2026-02-28)
 
 ### Code Refactoring
