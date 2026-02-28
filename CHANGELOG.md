@@ -1,3 +1,31 @@
+## [1.2.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.3...v1.2.4) (2026-02-28)
+
+### Code Refactoring
+
+* **deps:** remove @swc/core optional dependency (6eeff9af10e8e0ca469699cccd580127c5160df5)
+- Removes @swc/core and @swc/types as optional dependencies from package.json
+- Updates pnpm-lock.yaml to drop all @swc/* package entries and snapshots
+- Bumps pnpm packageManager version to 10.30.3
+- Rewrites README introduction to clarify the tool's purpose and tone
+- Adds TC39 standard decorators as a first-class supported feature with no extra dependencies
+- Splits legacy decorator metadata into its own feature bullet, noting @swc/core must be installed manually
+- Replaces the three-phase build description with a clearer two-phase explanation
+- Adds a Quick Start section showing the minimal tsconfig.json setup and how to run a build
+- Simplifies installation instructions by removing the --no-optional flag example
+- Adds an explicit note that @swc/core will never be installed automatically
+- Expands the Configuration section with an explanation of how tsconfig.json compilerOptions are honoured automatically
+- Adds a comment to the entryPoints example clarifying that entry points can be inferred from package.json
+- Adds a CLI usage note clarifying global vs local install invocation
+- Adds a dedicated Incremental Builds section documenting both caches, the .tsbuild/ directory, and the --force and --clearCache flags
+- Rewrites the Decorator Metadata section to lead with TC39 standard decorators and move legacy decorator metadata to a secondary subsection
+- Clarifies that the build fails with a helpful message if @swc/core is missing when emitDecoratorMetadata is set
+- Corrects the parallel processing performance note to accurately describe declaration bundling and transpilation running in parallel after type checking
+- Fixes the circular dependency warning description to say tsbuild continues rather than just emitting a warning
+- Updates the Limitations section to remove the Experimental label and improve the plugins limitation description
+- Updates the comparison table to split decorator support into TC39 and legacy rows
+- Changes the license from ISC to MIT
+- Removes the closing disclaimer recommending tsup for production use
+
 ## [1.2.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.2...v1.2.3) (2026-02-25)
 
 ### Bug Fixes
