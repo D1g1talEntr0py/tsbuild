@@ -1,12 +1,11 @@
 import { Json } from 'src/json';
 import { Paths } from 'src/paths';
 import { dirname } from 'node:path';
-import { transformFile, type Options as SwcOptions } from '@swc/core';
 import { Encoding, typeScriptExtensionExpression as filter } from 'src/constants';
 import type { OnLoadResult, Plugin } from 'esbuild';
 import type { RelativePath, JsonString, SourceMap } from 'src/@types';
 
-const swcOptions: SwcOptions = {
+const swcOptions = {
 	jsc: {
 		parser: { syntax: 'typescript', decorators: true },
 		transform: { legacyDecorator: true, decoratorMetadata: true },
@@ -31,6 +30,7 @@ export const swcDecoratorMetadataPlugin: Plugin = {
 		// Force esbuild to keep class names as well
 		build.initialOptions.keepNames = true;
 		build.onLoad({ filter }, async ({ path }): Promise<OnLoadResult> => {
+			const { transformFile } = await import('@swc/core');
 			const result = await transformFile(path, swcOptions);
 
 			if (result.map) {
