@@ -1,3 +1,54 @@
+## [1.3.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.5...v1.3.0) (2026-02-28)
+
+### Features
+
+* **logger:** add sub-step tree logging to performance output (2a775ca35d4b3524d2862f6e3b5e15040c2efb55)
+Introduces timed sub-step display beneath each build step in the
+performance log, making it easy to see where time is spent within a
+single decorated method.
+
+- Adds PerformanceSubStep type and exports it from the public types index
+- Extends PerformanceEntryDetail to carry an optional steps array
+- Adds Logger.subSteps() with tree-style ├─/└─ formatting and aligned columns
+- Adds module-level pendingSteps buffer to the performance decorator
+- Exports addPerformanceStep() so callers can register sub-steps during a decorated call
+- Flushes pending steps into the measurement detail inside the measure decorator
+- Calls Logger.subSteps() from the observer when steps are present
+- Adds unit tests for Logger.subSteps() alignment and single-item edge case
+- Adds unit test verifying sub-step attachment and observer rendering
+- Updates Logger mock in all affected test files to include subSteps
+
+* **type-script-project:** add per-phase timing to type-check step (acaf8a0c432bb9d340f2441a59577153c7d67ade)
+Instruments the three distinct phases of a type-check cycle with
+sub-step performance marks so the log shows exactly where build
+time is being spent.
+
+- Imports addPerformanceStep and the perf_hooks performance API
+- Wraps emit, diagnostics collection, and finalize with performance marks
+- Adds a private static elapsed() helper to compute and format duration from a named mark
+- Updates finalize() call-site to drop the now-unnecessary await
+
+
+### Performance Improvements
+
+* **file-manager:** defer emit work and make cache saves async (afe576b5969c7088ccfd77a22e6cd0b6555e1974)
+Reduces time spent inside TypeScript's synchronous emit() call by
+deferring declaration pre-processing and .tsbuildinfo I/O to a
+separate step after emit() returns. Cache persistence becomes a
+fire-and-forget promise, unblocking the current build's parallel
+phases.
+
+- Buffers raw declaration text and .tsbuildinfo content in fileWriter instead of processing synchronously
+- Introduces processEmittedFiles() to run AST creation and pre-processing after emit
+- Changes finalize() from async to sync; starts a background save promise
+- Adds flush() to await any in-flight background I/O when needed
+- Updates initialize() and close() to handle pending save state correctly
+- Removes the unused synchronous sys import from typescript
+- Updates JSDoc to reflect the deferred processing model
+- Removes await from all finalize() call-sites in tests
+- Adds explicit finalize() calls in tests that inspect declaration files directly
+- Adds await flush() in tests that read cache state from a second instance
+
 ## [1.2.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.4...v1.2.5) (2026-02-28)
 
 ### Bug Fixes
