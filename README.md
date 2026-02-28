@@ -8,9 +8,11 @@
 [![Node.js](https://img.shields.io/node/v/%40d1g1tal/tsbuild)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-A self-hosting TypeScript build tool that combines the best of three worlds: **TypeScript's type system**, **esbuild's speed**, and **SWC's decorator metadata support**. tsbuild is designed for modern ESM-only projects targeting Node.js 20.16.0+.
+A TypeScript build tool that combines three tools into one workflow: **TypeScript's type system** for correctness, **esbuild** for speed, and **SWC** for legacy decorator metadata (optional, not installed by default). Built for modern ESM-only projects on Node.js 20.16.0+.
 
-> **⚠️ Note:** This is an experimental project for personal use. For production use, consider [tsup](https://tsup.egoist.dev/) instead, which is mature, battle-tested, and widely adopted. Or check out the new [tsdown](https://tsdown.dev/) by [void(0)](https://voidzero.dev/).
+TC39 standard decorators are supported natively — no additional dependencies needed. SWC is only required if you are still using `experimentalDecorators` with `emitDecoratorMetadata`.
+
+> **Note:** This is a personal project I built for my own use and decided to share. It works well for me, but it's not battle-hardened for every setup. If you need something production-proven, [tsup](https://tsup.egoist.dev/) is excellent, or take a look at the newer [tsdown](https://tsdown.dev/) by [void(0)](https://voidzero.dev/).
 
 ## Features
 
@@ -19,7 +21,8 @@ A self-hosting TypeScript build tool that combines the best of three worlds: **T
 - 📦 **Declaration Bundling** - Automatically bundles `.d.ts` files into single entry points
 - ⚡ **Incremental Builds** - Intelligent caching with `.tsbuildinfo` for fast rebuilds
 - 👁️ **Watch Mode** - File watching with automatic rebuilds on changes
-- 🎨 **Decorator Metadata** - Optional SWC integration for `emitDecoratorMetadata` support for legacy decorators (Will probably be removed at some point in favor of native ESM decorators only)
+- 🎨 **TC39 Decorators** - Native support for standard decorators, no extra dependencies required
+- 🔧 **Legacy Decorator Metadata** - Optional SWC integration for `emitDecoratorMetadata` when using `experimentalDecorators` (install `@swc/core` separately)
 - 🔌 **Plugin System** - Extensible architecture with custom esbuild plugins
 - 🎯 **ESM-Only** - Pure ESM project with no CommonJS support by design
 - 🧹 **Clean Builds** - Optional output directory cleaning before builds
@@ -28,13 +31,48 @@ A self-hosting TypeScript build tool that combines the best of three worlds: **T
 
 ## Why tsbuild?
 
-tsbuild orchestrates a sophisticated three-phase build process:
+Most TypeScript build setups involve a compromise: use `tsc` alone and lose bundling speed, or use esbuild/swc alone and lose accurate type checking and declaration generation. tsbuild aims to give you both by running each tool for what it's actually good at.
 
-1. **Type Checking Phase** - TypeScript compiler validates types and emits `.d.ts` files into memory (not disk)
-2. **Transpile Phase** - esbuild bundles JavaScript with custom plugins for module resolution and output formatting
-3. **DTS Bundle Phase** - Custom minimal bundler combines declaration files through dependency graph traversal and AST transformation
+The build runs in two phases:
 
-This separation of concerns ensures TypeScript handles correctness, esbuild handles speed, and the custom bundler handles declaration consolidation efficiently without creating duplicate TypeScript Programs.
+1. **Type Checking** - TypeScript validates types and, if `declaration` is enabled, captures `.d.ts` files into memory (no disk I/O)
+2. **Output** - Once type checking completes, two things happen in parallel:
+   - esbuild transpiles and bundles the JavaScript
+   - If declarations were captured in phase 1, a custom bundler consolidates the `.d.ts` files into final entry points
+
+If `declaration` is not enabled, phase 2 is just the esbuild step.
+
+## Quick Start
+
+The only thing tsbuild requires in `tsconfig.json` is an `outDir`. Everything else carries over from your existing config:
+
+```jsonc
+{
+  "compilerOptions": {
+    "outDir": "./dist"
+    // ... your existing TypeScript config
+  },
+  "tsbuild": {} // entry points are inferred from package.json automatically
+}
+```
+
+Then, if tsbuild is installed globally:
+
+```bash
+tsbuild
+```
+
+Or if installed locally as a dev dependency, add a script to `package.json` and run it:
+
+```json
+{ "scripts": { "build": "tsbuild" } }
+```
+
+```bash
+pnpm build
+```
+
+That's it. tsbuild reads your `compilerOptions`, infers entry points from your `package.json`, and builds. See [Configuration Options](#configuration-options) for everything you can customise.
 
 ## Installation
 
@@ -57,10 +95,7 @@ With a global install, your projects can use `tsbuild` in `package.json` scripts
 Install as a dev dependency for per-project version pinning (recommended for CI/CD environments):
 
 ```bash
-# pnpm - no SWC dependency (Optional. For legacy decorator metadata. Native ESM decorators are supported without SWC)
-pnpm add -D @d1g1tal/tsbuild --no-optional
-
-# pnpm - with SWC dependency (For legacy decorator metadata)
+# pnpm
 pnpm add -D @d1g1tal/tsbuild
 
 # npm
@@ -69,6 +104,8 @@ npm install -D @d1g1tal/tsbuild
 # yarn
 yarn add -D @d1g1tal/tsbuild
 ```
+
+`@swc/core` is **not a dependency** and will never be installed automatically. It is only needed if you use `experimentalDecorators` with `emitDecoratorMetadata` — see [Decorator Metadata](#decorator-metadata) for details.
 
 > **Note:** When installed only as a local dev dependency, the `tsbuild` command is not available directly in your terminal. Use it through `package.json` scripts (e.g., `pnpm build`) or invoke it explicitly with `pnpm exec tsbuild` / `npx tsbuild`.
 
@@ -81,7 +118,22 @@ yarn add -D @d1g1tal/tsbuild
 
 ### Configuration
 
-Add a `tsbuild` property to your `tsconfig.json`:
+#### Your tsconfig.json Does the Heavy Lifting
+
+Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, `baseUrl`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
+
+The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behaviour, entry points, watch mode, output formatting, and similar build-specific settings.
+
+This means your type-checker and your build always use the exact same TypeScript configuration — no drift, no duplication.
+
+The only `compilerOptions` setting tsbuild requires:
+- **`outDir`** — determines where built files are written
+
+Declaration generation is **not required**. If `declaration: true` is already set in your `tsconfig.json`, tsbuild will automatically generate and bundle `.d.ts` files. If it's not set, tsbuild skips that step — no changes needed either way.
+
+Everything else carries over automatically.
+
+Add a `tsbuild` property to your `tsconfig.json` with only the options you need to customise:
 
 ```jsonc
 {
@@ -92,13 +144,13 @@ Add a `tsbuild` property to your `tsconfig.json`:
     "target": "ESNext",
     "module": "ESNext",
     "lib": [ "ESNext", "DOM" ],
-    "outDir": "./dist", // default value
+    "outDir": "./dist",
     // ... other TypeScript options
   },
   "tsbuild": {
     "clean": true, // Remove all files from output directory before building (default: true)
     "platform": "node", // Will default to "browser" if "DOM" is found in "lib", otherwise "node"
-    "entryPoints": {
+    "entryPoints": { // Optional - tsbuild can infer entry points from package.json if not provided
       "cli": "./src/cli.ts",
       "index": "./src/index.ts"
     },
@@ -110,6 +162,8 @@ Add a `tsbuild` property to your `tsconfig.json`:
 ```
 
 ### CLI Commands
+
+The examples below use the bare `tsbuild` command, which works when tsbuild is installed globally. If it's installed locally as a dev dependency, run these through `package.json` scripts (`pnpm build`, etc.) or prefix with `pnpm exec`/`npx` (e.g., `pnpm exec tsbuild --watch`).
 
 ```bash
 # Build once
@@ -154,6 +208,39 @@ tsbuild --version  # or -v
   }
 }
 ```
+
+## Incremental Builds
+
+tsbuild uses two separate caches to speed up repeated builds, and two flags to control them.
+
+### How it works
+
+Enable incremental compilation in `tsconfig.json`:
+
+```jsonc
+{
+  "compilerOptions": {
+    "incremental": true
+  }
+}
+```
+
+With this set, each build maintains two caches inside a `.tsbuild/` directory:
+
+| Cache | File | What it stores |
+|-------|------|----------------|
+| TypeScript | `.tsbuild/.tsbuildinfo` | Which source files changed and their type information |
+| DTS cache | `.tsbuild/dts_cache.v8.br` | Pre-processed declaration files (Brotli-compressed) |
+
+On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
+
+### Flags
+
+**`--force` (`-f`)** — Runs the output phase (esbuild + DTS bundling) even when TypeScript detects no changes. Useful when something outside the source files changed (e.g. an environment variable or esbuild config) and you need to regenerate output without touching the caches.
+
+**`--clearCache` (`-c`)** — Deletes the entire `.tsbuild/` directory before building, wiping both `.tsbuildinfo` and the DTS cache. The next build runs as if it's the first time. Use this when you suspect the cache is stale or after significant config changes.
+
+**Normal build (no flags)** — TypeScript compares source file hashes against `.tsbuildinfo`, re-emits only what changed, and the DTS cache is updated accordingly.
 
 ## Configuration Options
 
@@ -255,13 +342,34 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
 }
 ```
 
-**Note:** The `target` and `outDir` options come from `tsconfig.json` `compilerOptions` and cannot be overridden in the `tsbuild` section. The `force` and `minify` options are typically better controlled via CLI flags (`--force`, `--minify`) rather than in the config.
+**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. The `force` and `minify` options are generally more useful as CLI flags (`--force`, `--minify`) than as persistent config values.
 
 ## Advanced Features
 
 ### Decorator Metadata
 
-tsbuild supports `emitDecoratorMetadata` through SWC integration:
+#### TC39 Standard Decorators (recommended)
+
+Standard decorators work out of the box — just use them in your code. No configuration, no extra packages.
+
+```jsonc
+{
+  "compilerOptions": {
+    "target": "ESNext"
+    // No experimentalDecorators needed
+  }
+}
+```
+
+#### Legacy Decorators with Metadata (`experimentalDecorators`)
+
+If you are using the older decorator proposal with `emitDecoratorMetadata`, tsbuild delegates the transform to SWC so that metadata is emitted correctly through the esbuild pipeline. This requires `@swc/core` to be installed manually — it is **not** included with tsbuild:
+
+```bash
+pnpm add -D @swc/core
+```
+
+Then enable the flags in `tsconfig.json`:
 
 ```jsonc
 {
@@ -272,11 +380,7 @@ tsbuild supports `emitDecoratorMetadata` through SWC integration:
 }
 ```
 
-You must have `@swc/core` installed (as an optional dependency) for this feature to work:
-
-```bash
-pnpm add -D @swc/core
-```
+tsbuild detects these flags automatically and uses SWC. If `@swc/core` is not installed when these flags are set, the build will fail with a clear message telling you to install it.
 
 ### Custom Plugins
 
@@ -331,7 +435,7 @@ The declaration bundling system (`src/dts/declaration-bundler.ts`) is a custom i
 
 This custom bundler works entirely with in-memory declaration files, avoiding the overhead of duplicate TypeScript Program creation with some other bundlers.
 
-When a circular dependency is detected between declaration files, tsbuild emits a warning with the full cycle path (e.g., `a.d.ts -> b.d.ts -> a.d.ts`) rather than failing silently or crashing.
+When a circular dependency is detected between declaration files, tsbuild emits a warning with the full cycle path (e.g., `a.d.ts -> b.d.ts -> a.d.ts`) and continues rather than failing silently or crashing.
 
 ## Performance
 
@@ -339,7 +443,7 @@ tsbuild is designed for speed:
 
 - **Incremental builds** - Only recompiles changed files
 - **In-memory declarations** - No intermediate disk I/O for `.d.ts` files
-- **Parallel processing** - Type checking and transpilation run in parallel when possible
+- **Parallel processing** - Declaration bundling and transpilation run in parallel after type checking completes
 - **Smart caching** - Leverages `.tsbuildinfo` for TypeScript incremental compilation
 
 Typical build times for the tsbuild project itself:
@@ -367,9 +471,9 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 ## Limitations
 
 - **ESM Only** - No CommonJS support by design
-- **Node.js 20.16.0+** - Requires modern Node.js features
-- **Experimental** - Personal project, not recommended for production use
-- **Limited Configuration in tsconfig.json** - Some options (like `plugins`) are only available via programmatic API
+- **Node.js 20.16.0+** - Requires a modern Node.js version
+- **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
+- **Plugins are programmatic only** - Custom esbuild plugins can't be declared in `tsconfig.json`; they require using the `TypeScriptProject` API directly
 - **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed
 
 ## Comparison with Other Tools
@@ -377,9 +481,10 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 | Feature | tsbuild | tsup | tsc |
 |---------|---------|------|-----|
 | Type Checking | ✅ Full | ✅ Full | ✅ Full |
-| Fast Bundling | ✅ esbuild | ✅ esbuild | ❌ N/A |
+| Bundling | ✅ esbuild | ✅ esbuild | ❌ N/A |
 | Declaration Bundling | ✅ Custom Bundler | ✅ rollup-plugin-dts | ❌ N/A |
-| Decorator Metadata | ✅ SWC (optional) | ✅ SWC | ✅ Native |
+| TC39 Decorators | ✅ Native | ✅ Native | ✅ Native |
+| Legacy Decorator Metadata | ✅ SWC (manual install) | ✅ SWC | ✅ Native |
 | CommonJS Support | ❌ None | ✅ Yes | ✅ Yes |
 | Watch Mode | ✅ Yes | ✅ Yes | ✅ Yes |
 | Incremental Builds | ✅ Yes | ⚠️ Limited | ✅ Yes |
@@ -412,16 +517,12 @@ pnpm lint
 
 ## Contributing
 
-This is a personal experimental project. While contributions are welcome, please note that the project is not actively maintained for production use.
+Contributions and feedback are welcome. This is a personal project, so response times may vary, but issues and pull requests will be reviewed.
 
 ## License
 
-ISC
+MIT
 
 ## Author
 
 D1g1talEntr0py
-
----
-
-**Remember:** For production projects, use [tsup](https://tsup.egoist.dev/) instead. tsbuild is an educational and experimental project exploring how modern build tools can be composed together.
