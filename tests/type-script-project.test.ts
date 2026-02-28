@@ -22,7 +22,8 @@ vi.mock('node:fs/promises', async () => {
 
 // Hoist mock variables
 const mocks = vi.hoisted(() => ({
-	emitMock: vi.fn((..._args: unknown[]) => ({ diagnostics: [] }))
+	emitMock: vi.fn((..._args: unknown[]) => ({ diagnostics: [] })),
+	getSemanticDiagnosticsMock: vi.fn((): import('typescript').Diagnostic[] => [])
 }));
 
 // Mock TypeScript globally
@@ -40,6 +41,7 @@ vi.mock('typescript', async (importOriginal) => {
 		createIncrementalProgram: vi.fn(() => ({
 			getCompilerOptions: () => ({}),
 			getRootFileNames: () => [],
+			getSemanticDiagnostics: mocks.getSemanticDiagnosticsMock,
 			emit: mocks.emitMock,
 			getProgram: () => ({
 				getRootFileNames: () => [],
@@ -112,6 +114,7 @@ vi.mock('esbuild', () => ({
 describe('TypeScriptProject', () => {
 	beforeEach(async () => {
 		mocks.emitMock.mockClear();
+		mocks.getSemanticDiagnosticsMock.mockClear();
 		esbuildMocks.buildMock.mockClear();
 		vi.mocked(bundleDeclarations).mockClear();
 		mocks.emitMock.mockImplementation((_target: unknown, writeFile: unknown) => {

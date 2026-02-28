@@ -128,10 +128,14 @@ export class TypeScriptProject implements Closable {
 		await this.fileManager.initialize();
 
 		// For incremental builds, we need to call emit() to save the .tsbuildinfo file, even in type-check-only mode.
-		const { diagnostics } = this.builderProgram.emit(undefined, this.fileManager.fileWriter, undefined, true);
+		const { diagnostics: emitDiagnostics } = this.builderProgram.emit(undefined, this.fileManager.fileWriter, undefined, true);
 
-		if (diagnostics.length > 0) {
-			TypeScriptProject.handleTypeErrors('Type-checking failed', diagnostics, this.directory);
+		// Collect semantic diagnostics explicitly — emit() only returns emit-phase diagnostics
+		// and silently ignores semantic errors such as TS2307 (Cannot find module).
+		const allDiagnostics = [...this.builderProgram.getSemanticDiagnostics(), ...emitDiagnostics];
+
+		if (allDiagnostics.length > 0) {
+			TypeScriptProject.handleTypeErrors('Type-checking failed', allDiagnostics, this.directory);
 		}
 
 		return this.fileManager.finalize();
