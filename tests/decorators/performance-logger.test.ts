@@ -12,6 +12,7 @@ vi.mock('src/logger', () => ({
 		header: vi.fn(),
 		separator: vi.fn(),
 		step: vi.fn(),
+		subSteps: vi.fn(),
 		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
 	}
 }));
@@ -403,6 +404,70 @@ describe('decorators/performance-logger', () => {
 			}
 
 			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('1s500ms'));
+		});
+
+		it('should attach pending sub-steps to the measurement detail', async () => {
+			vi.resetModules();
+
+			let observerCallback: any;
+			vi.doMock('perf_hooks', async () => {
+				const actual = await vi.importActual<any>('perf_hooks');
+				return {
+					...actual,
+					PerformanceObserver: class {
+						constructor(cb: any) {
+							observerCallback = cb;
+						}
+						observe = vi.fn();
+						disconnect = vi.fn();
+					}
+				};
+			});
+
+			const { logPerformance, addPerformanceStep } = await import('../../src/decorators/performance-logger');
+			const { Logger } = await import('../../src/logger');
+			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
+			const subStepsSpy = vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
+
+			class TestClass {
+				@logPerformance('Type-checking')
+				typeCheck(): void {
+					addPerformanceStep('Emit', '355ms');
+					addPerformanceStep('Diagnostics', '0ms');
+					addPerformanceStep('Finalize', '5ms');
+				}
+			}
+
+			const instance = new TestClass();
+			instance.typeCheck();
+
+			const mockList = {
+				getEntriesByType: () => [{
+					name: 'TestClass.typeCheck',
+					duration: 366,
+					detail: {
+						message: 'Type-checking',
+						steps: [
+							{ name: 'Emit', duration: '355ms' },
+							{ name: 'Diagnostics', duration: '0ms' },
+							{ name: 'Finalize', duration: '5ms' },
+						]
+					}
+				}]
+			};
+
+			if (observerCallback) {
+				observerCallback(mockList);
+			} else {
+				throw new Error('PerformanceObserver callback was not captured');
+			}
+
+			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('Type-checking'));
+			expect(subStepsSpy).toHaveBeenCalledWith([
+				{ name: 'Emit', duration: '355ms' },
+				{ name: 'Diagnostics', duration: '0ms' },
+				{ name: 'Finalize', duration: '5ms' },
+			]);
 		});
 	});
 });

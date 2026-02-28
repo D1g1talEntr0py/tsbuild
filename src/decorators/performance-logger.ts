@@ -2,9 +2,10 @@ import { TextFormat } from 'src/text-formatter';
 import { Logger } from 'src/logger';
 import { closeOnExit } from './close-on-exit';
 import { PerformanceObserver, performance } from 'perf_hooks';
-import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction } from 'src/@types';
+import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction, PerformanceSubStep } from 'src/@types';
 
 const type = 'measure';
+const pendingSteps: PerformanceSubStep[] = [];
 
 /** A class that logs the performance of methods using the Performance API */
 @closeOnExit
@@ -14,7 +15,7 @@ class PerformanceLogger implements Closable {
 	constructor() {
 		this.performanceObserver = new PerformanceObserver((list): void => {
 			// Reverse the list to display the most recent entries first
-			for (const { name, duration, detail: { message, result = [] } } of list.getEntriesByType(type).reverse() as DetailedPerformanceEntry<WrittenFile[]>[]) {
+			for (const { name, duration, detail: { message, result = [], steps } } of list.getEntriesByType(type).reverse() as DetailedPerformanceEntry<WrittenFile[]>[]) {
 				// Special formatting for top-level "Build" step ⚡
 				if (message === 'Build') {
 					Logger.separator();
@@ -26,6 +27,7 @@ class PerformanceLogger implements Closable {
 					}
 				} else {
 					Logger.step(`${message} ${TextFormat.dim(`(${PerformanceLogger.formatDuration(duration)})`)}`);
+					if (steps?.length) { Logger.subSteps(steps) }
 
 					// If there are result files, log them with tree formatting
 					if (result.length > 0) { Logger.success('', ...result) }
@@ -47,6 +49,7 @@ class PerformanceLogger implements Closable {
 	measure(message: string, logResult: boolean = false) {
 		const _measure = <R>(propertyKey: string, result: R, options: PerformanceMeasureOptions<R>): R => {
 			if (logResult) { options.detail.result = result }
+			if (pendingSteps.length > 0) { options.detail.steps = pendingSteps.splice(0) }
 
 			({ startTime: options.end } = performance.mark(propertyKey));
 			performance.measure(propertyKey, options);
@@ -98,4 +101,13 @@ class PerformanceLogger implements Closable {
 
 const measure: typeof PerformanceLogger.prototype.measure = new PerformanceLogger().measure;
 
-export { measure as logPerformance };
+/**
+ * Registers a sub-step timing entry for the currently running performance measurement.
+ * @param name - The name of the sub-step.
+ * @param duration - The formatted duration string (e.g., '42ms').
+ */
+function addPerformanceStep(name: string, duration: string): void {
+	pendingSteps.push({ name, duration });
+}
+
+export { measure as logPerformance, addPerformanceStep };

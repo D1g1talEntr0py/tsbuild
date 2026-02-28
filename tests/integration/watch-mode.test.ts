@@ -13,6 +13,7 @@ vi.mock('../../src/logger', () => ({
 		header: vi.fn(),
 		separator: vi.fn(),
 		step: vi.fn(),
+		subSteps: vi.fn(),
 		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
 	}
 }));

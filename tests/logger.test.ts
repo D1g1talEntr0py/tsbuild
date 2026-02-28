@@ -288,4 +288,23 @@ describe('Logger', () => {
 			expect(logSpy).toHaveBeenCalledWith(TextFormat.green('  └─ Indented step'));
 		});
 	});
+
+	describe('subSteps', () => {
+		it('should log sub-steps with tree formatting and aligned columns', () => {
+			Logger.subSteps([
+				{ name: 'Emit', duration: '355ms' },
+				{ name: 'Diagnostics', duration: '0ms' },
+				{ name: 'Finalize', duration: '5ms' },
+			]);
+			expect(logSpy).toHaveBeenCalledTimes(3);
+			expect(logSpy).toHaveBeenNthCalledWith(1, `${TextFormat.dim('  ├─')} ${TextFormat.bold('Emit       ')} ${TextFormat.cyan('355ms')}`);
+			expect(logSpy).toHaveBeenNthCalledWith(2, `${TextFormat.dim('  ├─')} ${TextFormat.bold('Diagnostics')} ${TextFormat.cyan('  0ms')}`);
+			expect(logSpy).toHaveBeenNthCalledWith(3, `${TextFormat.dim('  └─')} ${TextFormat.bold('Finalize   ')} ${TextFormat.cyan('  5ms')}`);
+		});
+
+		it('should handle a single sub-step with └─ prefix', () => {
+			Logger.subSteps([{ name: 'Only', duration: '10ms' }]);
+			expect(logSpy).toHaveBeenCalledWith(`${TextFormat.dim('  └─')} ${TextFormat.bold('Only')} ${TextFormat.cyan('10ms')}`);
+		});
+	});
 });

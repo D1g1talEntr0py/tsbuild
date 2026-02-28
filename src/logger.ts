@@ -1,6 +1,6 @@
 import { TextFormat } from './text-formatter';
 import { dataUnits, newLine } from 'src/constants';
-import type { LogEntryType, WrittenFile } from './@types';
+import type { LogEntryType, WrittenFile, PerformanceSubStep } from './@types';
 
 /**
  * Checks if the given data is an array of WrittenFile objects.
@@ -91,6 +91,21 @@ export class Logger {
 	static step(message: string, indent: boolean = false): void {
 		const prefix = indent ? '  └─' : '✓';
 		console.log(TextFormat.green(`${prefix} ${message}`));
+	}
+
+	/**
+	 * Logs sub-step timing entries in a tree format below a parent step.
+	 * @param steps The sub-steps to log.
+	 */
+	static subSteps(steps: PerformanceSubStep[]): void {
+		const maxNameLength = steps.reduce((max, { name }) => Math.max(max, name.length), 0);
+		const maxDurationLength = steps.reduce((max, { duration }) => Math.max(max, duration.length), 0);
+
+		for (let i = 0, length = steps.length; i < length; i++) {
+			const { name, duration } = steps[i];
+			const prefix = i === length - 1 ? '  └─' : '  ├─';
+			console.log(`${TextFormat.dim(prefix)} ${TextFormat.bold(name.padEnd(maxNameLength))} ${TextFormat.cyan(duration.padStart(maxDurationLength))}`);
+		}
 	}
 
 	/**

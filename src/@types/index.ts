@@ -38,7 +38,8 @@ type Constructor<P extends unknown[] = unknown[], R = unknown> = new (...args: P
 interface Closable { close: Callable };
 type ClosableConstructor = Constructor<any[], Closable>;
 
-type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T };
+type PerformanceSubStep = { name: string; duration: string };
+type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[] };
 type DetailedPerformanceMeasureOptions<R> = PrettyModify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
 type DetailedPerformanceEntry<D> = Prettify<PerformanceEntry & { detail: PerformanceEntryDetail<D> }>;
 
@@ -265,6 +266,7 @@ export type {
 	Closable,
 	ClosableConstructor,
 	CompilerOptionOverrides,
+	PerformanceSubStep,
 	SourceMap,
 	PendingFileChange,
 	JsxRenderingMode,
