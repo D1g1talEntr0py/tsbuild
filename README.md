@@ -478,17 +478,19 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 
 ## Comparison with Other Tools
 
-| Feature | tsbuild | tsup | tsc |
-|---------|---------|------|-----|
-| Type Checking | ✅ Full | ✅ Full | ✅ Full |
-| Bundling | ✅ esbuild | ✅ esbuild | ❌ N/A |
-| Declaration Bundling | ✅ Custom Bundler | ✅ rollup-plugin-dts | ❌ N/A |
-| TC39 Decorators | ✅ Native | ✅ Native | ✅ Native |
-| Legacy Decorator Metadata | ✅ SWC (manual install) | ✅ SWC | ✅ Native |
-| CommonJS Support | ❌ None | ✅ Yes | ✅ Yes |
-| Watch Mode | ✅ Yes | ✅ Yes | ✅ Yes |
-| Incremental Builds | ✅ Yes | ⚠️ Limited | ✅ Yes |
-| Production Ready | ⚠️ Experimental | ✅ Yes | ✅ Yes |
+| Feature | tsbuild | tsup | tsdown | tsc |
+|---------|---------|------|--------|-----|
+| Type Checking | ✅ Full | ✅ Full | ⚠️ Via DTS only | ✅ Full |
+| Bundling | ✅ esbuild | ✅ esbuild | ✅ Rolldown | ❌ N/A |
+| Declaration Bundling | ✅ Custom Bundler | ✅ rollup-plugin-dts¹ | ✅ rolldown-plugin-dts | ❌ N/A |
+| TC39 Decorators | ✅ Native | ✅ Native | ✅ Native | ✅ Native |
+| Legacy Decorator Metadata | ✅ SWC (manual install) | ✅ SWC | ✅ SWC | ✅ Native |
+| CommonJS Support | ❌ None | ✅ Yes | ✅ Yes | ✅ Yes |
+| Watch Mode | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| Incremental Builds | ✅ Yes | ⚠️ Limited | ⚠️ Limited | ✅ Yes |
+| Production Ready | ⚠️ Experimental | ✅ Yes | ✅ Yes | ✅ Yes |
+
+> ¹ tsup uses **esbuild** for JS bundling and **rollup-plugin-dts** (a Rollup plugin) for declaration bundling. `--experimental-dts` uses `@microsoft/api-extractor` instead. An optional `--treeshake` flag also delegates tree-shaking to Rollup.
 
 ## Development
 
