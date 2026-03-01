@@ -1,11 +1,11 @@
 # tsbuild
 
-[![npm version](https://img.shields.io/npm/v/%40d1g1tal/tsbuild?color=blue)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
-[![npm downloads](https://img.shields.io/npm/dm/%40d1g1tal/tsbuild)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
+[![npm version](https://img.shields.io/npm/v/@d1g1tal/tsbuild?color=blue)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
+[![npm downloads](https://img.shields.io/npm/dm/@d1g1tal/tsbuild)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
 [![CI](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/ci.yml/badge.svg)](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/D1g1talEntr0py/tsbuild/graph/badge.svg)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
 [![License: MIT](https://img.shields.io/github/license/D1g1talEntr0py/tsbuild)](https://github.com/D1g1talEntr0py/tsbuild/blob/main/LICENSE)
-[![Node.js](https://img.shields.io/node/v/%40d1g1tal/tsbuild)](https://nodejs.org)
+[![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 A TypeScript build tool that combines three tools into one workflow: **TypeScript's type system** for correctness, **esbuild** for speed, and **SWC** for legacy decorator metadata (optional, not installed by default). Built for modern ESM-only projects on Node.js 20.16.0+.
