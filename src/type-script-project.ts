@@ -379,7 +379,11 @@ export class TypeScriptProject implements Closable {
 				try {
 					const pkgJson = JSON.parse(packageJsonContent) as PackageJson;
 					const outDir = typeScriptOptions.compilerOptions?.outDir ?? configResult.config.compilerOptions?.outDir ?? defaultOutDirectory;
+					const hasExportFields = pkgJson.exports !== undefined || pkgJson.bin !== undefined || pkgJson.main !== undefined || pkgJson.module !== undefined;
 					inferredEntryPoints = inferEntryPoints(pkgJson, outDir);
+					if (hasExportFields && inferredEntryPoints === undefined) {
+						Logger.warn(`Could not infer entry points from package.json exports (output paths do not match outDir "${outDir}"). Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+					}
 				} catch { /* ignore malformed package.json */ }
 			}
 		}
@@ -453,7 +457,7 @@ export class TypeScriptProject implements Closable {
 			} else if (await Paths.isFile(resolvedPath)) {
 				expandedEntryPoints[name] = resolvedPath;
 			} else {
-				throw new ConfigurationError(`Entry point does not exist: ${entryPoint}`);
+				throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
 			}
 		}
 
