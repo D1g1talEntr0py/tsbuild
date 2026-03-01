@@ -1,3 +1,17 @@
+## [1.3.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.3.0...v1.3.1) (2026-03-01)
+
+### Bug Fixes
+
+* **entry-points:** Resolves conditional exports (65a5d4835ba51e906422982ad1e4d1ba83eeae94)
+
+### Documentation
+
+* updated readme to include tsdown in the tool comparison section (ad3f38a38d05314aabbcc10bba1e55856b50086d)
+
+### Miscellaneous Chores
+
+* **repo:** Updates ignore and README badges (9bdd6ce61a2f97b92ede9f118df7b20aaabb0074)
+
 ## [1.3.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.2.5...v1.3.0) (2026-02-28)
 
 ### Features
