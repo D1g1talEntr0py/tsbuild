@@ -1,3 +1,13 @@
+## [1.3.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.3.1...v1.3.2) (2026-03-01)
+
+### Bug Fixes
+
+* updated the entry point inferrence handling message to be more helpful (eeddaaab6faf553098cbf0e85ecd9f0c05d22718)
+
+### Tests
+
+* remove test coverage (6f2ba17ce701d2b37232ab0f8fb64f4891557bee)
+
 ## [1.3.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.3.0...v1.3.1) (2026-03-01)
 
 ### Bug Fixes
