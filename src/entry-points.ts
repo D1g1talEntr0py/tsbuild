@@ -1,7 +1,7 @@
 import type { EntryPoints, RelativePath } from './@types/index.js';
 
 /** Conditional export keys tried in priority order */
-const importConditions = ['import', 'default'] as const;
+const importConditions = [ 'import', 'node', 'module', 'default' ] as const;
 
 /**
  * Extracts the filename stem from a path (e.g., `'./src/index.ts'` → `'index'`).
@@ -21,8 +21,8 @@ const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
 	['.d.ts', '.ts'],
 ]);
 
+interface PackageJsonConditionalExport { [key: string]: string | PackageJsonConditionalExport | undefined }
 type PackageJsonExports = string | Record<string, string | PackageJsonConditionalExport>;
-type PackageJsonConditionalExport = Partial<Record<string, string>>;
 
 /** Minimal package.json shape for entry point inference */
 type PackageJson = {
@@ -73,7 +73,8 @@ function outputToSourcePath(outputPath: string, outDir: string, sourceDir: strin
 }
 
 /**
- * Extracts the output path string from a conditional export value. Tries `import` then `default` conditions.
+ * Extracts the output path string from a conditional export value. Tries `import`, `node`, `module`,
+ * then `default` conditions, recursing into nested condition objects.
  * @param exportValue String shorthand or conditional export object
  * @returns The resolved output path, or undefined if no supported condition is found
  */
@@ -81,8 +82,10 @@ function resolveConditionalExport(exportValue: string | PackageJsonConditionalEx
 	if (typeof exportValue === 'string') { return exportValue }
 
 	for (const condition of importConditions) {
-		const value = exportValue[condition];
-		if (typeof value === 'string') { return value }
+		const value: string | PackageJsonConditionalExport | undefined = exportValue[condition];
+		if (value === undefined) { continue }
+		const resolved = resolveConditionalExport(value);
+		if (resolved !== undefined) { return resolved }
 	}
 
 	return undefined;

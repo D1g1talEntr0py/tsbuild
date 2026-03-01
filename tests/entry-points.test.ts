@@ -67,12 +67,50 @@ describe('entry-points', () => {
 			expect(resolveConditionalExport(conditional)).toBe('./dist/index.js');
 		});
 
-		it('should return undefined when no supported conditions exist', () => {
+		it('should resolve node condition', () => {
 			const conditional: PackageJsonConditionalExport = {
 				require: './dist/index.cjs',
 				node: './dist/index.node.js',
 			};
+			expect(resolveConditionalExport(conditional)).toBe('./dist/index.node.js');
+		});
+
+		it('should resolve module condition', () => {
+			const conditional: PackageJsonConditionalExport = {
+				require: './dist/index.cjs',
+				module: './dist/index.esm.js',
+			};
+			expect(resolveConditionalExport(conditional)).toBe('./dist/index.esm.js');
+		});
+
+		it('should return undefined when no supported conditions exist', () => {
+			const conditional: PackageJsonConditionalExport = {
+				require: './dist/index.cjs',
+				types: './dist/index.d.ts',
+			};
 			expect(resolveConditionalExport(conditional)).toBeUndefined();
+		});
+
+		it('should recurse into nested conditional exports', () => {
+			const conditional: PackageJsonConditionalExport = {
+				types: './dist/index.d.ts',
+				import: {
+					types: './dist/index.d.ts',
+					default: './dist/index.js',
+				},
+			};
+			expect(resolveConditionalExport(conditional)).toBe('./dist/index.js');
+		});
+
+		it('should recurse into nested node condition', () => {
+			const conditional: PackageJsonConditionalExport = {
+				types: './dist/index.d.ts',
+				node: {
+					types: './dist/index.d.ts',
+					import: './dist/index.js',
+				},
+			};
+			expect(resolveConditionalExport(conditional)).toBe('./dist/index.js');
 		});
 
 		it('should return undefined for empty conditional object', () => {
@@ -295,12 +333,37 @@ describe('entry-points', () => {
 			const pkg: PackageJson = {
 				name: 'my-pkg',
 				exports: {
-					'.': { require: './dist/index.cjs' }, // no import or default
+					'.': { require: './dist/index.cjs', types: './dist/index.d.ts' }, // no import/node/module/default
 					'./utils': { import: './dist/utils.js' },
 				},
 			};
 			const result = inferEntryPoints(pkg, 'dist', 'src');
 			expect(result).toEqual({ utils: './src/utils.ts' });
+		});
+
+		it('should infer entry points from node condition', () => {
+			const pkg: PackageJson = {
+				name: 'my-pkg',
+				exports: {
+					'.': { types: './dist/index.d.ts', node: './dist/index.js' },
+				},
+			};
+			const result = inferEntryPoints(pkg, 'dist', 'src');
+			expect(result).toEqual({ index: './src/index.ts' });
+		});
+
+		it('should infer entry points from nested conditional exports', () => {
+			const pkg: PackageJson = {
+				name: 'my-pkg',
+				exports: {
+					'.': {
+						types: './dist/index.d.ts',
+						import: { types: './dist/index.d.ts', default: './dist/index.js' },
+					},
+				},
+			};
+			const result = inferEntryPoints(pkg, 'dist', 'src');
+			expect(result).toEqual({ index: './src/index.ts' });
 		});
 
 		it('should handle .mjs exports', () => {
