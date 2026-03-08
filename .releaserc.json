@@ -31,8 +31,8 @@
     "@semantic-release/changelog",
     ["@semantic-release/npm", { "npmPublish": false }],
     ["@semantic-release/exec", {
-      "prepareCmd": "npm pack",
-      "publishCmd": "npm publish --provenance"
+      "prepareCmd": "pnpm lint && pnpm -s build && pnpm pack",
+      "publishCmd": "pnpm publish --provenance"
     }],
     ["@semantic-release/git", {
       "assets": ["CHANGELOG.md", "package.json"],
