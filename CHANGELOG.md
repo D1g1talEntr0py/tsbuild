@@ -1,3 +1,11 @@
+## [1.4.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.4.0...v1.4.1) (2026-03-08)
+
+### Bug Fixes
+
+* **ci:** drop node 20 and fix publish git checks (3ff1b239fcc1f7d2d0814bc59d3a61632671e043)
+- Removes Node.js 20 from the CI test matrix, keeping only 22 and 24 as actively tested versions
+- Adds --no-git-checks to the publish command to prevent pnpm from blocking the release due to git state checks in the semantic-release automation context
+
 ## [1.4.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.3.2...v1.4.0) (2026-03-08)
 
 ### Features
