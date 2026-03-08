@@ -284,17 +284,17 @@ tsbuild uses two separate caches to speed up repeated builds, and two flags to c
 
 ### How it works
 
-Enable incremental compilation in `tsconfig.json`:
+Incremental compilation is **enabled by default** — no configuration needed. To opt out, explicitly set `incremental: false` in `tsconfig.json`:
 
 ```jsonc
 {
   "compilerOptions": {
-    "incremental": true
+    "incremental": false  // disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
   }
 }
 ```
 
-With this set, each build maintains two caches inside a `.tsbuild/` directory:
+With incremental enabled, each build maintains two caches inside a `.tsbuild/` directory:
 
 | Cache | File | What it stores |
 |-------|------|----------------|
@@ -302,6 +302,20 @@ With this set, each build maintains two caches inside a `.tsbuild/` directory:
 | DTS cache | `.tsbuild/dts_cache.v8.br` | Pre-processed declaration files (Brotli-compressed) |
 
 On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
+
+### Ignoring the cache directory
+
+The `.tsbuild/` directory contains build artifacts that should not be committed to source control. Add it to your `.gitignore`:
+
+```bash
+echo '.tsbuild/' >> .gitignore
+```
+
+Or add the entry manually:
+
+```gitignore
+.tsbuild/
+```
 
 ### Flags
 
