@@ -8,7 +8,7 @@
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-A TypeScript build tool that combines three tools into one workflow: **TypeScript's type system** for correctness, **esbuild** for speed, and **SWC** for legacy decorator metadata (optional, not installed by default). Built for modern ESM-only projects on Node.js 20.16.0+.
+A TypeScript build tool that combines three tools into one workflow: **TypeScript's type system** for correctness, **esbuild** for speed, and **SWC** for legacy decorator metadata (optional, not installed by default). Built for modern ESM-only projects on Node.js 22+.
 
 TC39 standard decorators are supported natively — no additional dependencies needed. SWC is only required if you are still using `experimentalDecorators` with `emitDecoratorMetadata`.
 
