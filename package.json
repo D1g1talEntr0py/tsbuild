@@ -1,7 +1,7 @@
 {
   "name": "@d1g1tal/tsbuild",
   "author": "D1g1talEntr0py",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "license": "MIT",
   "description": "A fast, ESM-only TypeScript build tool combining the TypeScript API for type checking and declaration generation, esbuild for bundling, and SWC for decorator metadata.",
   "homepage": "https://github.com/D1g1talEntr0py/tsbuild#readme",

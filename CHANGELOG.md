@@ -1,3 +1,39 @@
+## [1.5.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.4.1...v1.5.0) (2026-03-08)
+
+### Features
+
+* **compiler:** always inject 'node' into compiler types (04f1e680dc9a8a76458fd82831f007463588fa6b)
+- Merges 'node' into the resolved types array when building the TypeScript incremental program, using a Set to deduplicate
+- User-specified types from tsconfig and tool options are preserved and merged, so 'node' is always present without overwriting other entries
+
+* **compiler:** force declarationDir to undefined in overrides (f1fd8efb22658cedf75f296567fc96af618731c8)
+- Adds declarationDir: undefined to CompilerOptionOverrides type and constant so .d.ts output always goes to outDir, making declaration files reliably discoverable by the bundler regardless of user tsconfig settings
+- Updates the constants test to assert declarationDir is undefined in the overrides object
+
+
+### Documentation
+
+* update minimum node.js version to 22+ (39e4a319afe4718b052ee2170583e9a928c2dc8a)
+- Updates the README description to reflect that the tool targets Node.js 22+ instead of the previously stated 20.16.0+
+
+
+### Miscellaneous Chores
+
+* **ci:** update the noode version for the README.md badge and packageManager pnpm version (89467c98966ea232fc015df8c6e5fbcaeb327b55)
+* **docs:** moved quick start section after installation and fixed some spelling errors (ea23a1a3e2a576c73caaa79514db3306576cd1fd)
+* **docs:** update the incremental builds section (9a971879a09a48ffb91177a34a3b9daaa8046f38)
+
+### Tests
+
+* **compiler:** add tests for declarationDir and types overrides (a5ba00a8ed1190ff531e1dbb0af4db8880bbb18f)
+- Adds a test asserting declarationDir is overridden to undefined even when set in tsconfig
+- Adds a test asserting types defaults to include 'node' when not specified in tsconfig
+- Adds a test asserting user-specified types are merged with the 'node' default
+- Adds a test asserting 'node' is not duplicated when the user already includes it
+- Adds a @types/node stub in the memfs test environment to prevent TS2688 errors during test runs where node_modules is unavailable
+- Fixes mock type casts to use 'as unknown as Diagnostic' for stricter TypeScript compatibility
+- Changes private transpile() call in a test to use bracket access to avoid visibility errors
+
 ## [1.4.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.4.0...v1.4.1) (2026-03-08)
 
 ### Bug Fixes
