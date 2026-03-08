@@ -42,6 +42,46 @@ The build runs in two phases:
 
 If `declaration` is not enabled, phase 2 is just the esbuild step.
 
+## Installation
+
+### Global Installation (Recommended for CLI usage)
+
+Installing globally makes the `tsbuild` command available in your terminal across all projects:
+
+```bash
+# pnpm
+pnpm add -g @d1g1tal/tsbuild
+
+# npm
+npm install -g @d1g1tal/tsbuild
+```
+
+With a global install, your projects can use `tsbuild` in `package.json` scripts without adding it as a dependency.
+
+### Local Installation (Per-project)
+
+Install as a dev dependency for per-project version pinning (recommended for CI/CD environments):
+
+```bash
+# pnpm
+pnpm add -D @d1g1tal/tsbuild
+
+# npm
+npm install -D @d1g1tal/tsbuild
+
+# yarn
+yarn add -D @d1g1tal/tsbuild
+```
+
+`@swc/core` is **not a dependency** and will never be installed automatically. It is only needed if you use `experimentalDecorators` with `emitDecoratorMetadata` — see [Decorator Metadata](#decorator-metadata) for details.
+
+> **Note:** When installed only as a local dev dependency, the `tsbuild` command is not available directly in your terminal. Use it through `package.json` scripts (e.g., `pnpm build`) or invoke it explicitly with `pnpm exec tsbuild` / `npx tsbuild`.
+
+### Requirements
+
+- **Node.js**: >=22.0.0
+- **pnpm**: >=10.13.0 (if using corepack)
+
 ## Quick Start
 
 The only thing tsbuild requires in `tsconfig.json` is an `outDir`. Everything else carries over from your existing config.
@@ -141,47 +181,7 @@ Or if installed locally as a dev dependency, add a script to `package.json` and 
 pnpm build
 ```
 
-That's it. tsbuild reads your `compilerOptions`, infers entry points from your `package.json`, and builds. See [Configuration Options](#configuration-options) for everything you can customise.
-
-## Installation
-
-### Global Installation (Recommended for CLI usage)
-
-Installing globally makes the `tsbuild` command available in your terminal across all projects:
-
-```bash
-# pnpm
-pnpm add -g @d1g1tal/tsbuild
-
-# npm
-npm install -g @d1g1tal/tsbuild
-```
-
-With a global install, your projects can use `tsbuild` in `package.json` scripts without adding it as a dependency.
-
-### Local Installation (Per-project)
-
-Install as a dev dependency for per-project version pinning (recommended for CI/CD environments):
-
-```bash
-# pnpm
-pnpm add -D @d1g1tal/tsbuild
-
-# npm
-npm install -D @d1g1tal/tsbuild
-
-# yarn
-yarn add -D @d1g1tal/tsbuild
-```
-
-`@swc/core` is **not a dependency** and will never be installed automatically. It is only needed if you use `experimentalDecorators` with `emitDecoratorMetadata` — see [Decorator Metadata](#decorator-metadata) for details.
-
-> **Note:** When installed only as a local dev dependency, the `tsbuild` command is not available directly in your terminal. Use it through `package.json` scripts (e.g., `pnpm build`) or invoke it explicitly with `pnpm exec tsbuild` / `npx tsbuild`.
-
-### Requirements
-
-- **Node.js**: >=20.16.0
-- **pnpm**: >=9.0.0
+That's it. tsbuild reads your `compilerOptions`, infers entry points from your `package.json`, and builds. See [Configuration Options](#configuration-options) for everything you can customize.
 
 ## Usage
 
@@ -191,7 +191,7 @@ yarn add -D @d1g1tal/tsbuild
 
 Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, `baseUrl`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
 
-The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behaviour, entry points, watch mode, output formatting, and similar build-specific settings.
+The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behavior, entry points, watch mode, output formatting, and similar build-specific settings.
 
 This means your type-checker and your build always use the exact same TypeScript configuration — no drift, no duplication.
 
@@ -202,7 +202,7 @@ Declaration generation is **not required**. If `declaration: true` is already se
 
 Everything else carries over automatically.
 
-Add a `tsbuild` property to your `tsconfig.json` with only the options you need to customise:
+Add a `tsbuild` property to your `tsconfig.json` with only the options you need to customize:
 
 ```jsonc
 {
@@ -510,7 +510,7 @@ When a circular dependency is detected between declaration files, tsbuild emits 
 
 tsbuild is designed for speed:
 
-- **Incremental builds** - Only recompiles changed files
+- **Incremental builds** - Only recompile changed files
 - **In-memory declarations** - No intermediate disk I/O for `.d.ts` files
 - **Parallel processing** - Declaration bundling and transpilation run in parallel after type checking completes
 - **Smart caching** - Leverages `.tsbuildinfo` for TypeScript incremental compilation
