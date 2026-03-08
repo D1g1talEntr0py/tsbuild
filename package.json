@@ -1,15 +1,15 @@
 {
   "name": "@d1g1tal/tsbuild",
-	"author": "D1g1talEntr0py",
-  "version": "1.3.2",
-	"license": "MIT",
+  "author": "D1g1talEntr0py",
+  "version": "1.4.0",
+  "license": "MIT",
   "description": "A fast, ESM-only TypeScript build tool combining the TypeScript API for type checking and declaration generation, esbuild for bundling, and SWC for decorator metadata.",
-	"homepage": "https://github.com/D1g1talEntr0py/tsbuild#readme",
-	"repository": {
+  "homepage": "https://github.com/D1g1talEntr0py/tsbuild#readme",
+  "repository": {
     "type": "git",
     "url": "git+https://github.com/D1g1talEntr0py/tsbuild.git"
   },
-	"bugs": {
+  "bugs": {
     "url": "https://github.com/D1g1talEntr0py/tsbuild/issues"
   },
   "maintainers": [
@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=20.16.0"
   },
-	"packageManager": "pnpm@10.30.3",
+  "packageManager": "pnpm@10.30.3",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -36,8 +36,8 @@
   "files": [
     "./dist",
     "./schema.json",
-		"README.md",
-		"LICENSE"
+    "README.md",
+    "LICENSE"
   ],
   "bin": {
     "tsbuild": "./dist/tsbuild.js"

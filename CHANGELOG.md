@@ -1,3 +1,37 @@
+## [1.4.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.3.2...v1.4.0) (2026-03-08)
+
+### Features
+
+* **cache:** add isValid() to BuildCache interface (2987352e2391ccf62c032e68ee668468cd18ddf0)
+- Adds isValid() method to IncrementalBuildCache returning !this.invalidated
+- Adds isValid(): boolean to the BuildCache interface with JSDoc
+- Adds missing JSDoc comments to other BuildCache interface methods
+- Fixes incremental build header label to only show when cache is actually valid
+
+
+### Documentation
+
+* expand Quick Start section in README (c31223b8296100af4899fcdec468580b5fe72a4f)
+- Adds minimal config example showing no tsbuild section is needed
+- Adds noExternal usage example for bundling a specific package
+- Adds preferred incremental tsconfig setup with annotated options
+- Adds preferred non-incremental tsconfig setup for CI environments
+- Clarifies entry point inference and external dependency defaults
+
+
+### Build System
+
+* update package metadata, deps, and release config (f203cf1611b337509e1f8c30d3b3ff9aebd28f1e)
+- Reorganizes package.json field order, grouping author/license/homepage/repository/bugs/maintainers/engines/publishConfig near the top
+- Adds maintainers field with name and email
+- Adds README.md and LICENSE to published files list
+- Moves keywords field to end of package.json
+- Updates release commands in .releaserc.json to use pnpm with lint and build steps before pack
+- Switches publishCmd to pnpm publish --provenance
+- Reorders tsconfig.json compiler options for clarity, groups isolated/verbatim options, moves lib after noUncheckedIndexedAccess, removes moduleDetection: force
+- Bumps @types/node, eslint, and memfs dev dependencies to latest minor versions
+- Updates pnpm-lock.yaml to reflect all dependency version changes
+
 ## [1.3.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.3.1...v1.3.2) (2026-03-01)
 
 ### Bug Fixes
