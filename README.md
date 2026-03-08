@@ -44,7 +44,24 @@ If `declaration` is not enabled, phase 2 is just the esbuild step.
 
 ## Quick Start
 
-The only thing tsbuild requires in `tsconfig.json` is an `outDir`. Everything else carries over from your existing config:
+The only thing tsbuild requires in `tsconfig.json` is an `outDir`. Everything else carries over from your existing config.
+
+### Minimal config — no `tsbuild` section needed
+
+```jsonc
+{
+  "compilerOptions": {
+    "outDir": "./dist"
+    // ... your existing TypeScript config
+  }
+}
+```
+
+Entry points are inferred from `package.json` automatically, and all dependencies are treated as external by default.
+
+### Bundle a specific package into the output
+
+By default, bare specifiers (e.g. `lodash-es`) are kept as external imports. Use `noExternal` to force a package to be inlined into the bundle:
 
 ```jsonc
 {
@@ -52,7 +69,59 @@ The only thing tsbuild requires in `tsconfig.json` is an `outDir`. Everything el
     "outDir": "./dist"
     // ... your existing TypeScript config
   },
-  "tsbuild": {} // entry points are inferred from package.json automatically
+  "tsbuild": {
+    "noExternal": ["evicting-cache"]  // bundle evicting-cache into the output instead of leaving it as an import
+  }
+}
+```
+
+### Preferred `tsconfig.json` setup — incremental (recommended)
+
+`incremental` defaults to `true` in tsbuild unless you explicitly set it to `false` in your `tsconfig.json`. With incremental enabled, TypeScript only re-emits changed files on each build and the declaration cache is preserved across runs, making repeated builds significantly faster.
+
+```jsonc
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "declaration": true,
+    "incremental": true,           // redundant — tsbuild enables this by default, but explicit is clear
+    "isolatedDeclarations": true,  // recommended: enables faster parallel declaration emit
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler", // recommended for library builds processed by a bundler
+    // lib controls platform detection — omitting "DOM" targets Node.js (platform: "node").
+    // Add "DOM" to target the browser (platform: "browser").
+    "lib": ["ESNext"]             // Node.js library — no DOM APIs
+    // "lib": ["ESNext", "DOM"]   // Browser library — includes DOM APIs, sets platform to "browser"
+  }
+}
+```
+
+### Preferred `tsconfig.json` setup — non-incremental
+
+Set `incremental: false` to opt out of the `.tsbuildinfo` cache entirely. Every build is a full compilation from scratch. Useful for CI environments where you want deterministic, cache-free output.
+
+```jsonc
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "declaration": true,
+    "incremental": false,          // disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
+    "isolatedDeclarations": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler", // recommended for library builds processed by a bundler
+    // lib controls platform detection — omitting "DOM" targets Node.js (platform: "node").
+    // Add "DOM" to target the browser (platform: "browser").
+    "lib": ["ESNext"]             // Node.js library — no DOM APIs
+    // "lib": ["ESNext", "DOM"]   // Browser library — includes DOM APIs, sets platform to "browser"
+  }
 }
 ```
 
