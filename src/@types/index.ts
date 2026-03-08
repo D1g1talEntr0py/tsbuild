@@ -229,6 +229,7 @@ type CompilerOptionOverrides = Readonly<{
 	allowJs: false;
 	checkJs: false;
 	declarationMap: false;
+	declarationDir: undefined;
 	skipLibCheck: true;
 	preserveSymlinks: false;
 	target: ScriptTarget.ESNext;
