@@ -415,7 +415,9 @@ export class TypeScriptProject implements Closable {
 			compilerOptions: {
 				...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, incremental: true, tsBuildInfoFile: Paths.join(cacheDirectory, buildInfoFile), lib: [] },
 				...configResult.config.compilerOptions,
-				...typeScriptOptions.compilerOptions
+				...typeScriptOptions.compilerOptions,
+				// Always include 'node' and merge with any user-specified types
+				types: [ ...new Set([ 'node', ...(configResult.config.compilerOptions?.types ?? []), ...(typeScriptOptions.compilerOptions?.types ?? []) ]) ]
 			}
 		};
 
