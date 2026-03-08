@@ -74,7 +74,7 @@ export class TypeScriptProject implements Closable {
 	 */
 	@logPerformance('Build')
 	async build(): Promise<void> {
-		Logger.header(`🚀 tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental ? ' [incremental]' : ''}`);
+		Logger.header(`🚀 tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
 
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];

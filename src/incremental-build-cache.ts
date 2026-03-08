@@ -93,6 +93,14 @@ export class IncrementalBuildCache implements BuildCache {
 	}
 
 	/**
+	 * Checks if the cache is valid (not invalidated).
+	 * @returns True if the cache is valid, false if it has been invalidated
+	 */
+	isValid(): boolean {
+		return !this.invalidated;
+	}
+
+	/**
 	 * Custom inspection tag for type.
 	 * @returns The string 'IncrementalBuildCache'
 	 */

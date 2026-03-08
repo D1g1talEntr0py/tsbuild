@@ -175,9 +175,15 @@ type CachedDeclaration = {
 
 /** Interface for build cache operations */
 interface BuildCache {
+	/** Invalidates the build cache */
 	invalidate(): void;
+	/** Restores cached declaration files into the provided map */
 	restore(target: Map<string, CachedDeclaration>): Promise<void>;
+	/** Saves declaration files to the cache */
 	save(source: ReadonlyMap<string, CachedDeclaration>): Promise<void>;
+	/** Checks if the cache is valid */
+	isValid(): boolean;
+	/** Checks if a file path is the TypeScript build info file */
 	isBuildInfoFile(filePath: AbsolutePath): boolean;
 };
 
