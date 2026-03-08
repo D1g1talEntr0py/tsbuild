@@ -22,7 +22,7 @@ vi.mock('node:fs/promises', async () => {
 
 // Hoist mock variables
 const mocks = vi.hoisted(() => ({
-	emitMock: vi.fn((..._args: unknown[]) => ({ diagnostics: [] })),
+	emitMock: vi.fn((..._args: unknown[]) => ({ diagnostics: [] as import('typescript').Diagnostic[] })),
 	getSemanticDiagnosticsMock: vi.fn((): import('typescript').Diagnostic[] => [])
 }));
 
@@ -151,6 +151,55 @@ describe('TypeScriptProject', () => {
 			expect(project).toBeDefined();
 			expect(typeof project.build).toBe('function');
 		});
+
+		it('should override declarationDir to undefined even when set in tsconfig', () => {
+			vi.mocked(createIncrementalProgram).mockClear();
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declarationDir: './dist/@types' } }
+			});
+
+			createProject(projectPath);
+
+			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
+			expect(callOptions.declarationDir).toBeUndefined();
+		});
+
+		it('should default types to ["node"] when not specified', () => {
+			vi.mocked(createIncrementalProgram).mockClear();
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: {} }
+			});
+
+			createProject(projectPath);
+
+			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
+			expect(callOptions.types).toContain('node');
+		});
+
+		it('should merge user-specified types with the ["node"] default', () => {
+			vi.mocked(createIncrementalProgram).mockClear();
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { types: ['jest'] } }
+			});
+
+			createProject(projectPath);
+
+			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
+			expect(callOptions.types).toContain('node');
+			expect(callOptions.types).toContain('jest');
+		});
+
+		it('should not duplicate "node" when user already specifies it in types', () => {
+			vi.mocked(createIncrementalProgram).mockClear();
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { types: ['node', 'jest'] } }
+			});
+
+			createProject(projectPath);
+
+			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
+			expect(callOptions.types?.filter((t: string) => t === 'node')).toHaveLength(1);
+		});
 	});
 
 	describe('clean', () => {
@@ -211,7 +260,7 @@ describe('TypeScriptProject', () => {
 					file: mockFile,
 					messageText: 'Type number is not assignable to type string',
 					start: 6, length: 1, category: 1, code: 2322
-				} as import('typescript').Diagnostic]
+				} as unknown as import('typescript').Diagnostic]
 			});
 
 			// build() no longer throws for expected build failures - it sets exit code instead
@@ -233,8 +282,8 @@ describe('TypeScriptProject', () => {
 			const mockFile = { fileName: 'test.ts', text: 'const x: string = 123;', getLineAndCharacterOfPosition: () => ({ line: 0, character: 6 }) };
 			mocks.emitMock.mockReturnValueOnce({
 				diagnostics: [
-					{ file: mockFile, messageText: 'Error 1', start: 0, length: 1, category: 1, code: 2322 } as import('typescript').Diagnostic,
-					{ file: mockFile, messageText: 'Error 2', start: 10, length: 1, category: 1, code: 2322 } as import('typescript').Diagnostic
+					{ file: mockFile, messageText: 'Error 1', start: 0, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic,
+					{ file: mockFile, messageText: 'Error 2', start: 10, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic
 				]
 			});
 
@@ -258,8 +307,8 @@ describe('TypeScriptProject', () => {
 			const mockFileB = { fileName: 'b.ts', text: 'const y: number = "x";', getLineAndCharacterOfPosition: () => ({ line: 2, character: 6 }) };
 			mocks.emitMock.mockReturnValueOnce({
 				diagnostics: [
-					{ file: mockFileA, messageText: 'Error 1', start: 0, length: 1, category: 1, code: 2322 } as import('typescript').Diagnostic,
-					{ file: mockFileB, messageText: 'Error 2', start: 10, length: 1, category: 1, code: 2322 } as import('typescript').Diagnostic
+					{ file: mockFileA, messageText: 'Error 1', start: 0, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic,
+					{ file: mockFileB, messageText: 'Error 2', start: 10, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic
 				]
 			});
 
@@ -409,7 +458,7 @@ describe('TypeScriptProject', () => {
 			});
 
 			vol.writeFileSync(join(projectPath, 'src/index.ts'), 'export const url = import.meta.env.API_URL;');
-			await project.transpile();
+			await (project as any).transpile();
 
 			const output = vol.readFileSync(join(projectPath, 'dist/index.js'), 'utf8') as string;
 			expect(output).toContain('"https://api.example.com"');

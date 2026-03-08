@@ -51,6 +51,13 @@ export class TestHelper {
 			console.warn('Failed to copy typescript libs:', e);
 		}
 
+		// Create a minimal @types/node stub so `types: ["node"]` in compilerOptions
+		// doesn't emit TS2688 ("Cannot find type definition file for 'node'") in the
+		// memfs environment where node_modules is not available.
+		const atTypesNodeDir = path.join(process.cwd(), 'node_modules', '@types', 'node');
+		vol.mkdirSync(atTypesNodeDir, { recursive: true });
+		vol.writeFileSync(path.join(atTypesNodeDir, 'index.d.ts'), '// stub\nexport {};\n');
+
 		await this.patchTsSys();
 	}
 
