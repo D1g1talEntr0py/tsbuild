@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@10.31.0",
+  "packageManager": "pnpm@10.32.0",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -53,23 +53,23 @@
     "prepublishOnly": "pnpm lint && pnpm build"
   },
   "dependencies": {
-    "@d1g1tal/watchr": "1.0.0",
+    "@d1g1tal/watchr": "^1.0.3",
     "esbuild": "^0.27.3",
     "magic-string": "^0.30.21"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.3.5",
-    "@typescript-eslint/eslint-plugin": "^8.56.1",
-    "@typescript-eslint/parser": "^8.56.1",
-    "@vitest/coverage-v8": "4.0.18",
+    "@types/node": "^25.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^10.0.3",
     "eslint-plugin-jsdoc": "^62.7.1",
     "fs-monkey": "^1.1.0",
     "memfs": "^4.56.11",
     "tsx": "^4.21.0",
-    "typescript": "5.9.3",
-    "typescript-eslint": "^8.56.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
     "vitest": "^4.0.18"
   },
   "keywords": [
