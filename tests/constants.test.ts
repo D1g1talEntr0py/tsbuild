@@ -163,7 +163,6 @@ describe('Constants', () => {
 				allowJs: false,
 				checkJs: false,
 				declarationMap: false,
-				declarationDir: undefined,
 				skipLibCheck: true,
 				preserveSymlinks: false,
 				target: ScriptTarget.ESNext,

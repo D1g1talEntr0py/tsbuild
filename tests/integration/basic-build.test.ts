@@ -77,6 +77,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 					target: 'ES2022',
 					module: ts.ModuleKind.ESNext,
 					outDir: './dist',
+					incremental: false,
 				},
 				tsbuild: {
 					clean: false,
@@ -107,6 +108,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 					target: 'ES2022',
 					module: ts.ModuleKind.ESNext,
 					outDir: './dist',
+					incremental: false,
 				},
 				tsbuild: {
 					clean: false,
@@ -138,7 +140,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 	it('should clean output directory when clean option is true', async () => {
 		const projectPath = await TestHelper.createTestProject({
 			tsconfig: {
-				compilerOptions: { declaration: false },
+				compilerOptions: { declaration: false, incremental: false },
 				tsbuild: { entryPoints: { index: './src/index.ts' }, clean: true }
 			},
 			files: {
@@ -218,6 +220,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 			tsconfig: {
 				compilerOptions: {
 					types: [],
+					incremental: false,
 				},
 				tsbuild: {
 					clean: false,
@@ -310,6 +313,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 				compilerOptions: {
 					experimentalDecorators: true,
 					lib: ['ES2022', 'DOM'], // Need DOM for console
+					incremental: false,
 				},
 				tsbuild: {
 					clean: false,
@@ -342,6 +346,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 			tsconfig: {
 				compilerOptions: {
 					sourceMap: true,
+					incremental: false,
 				},
 				tsbuild: {
 					clean: false,
@@ -368,6 +373,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 			tsconfig: {
 				compilerOptions: {
 					lib: ['ES2022', 'DOM'], // Need DOM for console
+					incremental: false,
 				},
 				tsbuild: {
 					clean: false,

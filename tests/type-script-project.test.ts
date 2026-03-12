@@ -152,18 +152,6 @@ describe('TypeScriptProject', () => {
 			expect(typeof project.build).toBe('function');
 		});
 
-		it('should override declarationDir to undefined even when set in tsconfig', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declarationDir: './dist/@types' } }
-			});
-
-			createProject(projectPath);
-
-			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
-			expect(callOptions.declarationDir).toBeUndefined();
-		});
-
 		it('should default types to ["node"] when not specified', () => {
 			vi.mocked(createIncrementalProgram).mockClear();
 			const projectPath = TestHelper.createTestProject({
@@ -363,18 +351,20 @@ describe('TypeScriptProject', () => {
 				expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
 			});
 
-			it('should skip build when incremental without declarations and no .tsbuildinfo change', async () => {
+			it('should always run transpile when incremental without declarations', async () => {
 				const projectPath = await TestHelper.createTestProject({
 					tsconfig: { compilerOptions: { declaration: false, incremental: true } }
 				});
 				const project = createProject(projectPath);
 
-				// Mock emit to NOT write any files (simulating no changes)
+				// declaration:false projects have no reliable change signal (TypeScript never emits
+				// .d.ts files, and .tsbuildinfo writes are not a valid JS-change indicator), so
+				// transpile always runs to guarantee output stays up-to-date.
 				mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
 
 				await project.build();
 
-				expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
+				expect(esbuildMocks.buildMock).toHaveBeenCalled();
 			});
 
 			it('should run build when incremental with declarations and .tsbuildinfo changes', async () => {

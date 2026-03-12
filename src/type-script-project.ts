@@ -147,7 +147,9 @@ export class TypeScriptProject implements Closable {
 		const result = this.fileManager.finalize();
 		addPerformanceStep('Finalize', TypeScriptProject.elapsed('finalize:start'));
 
-		return result;
+		// When declaration is disabled, TypeScript never emits .d.ts files, so finalize()
+		// has no change signal — always proceed to allow esbuild to run.
+		return result || !this.configuration.compilerOptions.declaration;
 	}
 
 	/**

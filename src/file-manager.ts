@@ -229,10 +229,10 @@ export class FileManager implements Closable {
 		} else {
 			// Defer pre-processing — raw text is stored and processed in finalize()
 			this.pendingFiles.push({ path: filePath as AbsolutePath, text });
+			// Only non-buildinfo writes indicate TypeScript detected source changes —
+			// .tsbuildinfo is always written by TypeScript even when nothing changed
+			if (!this.hasEmittedFiles) { this.hasEmittedFiles = true }
 		}
-
-		// Any file write indicates TypeScript detected changes
-		if (!this.hasEmittedFiles) { this.hasEmittedFiles = true }
 	};
 
 	/**

@@ -175,12 +175,41 @@ describe('FileManager', () => {
 			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
 			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
 
-			const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
-			const manager = new FileManager(cache);
-			await manager.initialize();
+			// Set up prior build with cached declarations (simulates a declaration project)
+			const cache1 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
+			const manager1 = new FileManager(cache1);
+			await manager1.initialize();
+			manager1.fileWriter('test.d.ts', 'export const hello: string;');
+			manager1.finalize();
+			await manager1.flush();
 
-			// Incremental build with no files written should return false
-			const hasEmitted = manager.finalize();
+			// Incremental build: cache restored, no new files written → no changes detected
+			const cache2 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
+			const manager2 = new FileManager(cache2);
+			await manager2.initialize();
+			const hasEmitted = manager2.finalize();
+			expect(hasEmitted).toBe(false);
+		});
+
+		it('should return false for incremental builds when only .tsbuildinfo is written', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			// Set up prior build with cached declarations (simulates a declaration project)
+			const cache1 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
+			const manager1 = new FileManager(cache1);
+			await manager1.initialize();
+			manager1.fileWriter('test.d.ts', 'export const hello: string;');
+			manager1.finalize();
+			await manager1.flush();
+
+			// TypeScript always writes .tsbuildinfo even when nothing changed —
+			// this must NOT be treated as "files were emitted"
+			const cache2 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
+			const manager2 = new FileManager(cache2);
+			await manager2.initialize();
+			manager2.fileWriter(`${tempDir}/${tsBuildInfoFile}`, '{"version":"5.0"}');
+			const hasEmitted = manager2.finalize();
 			expect(hasEmitted).toBe(false);
 		});
 

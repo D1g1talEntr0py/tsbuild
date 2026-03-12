@@ -16,8 +16,6 @@ const compilerOptionOverrides: CompilerOptionOverrides = {
 	checkJs: false,
 	// Skip declaration map generation. TODO - Would love to figure out how to combine them into a single file / entry point
 	declarationMap: false,
-	// Force .d.ts output to outDir so the bundler can reliably find declaration files
-	declarationDir: undefined,
 	// Skip type-checking all dependencies
 	skipLibCheck: true,
 	// Ensure TS2742 errors are visible when `true`. TODO - Figure out how to have this work with a value of `true`
