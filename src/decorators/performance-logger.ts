@@ -104,10 +104,10 @@ const measure: typeof PerformanceLogger.prototype.measure = new PerformanceLogge
 /**
  * Registers a sub-step timing entry for the currently running performance measurement.
  * @param name - The name of the sub-step.
- * @param duration - The formatted duration string (e.g., '42ms').
+ * @param ms - The elapsed time in milliseconds.
  */
-function addPerformanceStep(name: string, duration: string): void {
-	pendingSteps.push({ name, duration });
+function addPerformanceStep(name: string, ms: number): void {
+	pendingSteps.push({ name, duration: `${ms}ms`, ms });
 }
 
 export { measure as logPerformance, addPerformanceStep };

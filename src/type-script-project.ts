@@ -555,14 +555,14 @@ export class TypeScriptProject implements Closable {
 	/**
 	 * Calculates elapsed time since a performance mark and clears the mark.
 	 * @param markName - The name of the performance mark to measure from
-	 * @returns Formatted elapsed time string (e.g., '42ms')
+	 * @returns Elapsed time in milliseconds
 	 */
-	private static elapsed(markName: string): string {
+	private static elapsed(markName: string): number {
 		const endMark = performance.mark(`${markName}:end`);
-		const duration = endMark.startTime - performance.getEntriesByName(markName, 'mark')[0].startTime;
+		const ms = ~~(endMark.startTime - performance.getEntriesByName(markName, 'mark')[0].startTime);
 		performance.clearMarks(markName);
 		performance.clearMarks(endMark.name);
 
-		return `${~~duration}ms`;
+		return ms;
 	}
 }

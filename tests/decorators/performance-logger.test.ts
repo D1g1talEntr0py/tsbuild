@@ -432,9 +432,9 @@ describe('decorators/performance-logger', () => {
 			class TestClass {
 				@logPerformance('Type-checking')
 				typeCheck(): void {
-					addPerformanceStep('Emit', '355ms');
-					addPerformanceStep('Diagnostics', '0ms');
-					addPerformanceStep('Finalize', '5ms');
+					addPerformanceStep('Emit', 355);
+					addPerformanceStep('Diagnostics', 0);
+					addPerformanceStep('Finalize', 5);
 				}
 			}
 
@@ -448,9 +448,9 @@ describe('decorators/performance-logger', () => {
 					detail: {
 						message: 'Type-checking',
 						steps: [
-							{ name: 'Emit', duration: '355ms' },
-							{ name: 'Diagnostics', duration: '0ms' },
-							{ name: 'Finalize', duration: '5ms' },
+							{ name: 'Emit', duration: '355ms', ms: 355 },
+							{ name: 'Diagnostics', duration: '0ms', ms: 0 },
+							{ name: 'Finalize', duration: '5ms', ms: 5 },
 						]
 					}
 				}]
@@ -464,9 +464,9 @@ describe('decorators/performance-logger', () => {
 
 			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('Type-checking'));
 			expect(subStepsSpy).toHaveBeenCalledWith([
-				{ name: 'Emit', duration: '355ms' },
-				{ name: 'Diagnostics', duration: '0ms' },
-				{ name: 'Finalize', duration: '5ms' },
+				{ name: 'Emit', duration: '355ms', ms: 355 },
+				{ name: 'Diagnostics', duration: '0ms', ms: 0 },
+				{ name: 'Finalize', duration: '5ms', ms: 5 },
 			]);
 		});
 	});
