@@ -350,7 +350,7 @@ If a directory is provided, all files within will be used as entry points.
 
 When `entryPoints` is omitted entirely, tsbuild automatically infers entry points from `package.json` by reverse-mapping output paths back to their source files. Resolution order:
 
-1. **`exports`** - Subpath export map (wildcard patterns are skipped; `import`/`default` conditions are tried in order)
+1. **`exports`** - Subpath export map (wildcard patterns are skipped; `import`, `node`, `module`, and `default` conditions are tried in order)
 2. **`bin`** - Binary entry points
 3. **`main`** / **`module`** - Legacy fallback (only used when `exports` and `bin` produce no results)
 
@@ -549,12 +549,12 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 - **[TypeScript](https://www.typescriptlang.org/)** - Type checking, declaration generation, and module resolution
 - **[SWC](https://swc.rs/)** - Optional decorator metadata transformation
 - **[magic-string](https://github.com/Rich-Harris/magic-string)** - Efficient source code transformation with sourcemap support
-- **[watchr](https://github.com/bevry/watchr)** - File watching for watch mode
+- **[watchr](https://github.com/D1g1talEntr0py/watchr)** - File watching for watch mode
 
 ## Limitations
 
 - **ESM Only** - No CommonJS support by design
-- **Node.js 20.16.0+** - Requires a modern Node.js version
+- **Node.js 22+** - Requires a modern Node.js version
 - **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
 - **Plugins are programmatic only** - Custom esbuild plugins can't be declared in `tsconfig.json`; they require using the `TypeScriptProject` API directly
 - **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed

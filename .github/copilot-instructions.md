@@ -25,7 +25,7 @@
 - Do **not** add new dependencies unless no native or existing solution is feasible.
 
 ## Project Overview
-tsbuild is a self-hosting TypeScript build tool that combines three systems: **TypeScript API** (type checking + declarations), **esbuild** (bundling), and **SWC** (decorator metadata). **ESM-only by design** - no CommonJS support. Targets Node.js 20.16.0+ with pnpm 9+.
+tsbuild is a self-hosting TypeScript build tool that combines three systems: **TypeScript API** (type checking + declarations), **esbuild** (bundling), and **SWC** (decorator metadata). **ESM-only by design** - no CommonJS support. Targets Node.js 22+ with pnpm 10+.
 
 ## Core Architecture
 
@@ -235,19 +235,6 @@ File watching uses `Watchr` with debounced rebuild logic:
    - `-m, --minify` - Minify the output
 
 8. **SWC is lazy-loaded** - The `decorator-metadata.ts` plugin is only imported when `emitDecoratorMetadata: true`. If `@swc/core` is not installed, a helpful error message is thrown.
-
-## Performance Notes
-
-1. **`collectIdentifiers` caching** - Uses WeakMap to cache results keyed by SourceFile objects
-2. **Module resolution caching** - Bundler caches resolved module paths per instance
-3. **Brotli compression** - Cache files use Brotli for efficient storage
-4. **Lazy loading** - SWC is only imported when decorator metadata is needed
-
-## Testing Gaps to Consider
-
-1. **Cache restoration edge cases** - Corrupted cache files, cache format version mismatches
-2. **Error recovery in watch mode** - Build failures followed by successful builds
-3. **Path edge cases** - Symlinks, case sensitivity, Windows paths
 
 When extending tsbuild, prioritize the plugin architecture for new features, use decorators for cross-cutting concerns, and maintain the clear separation between the three build systems. Always consider the in-memory architecture and avoid unnecessary disk I/O.
 
