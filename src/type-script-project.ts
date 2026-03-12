@@ -3,6 +3,7 @@ import { Paths } from './paths.js';
 import { Json } from './json.js';
 import { Watchr, type WatchrStats, type FileSystemEvent } from '@d1g1tal/watchr';
 import { Logger } from './logger';
+import { TextFormat } from './text-formatter';
 import { bundleDeclarations } from './dts/declaration-bundler';
 import { outputPlugin } from './plugins/output';
 import { externalModulesPlugin } from './plugins/external-modules';
@@ -74,7 +75,8 @@ export class TypeScriptProject implements Closable {
 	 */
 	@logPerformance('Build')
 	async build(): Promise<void> {
-		Logger.header(`🚀 tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
+		const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
+		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
 
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];
@@ -289,7 +291,7 @@ export class TypeScriptProject implements Closable {
 	 * Processes declaration files.
 	 * @returns A promise that resolves to an array of written files after processing declarations.
 	 */
-	@logPerformance('Process Declarations', true)
+	@logPerformance('Bundle Declarations', true)
 	private async processDeclarations(): Promise<WrittenFile[]> {
 		// If not bundling, just write declaration files to disk
 		if (!this.buildConfiguration.bundle) { return this.fileManager.writeFiles(this.directory) }

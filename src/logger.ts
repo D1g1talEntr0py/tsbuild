@@ -68,10 +68,13 @@ export class Logger {
 
 	/**
 	 * Logs a header box with a message.
+	 * The header is styled with a cyan border and the message is centered inside. ANSI escape codes are stripped from the message when calculating the width to ensure proper formatting.
+	 * This ensures the header box is sized correctly even when the message contains color codes or other formatting.
 	 * @param message The message to display in the header.
 	 */
 	static header(message: string): void {
-		const innerWidth = message.length + 2;
+		// Calculate the visible length of the message by removing ANSI escape codes, which do not take up space in the console.
+		const innerWidth = message.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '').length + 2;
 		console.log(TextFormat.cyan(`╭${'─'.repeat(innerWidth)}╮${newLine}│ ${message} │${newLine}╰${'─'.repeat(innerWidth)}╯`));
 	}
 
@@ -98,11 +101,14 @@ export class Logger {
 	 * @param steps The sub-steps to log.
 	 */
 	static subSteps(steps: PerformanceSubStep[]): void {
-		const maxNameLength = steps.reduce((max, { name }) => Math.max(max, name.length), 0);
-		const maxDurationLength = steps.reduce((max, { duration }) => Math.max(max, duration.length), 0);
+		const visible = steps.filter(({ ms }) => ms >= 5);
+		if (visible.length === 0) { return }
 
-		for (let i = 0, length = steps.length; i < length; i++) {
-			const { name, duration } = steps[i];
+		const maxNameLength = visible.reduce((max, { name }) => Math.max(max, name.length), 0);
+		const maxDurationLength = visible.reduce((max, { duration }) => Math.max(max, duration.length), 0);
+
+		for (let i = 0, length = visible.length; i < length; i++) {
+			const { name, duration } = visible[i];
 			const prefix = i === length - 1 ? '  └─' : '  ├─';
 			console.log(`${TextFormat.dim(prefix)} ${TextFormat.bold(name.padEnd(maxNameLength))} ${TextFormat.cyan(duration.padStart(maxDurationLength))}`);
 		}

@@ -290,21 +290,25 @@ describe('Logger', () => {
 	});
 
 	describe('subSteps', () => {
-		it('should log sub-steps with tree formatting and aligned columns', () => {
+		it('should log sub-steps with tree formatting and aligned columns, filtering steps below 5ms', () => {
 			Logger.subSteps([
-				{ name: 'Emit', duration: '355ms' },
-				{ name: 'Diagnostics', duration: '0ms' },
-				{ name: 'Finalize', duration: '5ms' },
+				{ name: 'Emit', duration: '355ms', ms: 355 },
+				{ name: 'Diagnostics', duration: '0ms', ms: 0 },
+				{ name: 'Finalize', duration: '5ms', ms: 5 },
 			]);
-			expect(logSpy).toHaveBeenCalledTimes(3);
-			expect(logSpy).toHaveBeenNthCalledWith(1, `${TextFormat.dim('  ├─')} ${TextFormat.bold('Emit       ')} ${TextFormat.cyan('355ms')}`);
-			expect(logSpy).toHaveBeenNthCalledWith(2, `${TextFormat.dim('  ├─')} ${TextFormat.bold('Diagnostics')} ${TextFormat.cyan('  0ms')}`);
-			expect(logSpy).toHaveBeenNthCalledWith(3, `${TextFormat.dim('  └─')} ${TextFormat.bold('Finalize   ')} ${TextFormat.cyan('  5ms')}`);
+			expect(logSpy).toHaveBeenCalledTimes(2);
+			expect(logSpy).toHaveBeenNthCalledWith(1, `${TextFormat.dim('  ├─')} ${TextFormat.bold('Emit    ')} ${TextFormat.cyan('355ms')}`);
+			expect(logSpy).toHaveBeenNthCalledWith(2, `${TextFormat.dim('  └─')} ${TextFormat.bold('Finalize')} ${TextFormat.cyan('  5ms')}`);
 		});
 
 		it('should handle a single sub-step with └─ prefix', () => {
-			Logger.subSteps([{ name: 'Only', duration: '10ms' }]);
+			Logger.subSteps([{ name: 'Only', duration: '10ms', ms: 10 }]);
 			expect(logSpy).toHaveBeenCalledWith(`${TextFormat.dim('  └─')} ${TextFormat.bold('Only')} ${TextFormat.cyan('10ms')}`);
+		});
+
+		it('should not log anything when all steps are below threshold', () => {
+			Logger.subSteps([{ name: 'Finalize', duration: '1ms', ms: 1 }]);
+			expect(logSpy).not.toHaveBeenCalled();
 		});
 	});
 });
