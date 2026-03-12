@@ -1,3 +1,71 @@
+## [1.6.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.5.0...v1.6.0) (2026-03-12)
+
+### Features
+
+* **logger:** add ANSI-safe header width and styled build banner (6dd2e72306dcc29998b2a1900c51e044d5cd0b9a)
+- Fix header box width calculation by stripping ANSI escape codes before measuring message length
+- Add TextFormat import to TypeScriptProject for use in the build header
+- Prefix build header message with a styled blue TS logo
+- Rename logPerformance label from 'Process Declarations' to 'Bundle Declarations'
+- Update logger subSteps test to cover filtering behaviour and new PerformanceSubStep shape
+- Add test case asserting nothing is logged when all steps are below the threshold
+
+
+### Bug Fixes
+
+* **incremental:** prevent false change detection on .tsbuildinfo writes (8cb4d9631336d1a2a4401da0b1bcdacdc873bb6a)
+- Remove forced declarationDir: undefined override from compiler option overrides
+- Remove corresponding type entry from CompilerOptionOverrides
+- Move hasEmittedFiles tracking inside the non-buildinfo branch of fileWriter so only real output files (not .tsbuildinfo) set the flag
+- Return true from the hasChanged check when declaration:false is set, ensuring esbuild always runs when declarations are disabled
+- Add test verifying that writing only .tsbuildinfo does not set the emitted flag
+- Update existing incremental no-changes test to properly simulate a prior build with cached declarations
+- Update test asserting esbuild is always invoked for declaration:false projects
+- Remove outdated declarationDir override test
+- Remove outdated test asserting esbuild was skipped for declaration:false incremental builds
+- Add incremental: false to basic build integration tests to keep them hermetic
+
+
+### Performance Improvements
+
+* **logger:** filter sub-steps below 5ms to reduce build output noise (fe37d375ca8f3ee79f3c1602cc0240f0d6aefd94)
+- Add ms field to PerformanceSubStep type to carry the raw numeric duration
+- Update addPerformanceStep to accept a number and derive the formatted string internally
+- Update TypeScriptProject.elapsed() to return a number instead of a pre-formatted string
+- Update all call sites to pass numeric millisecond values
+- Filter out sub-steps with ms < 5 before logging; return early if nothing remains
+- Update tests to reflect the new numeric API and updated PerformanceSubStep shape
+
+
+### Documentation
+
+* update runtime requirements, watchr link, and exports docs (5fe88a82785f56743f82e68622e9986924444b10)
+- Bump minimum Node.js requirement from 20.16.0 to 22+ in README and copilot instructions
+- Bump minimum pnpm requirement from 9+ to 10+ in copilot instructions
+- Update watchr link in README to point to the correct fork repository
+- Update exports condition list to include node and module conditions
+- Remove stale Performance Notes and Testing Gaps sections from copilot instructions
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependencies (3b4a3acacd4306e9110b1d1858ce2e43326c8c31)
+
+### Build System
+
+* **deps:** bump esbuild, vitest, and related packages (4f10321b7772e0ea6c94faa86d38f3156d3a0f7b)
+- Upgrade esbuild from 0.27.3 to 0.27.4
+- Upgrade vitest and @vitest/* packages from 4.0.18 to 4.1.0
+- Upgrade @vitest/coverage-v8 from 4.0.18 to 4.1.0
+- Upgrade eslint-plugin-jsdoc from 62.7.1 to 62.8.0
+- Add convert-source-map 2.0.0 as new transitive dependency
+- Upgrade ast-v8-to-istanbul from 0.3.12 to 1.0.0
+- Upgrade es-module-lexer from 1.7.0 to 2.0.0
+- Upgrade std-env from 3.10.0 to 4.0.0
+- Upgrade tinyrainbow from 3.0.3 to 3.1.0
+- Update pnpm-lock.yaml to reflect all dependency changes
+- Remove prepublishOnly script from package.json
+
 ## [1.5.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.4.1...v1.5.0) (2026-03-08)
 
 ### Features
