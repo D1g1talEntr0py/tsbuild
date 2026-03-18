@@ -1,3 +1,9 @@
+## [1.6.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.2...v1.6.3) (2026-03-18)
+
+### Bug Fixes
+
+* updated regex to allow minified output to have the proper extensions in the imports (23ab153ec4e1e07a10a4c21b692491031557f03b)
+
 ## [1.6.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.1...v1.6.2) (2026-03-18)
 
 ### Bug Fixes
