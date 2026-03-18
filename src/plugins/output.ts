@@ -7,7 +7,7 @@ type PluginOptions = BuildOptions & { write: false };
 
 const FileMode = { READ_WRITE: 0o666, READ_WRITE_EXECUTE: 0o755 } as const;
 
-const relativeSpecifierPattern = /(from\s+['"])(\.\.?\/[^'"]*?)(['"])/g;
+const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
 
 /**
  * Rewrites extension-less relative specifiers in emitted JS/DTS output to include `.js`.
