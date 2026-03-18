@@ -8,13 +8,13 @@ function decoratorPreset(options: Record<string, unknown>) {
     }),
     rolldown: {
       // Only run this transform if the file contains a decorator.
-      filter: { code: '@' },
+      filter: { code: '@' }
     }
   }
 }
 
 export default defineConfig({
-	plugins: [ babel({ presets: [decoratorPreset({ version: '2023-11' })] }) ],
+	plugins: [ babel({ presets: [ decoratorPreset({ version: '2023-11' }) ] }) ],
   resolve: {
     alias: { 'src': new URL('./src', import.meta.url).pathname }
   },
@@ -23,6 +23,7 @@ export default defineConfig({
     globals: false,
     pool: 'vmForks',
     testTimeout: 15_000,
+		typecheck: { enabled: false },
     coverage: {
       reporter: [ 'text', 'json' ],
 			reportsDirectory: 'tests/coverage',
