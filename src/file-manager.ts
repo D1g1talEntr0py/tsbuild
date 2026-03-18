@@ -1,6 +1,7 @@
 import { Files } from 'src/files';
 import { Paths } from 'src/paths';
 import { defaultEntryPoint } from 'src/constants';
+import { rewriteRelativeSpecifiers } from './plugins/output';
 import { DeclarationProcessor } from './dts/declaration-processor';
 import { createSourceFile, ScriptTarget } from 'typescript';
 import type { AbsolutePath, BuildCache, CachedDeclaration, Closable, WrittenFile } from 'src/@types';
@@ -211,8 +212,9 @@ export class FileManager implements Closable {
 	 * @returns Metadata of the written file
 	 */
 	private async writeFile(projectDirectory: AbsolutePath, filePath: AbsolutePath, content: string): Promise<WrittenFile> {
-		await Files.write(filePath, content);
-		return { path: Paths.relative(projectDirectory, filePath), size: content.length };
+		const rewritten = rewriteRelativeSpecifiers(content);
+		await Files.write(filePath, rewritten);
+		return { path: Paths.relative(projectDirectory, filePath), size: rewritten.length };
 	}
 
 	/**
