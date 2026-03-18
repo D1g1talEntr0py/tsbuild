@@ -1,3 +1,22 @@
+## [1.6.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.1...v1.6.2) (2026-03-18)
+
+### Bug Fixes
+
+* **compiler:** rewrite relative specifiers to include .js extension (39bc1a19d6d79cebb298e7717435591099f47c11)
+- Add relativeSpecifierPattern to detect bare relative imports
+- Implement rewriteRelativeSpecifiers to append .js for ESM Node resolution
+- Apply rewriteRelativeSpecifiers before writing files in FileManager
+- Update fileMapper in output plugin to rewrite JS contents
+
+
+### Miscellaneous Chores
+
+* **workspace:** update workspace configurations and metadata (af85d4d72aa726a9f1d2b5ef60dc2e3beae8318c)
+- Remove FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 from github actions CI
+- Add compiler, type-checking, and library keywords to package.json
+- Format babel preset plugins array in vitest.config.ts
+- Disable typecheck in vitest configuration explicitly
+
 ## [1.6.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.0...v1.6.1) (2026-03-18)
 
 ### Bug Fixes
