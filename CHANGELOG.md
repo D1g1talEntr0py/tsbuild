@@ -1,3 +1,38 @@
+## [1.6.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.0...v1.6.1) (2026-03-18)
+
+### Bug Fixes
+
+* **test:** workaround vitest 4.1 decorator regression (e018d99561fad324f4f8c73bf34fd6b4fcd881e5)
+- add @rolldown/plugin-babel and @babel/plugin-proposal-decorators to devDependencies
+- update vitest.config.ts to transform decorators using babel
+- introduce tests/tsconfig.json for test environment typing
+- bump typescript-eslint and @types/node dependencies
+- sync pnpm-lock.yaml with updated dependencies
+
+
+### Miscellaneous Chores
+
+* **pkg:** update package manager and project scripts (57a0ff3aa552d49aa56745bd0179ee245fd70ac7)
+- bump pnpm packageManager field to 10.32.1
+- include CHANGELOG.md in the list of published files
+- remove deprecated prepare script
+- add test:watch convenience script for vitest
+
+* **style:** add editorconfig (55d07cb8090f6874e7f16a5c7943309e6ade8f64)
+- establish consistent coding styles across the workspace
+- configure standard indents, charsets, and newline rules
+
+
+### Continuous Integration
+
+* force actions to use Node.js 24 (9eaac47d702c40ce9d8aeb7b7e6d990ccfa3b51d)
+* updated actions to latest versions (a5a7b0f36420cad83192fca489c5ff9bc376b9d7)
+* upgrade github actions runner versions (b9ed4f72294dee56713155623b016fc4951c8931)
+- bump actions/checkout to v6
+- bump pnpm/action-setup to v5
+- bump actions/setup-node to v6
+- enforce using latest npm globally in publish workflow
+
 ## [1.6.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.5.0...v1.6.0) (2026-03-12)
 
 ### Features
