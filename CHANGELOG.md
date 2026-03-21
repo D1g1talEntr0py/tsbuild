@@ -1,3 +1,33 @@
+## [1.6.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.4...v1.6.5) (2026-03-21)
+
+### Code Refactoring
+
+* **bundler:** remove unused getModuleExports method (40be90ce03de5ada924ac6ac5d0966cceda7ade1)
+- Remove dead private method getModuleExports from DeclarationBundler class
+
+
+### Tests
+
+* add json, incremental-build-cache tests and shared declaration fixtures (dadea76ceb2fa487124031bbef2b2532195a60dd)
+- Add comprehensive tests for Json.parse and Json.serialize with primitives, arrays, and objects
+- Add tests for IncrementalBuildCache covering restore, save, invalidate, isBuildInfoFile, and isValid
+- Add tests for corrupt cache file handling, cache invalidation skipping restore, and round-trip save/restore
+- Add shared declaration fixture file with reusable type definitions for bundler and processor tests
+- Remove old build-cache.test.ts in favor of new incremental-build-cache.test.ts
+
+* rewrite test suite with parameterized patterns and expanded coverage (dd30d901a7bcffcf743ae7bb91d6309377cdb49d)
+- Rewrite text-formatter tests with it.each matrix patterns for formatting, color, bright, background, and bright background categories
+- Rewrite paths tests with it.each matrix for isPath, add parse and isFile coverage, remove TestHelper boilerplate
+- Rewrite logger tests with it.each matrices for isWrittenFiles/colorize/prettyBytes, remove memfs dependency, add header/separator/step/subSteps/EntryType tests
+- Rewrite decorator-metadata plugin tests removing TestHelper dependency, simplify mock setup
+- Rewrite external-modules plugin tests with it.each for bare specifiers and local paths, add packageName extraction tests
+- Rewrite output plugin tests, add rewriteRelativeSpecifiers unit tests for extension-less and bare specifier handling
+- Simplify process-manager tests by condensing redundant assertions and removing duplicate spy verifications
+- Rewrite tsbuild CLI tests with it.each for --help/-h and --version/-v flags, group into describe blocks
+- Expand type-script-project tests with triggerRebuild (rename, unlink, empty changes), close, handleBuildError (watch mode), resolveConfiguration (browser platform, entry point inference, invalid tsconfig, malformed package.json), getEntryPoints, and transpile (env expansion, esbuild warnings/errors, SWC decorator metadata plugin)
+- Streamline integration tests with condensed fixtures and consistent Logger mock formatting
+- Rewrite constants, declaration-bundler, declaration-processor, decorator, entry-points, errors, file-manager, and files tests with simplified patterns
+
 ## [1.6.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.3...v1.6.4) (2026-03-21)
 
 ### Bug Fixes
