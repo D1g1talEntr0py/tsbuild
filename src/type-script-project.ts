@@ -234,7 +234,9 @@ export class TypeScriptProject implements Closable {
 			});
 
 			for (const [ kind, logEntryType, messages ] of [[ BuildMessageType.WARNING, Logger.EntryType.Warn, warnings ], [ BuildMessageType.ERROR, Logger.EntryType.Error, errors ]] as const) {
-				for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
+				if (messages.length > 0) {
+					for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
+				}
 
 				if (kind === BuildMessageType.ERROR && errors.length > 0) { return [] }
 			}
