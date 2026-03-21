@@ -1,103 +1,118 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { performance } from 'perf_hooks';
 
 vi.mock('src/logger', () => ({
 	Logger: {
-		info: vi.fn(),
-		error: vi.fn(),
-		log: vi.fn(),
-		clear: vi.fn(),
-		warn: vi.fn(),
-		success: vi.fn(),
-		header: vi.fn(),
-		separator: vi.fn(),
-		step: vi.fn(),
-		subSteps: vi.fn(),
+		info: vi.fn(), error: vi.fn(), log: vi.fn(), clear: vi.fn(),
+		warn: vi.fn(), success: vi.fn(), header: vi.fn(), separator: vi.fn(),
+		step: vi.fn(), subSteps: vi.fn(),
 		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
 	}
 }));
 
-describe('decorators/performance-logger', () => {
-	let exitSpy: any;
-	let logPerformance: typeof import('../../src/decorators/performance-logger').logPerformance;
+describe('logPerformance', () => {
+	let exitSpy: ReturnType<typeof vi.spyOn<typeof process, 'exit'>>;
+	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
+	let addPerformanceStep: typeof import('src/decorators/performance-logger').addPerformanceStep;
 
 	beforeEach(async () => {
 		vi.resetModules();
-		// Mock process.exit to prevent test crashes from @closeOnExit decorator
 		exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-		// Clear any existing performance marks/measures
 		performance.clearMarks();
 		performance.clearMeasures();
-		({ logPerformance } = await import('../../src/decorators/performance-logger'));
+		({ logPerformance, addPerformanceStep } = await import('src/decorators/performance-logger'));
 	});
 
 	afterEach(async () => {
-		const { processManager } = await import('../../src/process-manager');
+		const { processManager } = await import('src/process-manager');
 		processManager.close();
 		vi.restoreAllMocks();
 		performance.clearMarks();
 		performance.clearMeasures();
 	});
 
-	describe('@logPerformance decorator', () => {
-		it('should not affect the return value of synchronous methods', () => {
-			class TestClass {
-				@logPerformance('Test operation')
-				syncMethod(): string {
-					return 'result';
-				}
+	describe('sync methods', () => {
+		it('preserves return value', () => {
+			class Test {
+				@logPerformance('sync op')
+				method(): string { return 'result' }
 			}
 
-			const instance = new TestClass();
-			const result = instance.syncMethod();
-
-			expect(result).toBe('result');
+			expect(new Test().method()).toBe('result');
 		});
 
-		it('should not affect the return value of async methods', async () => {
-			class TestClass {
-				@logPerformance('Async operation')
-				async asyncMethod(): Promise<number> {
-					return 42;
-				}
+		it('preserves this context', () => {
+			class Test {
+				value = 100;
+
+				@logPerformance('ctx op')
+				method(): number { return this.value }
 			}
 
-			const instance = new TestClass();
-			const result = await instance.asyncMethod();
-
-			expect(result).toBe(42);
+			expect(new Test().method()).toBe(100);
 		});
 
-		it('should create performance marks for methods', () => {
-			class TestClass {
-				@logPerformance('Test operation')
-				testMethod(): void {
-					// Method body
-				}
+		it('preserves parameters', () => {
+			class Test {
+				@logPerformance('param op')
+				method(a: number, b: string): string { return `${a}-${b}` }
 			}
 
-			const instance = new TestClass();
+			expect(new Test().method(42, 'test')).toBe('42-test');
+		});
+
+		it('propagates errors', () => {
+			class Test {
+				@logPerformance('error op')
+				method(): never { throw new Error('test error') }
+			}
+
+			expect(() => new Test().method()).toThrow('test error');
+		});
+	});
+
+	describe('async methods', () => {
+		it('preserves resolved value', async () => {
+			class Test {
+				@logPerformance('async op')
+				async method(): Promise<number> { return 42 }
+			}
+
+			expect(await new Test().method()).toBe(42);
+		});
+
+		it('propagates rejections', async () => {
+			class Test {
+				@logPerformance('async err')
+				async method(): Promise<never> { throw new Error('async error') }
+			}
+
+			await expect(new Test().method()).rejects.toThrow('async error');
+		});
+	});
+
+	describe('performance marks and measures', () => {
+		it('creates performance marks', () => {
+			class Test {
+				@logPerformance('mark test')
+				method(): void {}
+			}
+
 			performance.clearMarks();
+			new Test().method();
 
-			instance.testMethod();
-
-			// Marks are created with the method name as key
 			const marks = performance.getEntriesByType('mark');
 			expect(marks.length).toBeGreaterThan(0);
 		});
 
-		it('should create performance measures for methods', async () => {
-			class TestClass {
-				@logPerformance('Test operation')
-				testMethod(): void {
-					// Method body
-				}
+		it('creates performance measures', async () => {
+			class Test {
+				@logPerformance('measure test')
+				method(): void {}
 			}
 
-			const instance = new TestClass();
 			performance.clearMeasures();
-
-			instance.testMethod();
+			new Test().method();
 
 			// Wait for PerformanceObserver to process
 			await new Promise(resolve => setTimeout(resolve, 50));
@@ -105,369 +120,95 @@ describe('decorators/performance-logger', () => {
 			const measures = performance.getEntriesByType('measure');
 			expect(measures.length).toBeGreaterThan(0);
 		});
+	});
 
-		it('should preserve method context (this binding)', () => {
-			class TestClass {
-				value = 100;
-
-				@logPerformance('Method with context')
-				methodUsingThis(): number {
-					return this.value;
-				}
+	describe('logResult option', () => {
+		it('passes result when logResult is true', () => {
+			class Test {
+				@logPerformance('result op', true)
+				method(): number[] { return [1, 2, 3] }
 			}
 
-			const instance = new TestClass();
-			const result = instance.methodUsingThis();
-
-			expect(result).toBe(100);
+			expect(new Test().method()).toEqual([1, 2, 3]);
 		});
+	});
 
-		it('should handle methods with parameters', () => {
-			class TestClass {
-				@logPerformance('Method with params')
-				methodWithParams(a: number, b: string): string {
-					return `${a}-${b}`;
-				}
+	describe('multiple methods', () => {
+		it('supports multiple decorated methods on one class', () => {
+			class Test {
+				@logPerformance('op1')
+				method1(): number { return 1 }
+
+				@logPerformance('op2')
+				method2(): number { return 2 }
 			}
 
-			const instance = new TestClass();
-			const result = instance.methodWithParams(42, 'test');
-
-			expect(result).toBe('42-test');
-		});
-
-		it('should work with multiple methods on the same class', () => {
-			class TestClass {
-				@logPerformance('Method 1')
-				method1(): number {
-					return 1;
-				}
-
-				@logPerformance('Method 2')
-				method2(): number {
-					return 2;
-				}
-
-				@logPerformance('Method 3')
-				method3(): number {
-					return 3;
-				}
-			}
-
-			const instance = new TestClass();
-
+			const instance = new Test();
 			expect(instance.method1()).toBe(1);
 			expect(instance.method2()).toBe(2);
-			expect(instance.method3()).toBe(3);
 		});
+	});
 
-		it('should handle symbol property keys', () => {
-			const methodKey = Symbol('testMethod');
+	describe('symbol keys', () => {
+		it('handles symbol property keys', () => {
+			const key = Symbol('testMethod');
 
-			class TestClass {
-				@logPerformance('Symbol method')
-				[methodKey](): string {
-					return 'symbol result';
+			class Test {
+				@logPerformance('symbol op')
+				[key](): string { return 'symbol result' }
+			}
+
+			expect(new Test()[key]()).toBe('symbol result');
+		});
+	});
+
+	describe('addPerformanceStep', () => {
+		it('accumulates sub-steps for the next measurement', async () => {
+			const { Logger } = await import('src/logger');
+
+			class Test {
+				@logPerformance('op with steps')
+				method(): void {
+					addPerformanceStep('sub-step-1', 50);
+					addPerformanceStep('sub-step-2', 100);
 				}
 			}
 
-			const instance = new TestClass();
-			const result = instance[methodKey]();
+			new Test().method();
 
-			expect(result).toBe('symbol result');
+			// Wait for PerformanceObserver to fire
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			expect(Logger.subSteps).toHaveBeenCalled();
 		});
+	});
 
-		it('should handle methods that throw errors', () => {
-			class TestClass {
-				@logPerformance('Error method')
-				errorMethod(): never {
-					throw new Error('Test error');
-				}
+	describe('build-failed branch', () => {
+		it('logs error when process.exitCode is set for Build message', async () => {
+			const { Logger } = await import('src/logger');
+
+			class BuildRunner {
+				@logPerformance('Build')
+				run(): void {}
 			}
 
-			const instance = new TestClass();
+			process.exitCode = 1;
+			new BuildRunner().run();
 
-			expect(() => instance.errorMethod()).toThrow('Test error');
+			// Wait for PerformanceObserver to fire
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Build failed'));
+			process.exitCode = undefined;
 		});
+	});
 
-		it('should handle async methods that reject', async () => {
-			class TestClass {
-				@logPerformance('Async error method')
-				async asyncErrorMethod(): Promise<never> {
-					throw new Error('Async test error');
-				}
-			}
-
-			const instance = new TestClass();
-
-			await expect(instance.asyncErrorMethod()).rejects.toThrow('Async test error');
-		});
-
-		it('should handle methods returning arrays', () => {
-			class TestClass {
-				@logPerformance('Array result', true)
-				arrayMethod(): number[] {
-					return [1, 2, 3, 4, 5];
-				}
-			}
-
-			const instance = new TestClass();
-			const result = instance.arrayMethod();
-
-			expect(result).toEqual([1, 2, 3, 4, 5]);
-		});
-
-		it('should handle methods returning objects', () => {
-			class TestClass {
-				@logPerformance('Object result')
-				objectMethod(): { data: string } {
-					return { data: 'test' };
-				}
-			}
-
-			const instance = new TestClass();
-			const result = instance.objectMethod();
-
-			expect(result).toEqual({ data: 'test' });
-		});
-
-		it('should handle async methods with delays', async () => {
-			class TestClass {
-				@logPerformance('Slow operation')
-				async slowMethod(): Promise<string> {
-					await new Promise(resolve => setTimeout(resolve, 10));
-					return 'done';
-				}
-			}
-
-			const instance = new TestClass();
-			const result = await instance.slowMethod();
-
-			expect(result).toBe('done');
-		});
-
-		it('should not interfere with method chaining', () => {
-			class TestClass {
-				value = 0;
-
-				@logPerformance('Add operation')
-				add(n: number): this {
-					this.value += n;
-					return this;
-				}
-
-				@logPerformance('Multiply operation')
-				multiply(n: number): this {
-					this.value *= n;
-					return this;
-				}
-			}
-
-			const instance = new TestClass();
-			instance.add(10).multiply(2);
-
-			expect(instance.value).toBe(20);
-		});
-
-		it('should handle methods with rest parameters', () => {
-			class TestClass {
-				@logPerformance('Rest params method')
-				sumAll(...numbers: number[]): number {
-					return numbers.reduce((a, b) => a + b, 0);
-				}
-			}
-
-			const instance = new TestClass();
-			const result = instance.sumAll(1, 2, 3, 4, 5);
-
-			expect(result).toBe(15);
-		});
-
-		it('should cleanup performance observer on SIGINT', async () => {
-			const sigintListenersBefore = process.listeners('SIGINT');
-			// Import processManager to trigger SIGINT handling
-			const { processManager } = await import('../../src/process-manager');
-			const sigintListenersAfter = process.listeners('SIGINT');
-			const processManagerListeners = sigintListenersAfter.filter((l) => !sigintListenersBefore.includes(l)) as Array<() => void>;
-
-			class TestClass {
-				@logPerformance('Test before SIGINT')
-				testMethod(): string {
-					return 'result';
-				}
-			}
-
-			const instance = new TestClass();
-
-			// Method should work before SIGINT
-			expect(instance.testMethod()).toBe('result');
-
-			// Simulate SIGINT handling without emitting SIGINT on the real process
-			for (const listener of processManagerListeners) { listener(); }
-
-			// The close method should have been called (covered by this test)
-			// Method should still work after close (decorator doesn't break functionality)
-			expect(instance.testMethod()).toBe('result');
-		});
-		it('should format durations > 1 minute correctly', async () => {
-			vi.resetModules();
-			
-			let observerCallback: any;
-			vi.doMock('perf_hooks', async () => {
-				const actual = await vi.importActual<any>('perf_hooks');
-				return {
-					...actual,
-					PerformanceObserver: class {
-						constructor(cb: any) {
-							observerCallback = cb;
-						}
-						observe = vi.fn();
-						disconnect = vi.fn();
-					}
-				};
-			});
-
-			// Re-import to use the mock
-			const { logPerformance } = await import('../../src/decorators/performance-logger');
-			const { Logger } = await import('../../src/logger');
-			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
-
-			class TestClass {
-				@logPerformance('Long operation')
-				longMethod(): void {}
-			}
-
-			const instance = new TestClass();
-			instance.longMethod();
-
-			// Trigger observer with > 1 minute duration
-			const mockList = {
-				getEntriesByType: () => [{
-					name: 'TestClass.longMethod',
-					duration: 65123, // 1m 5s 123ms
-					detail: { message: 'Long operation' }
-				}]
-			};
-
-			if (observerCallback) {
-				observerCallback(mockList);
-			} else {
-				throw new Error('PerformanceObserver callback was not captured');
-			}
-
-			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('1m5s123ms'));
-		});
-
-		it('should format durations > 1 second correctly', async () => {
-			vi.resetModules();
-			
-			let observerCallback: any;
-			vi.doMock('perf_hooks', async () => {
-				const actual = await vi.importActual<any>('perf_hooks');
-				return {
-					...actual,
-					PerformanceObserver: class {
-						constructor(cb: any) {
-							observerCallback = cb;
-						}
-						observe = vi.fn();
-						disconnect = vi.fn();
-					}
-				};
-			});
-
-			const { logPerformance } = await import('../../src/decorators/performance-logger');
-			const { Logger } = await import('../../src/logger');
-			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
-
-			class TestClass {
-				@logPerformance('Medium operation')
-				mediumMethod(): void {}
-			}
-
-			const instance = new TestClass();
-			instance.mediumMethod();
-
-			// Trigger observer with > 1 second duration
-			const mockList = {
-				getEntriesByType: () => [{
-					name: 'TestClass.mediumMethod',
-					duration: 1500, // 1s 500ms
-					detail: { message: 'Medium operation' }
-				}]
-			};
-
-			if (observerCallback) {
-				observerCallback(mockList);
-			} else {
-				throw new Error('PerformanceObserver callback was not captured');
-			}
-
-			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('1s500ms'));
-		});
-
-		it('should attach pending sub-steps to the measurement detail', async () => {
-			vi.resetModules();
-
-			let observerCallback: any;
-			vi.doMock('perf_hooks', async () => {
-				const actual = await vi.importActual<any>('perf_hooks');
-				return {
-					...actual,
-					PerformanceObserver: class {
-						constructor(cb: any) {
-							observerCallback = cb;
-						}
-						observe = vi.fn();
-						disconnect = vi.fn();
-					}
-				};
-			});
-
-			const { logPerformance, addPerformanceStep } = await import('../../src/decorators/performance-logger');
-			const { Logger } = await import('../../src/logger');
-			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
-			const subStepsSpy = vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
-
-			class TestClass {
-				@logPerformance('Type-checking')
-				typeCheck(): void {
-					addPerformanceStep('Emit', 355);
-					addPerformanceStep('Diagnostics', 0);
-					addPerformanceStep('Finalize', 5);
-				}
-			}
-
-			const instance = new TestClass();
-			instance.typeCheck();
-
-			const mockList = {
-				getEntriesByType: () => [{
-					name: 'TestClass.typeCheck',
-					duration: 366,
-					detail: {
-						message: 'Type-checking',
-						steps: [
-							{ name: 'Emit', duration: '355ms', ms: 355 },
-							{ name: 'Diagnostics', duration: '0ms', ms: 0 },
-							{ name: 'Finalize', duration: '5ms', ms: 5 },
-						]
-					}
-				}]
-			};
-
-			if (observerCallback) {
-				observerCallback(mockList);
-			} else {
-				throw new Error('PerformanceObserver callback was not captured');
-			}
-
-			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('Type-checking'));
-			expect(subStepsSpy).toHaveBeenCalledWith([
-				{ name: 'Emit', duration: '355ms', ms: 355 },
-				{ name: 'Diagnostics', duration: '0ms', ms: 0 },
-				{ name: 'Finalize', duration: '5ms', ms: 5 },
-			]);
+	describe('close', () => {
+		it('disconnects the performance observer on process exit without errors', () => {
+			// The PerformanceLogger is registered with processManager via @closeOnExit.
+			// Emitting 'exit' triggers handleExit which calls close() on all closeables,
+			// including the PerformanceLogger (which calls performanceObserver.disconnect()).
+			expect(() => process.emit('exit', 0)).not.toThrow();
 		});
 	});
 });

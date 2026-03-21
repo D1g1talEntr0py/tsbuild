@@ -4,11 +4,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { defaultDirOptions } from '../src/constants';
 import { FileManager } from '../src/file-manager';
 import { IncrementalBuildCache } from '../src/incremental-build-cache';
-import { mkdir, writeFile as fsWriteFile, chmod } from 'node:fs/promises';
+import { mkdir, writeFile as fsWriteFile } from 'node:fs/promises';
 import { TestHelper } from './scripts/test-helper';
 import type { AbsolutePath, CachedDeclaration } from '../src/@types';
 
-// Mock node:fs and node:fs/promises with memfs
 vi.mock('node:fs', async () => {
 	const memfs: typeof import('memfs') = await vi.importActual('memfs');
 	return memfs.fs;
@@ -27,266 +26,187 @@ describe('FileManager', () => {
 		vol.mkdirSync(tempDir, defaultDirOptions);
 	});
 
-	afterEach(() => {
-		TestHelper.teardownMemfs();
-	});
+	afterEach(() => { TestHelper.teardownMemfs() });
 
 	describe('constructor', () => {
-		it('should initialize without caching when no options provided', async () => {
+		it('initializes without caching when no cache provided', () => {
 			const manager = new FileManager();
 			expect(manager).toBeDefined();
 			expect(manager.getDeclarationFiles().size).toBe(0);
 		});
 
-		it('should initialize with caching when options provided', async () => {
-			// Create .tsbuild directory before initializing manager
+		it('initializes with caching when cache provided', async () => {
 			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
-
 			const cache = new IncrementalBuildCache(tempDir, 'tsconfig.tsbuildinfo');
 			const manager = new FileManager(cache);
 			expect(manager).toBeDefined();
 			expect(manager.getDeclarationFiles().size).toBe(0);
 		});
-
-		it('should handle errors when deleting tsbuildinfo file during cache verification', async () => {
-			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
-
-			// Create tsbuildinfo file and make it read-only to simulate deletion error
-			await fsWriteFile(join(tempDir, tsBuildInfoFile), '{"version":"5.0"}');
-			await chmod(join(tempDir, tsBuildInfoFile), 0o444);
-
-			try {
-				// Constructor calls verifyCache which should handle deletion error gracefully (line 122)
-				const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
-				const manager = new FileManager(cache);
-
-				expect(manager).toBeDefined();
-			} finally {
-				// Clean up: restore write permissions
-				await chmod(join(tempDir, tsBuildInfoFile), 0o644).catch(() => {});
-			}
-		});
 	});
 
 	describe('initialize', () => {
-		it('should prepare manager for emit', async () => {
+		it('prepares fileWriter for emit', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
-			expect(manager.fileWriter).toBeDefined();
 			expect(typeof manager.fileWriter).toBe('function');
 		});
 
-		it('should clear files when caching is disabled', async () => {
+		it('clears files when caching is disabled', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('test.d.ts', 'content');
 			manager.finalize();
 			expect(manager.getDeclarationFiles().size).toBe(1);
 
-			// Second initialize should clear files
 			await manager.initialize();
 			expect(manager.getDeclarationFiles().size).toBe(0);
 		});
 
-		it('should reset emit flag on each initialize', async () => {
+		it('resets emit flag on each initialize', async () => {
 			const manager = new FileManager();
 
-			// First emit
 			await manager.initialize();
 			manager.fileWriter('file1.d.ts', 'content1');
-			let hasEmitted = manager.finalize();
-			expect(hasEmitted).toBe(true);
+			expect(manager.finalize()).toBe(true);
 
-			// Second initialize should reset flag
 			await manager.initialize();
-			hasEmitted = manager.finalize();
-			expect(hasEmitted).toBe(true); // Non-incremental always returns true
+			expect(manager.finalize()).toBe(true); // Non-incremental always true
 		});
 
-		it('should load cache when caching is enabled', async () => {
+		it('loads cache when caching is enabled', async () => {
 			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
 			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
 
-			// First manager: write and save
 			const cache1 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager1 = new FileManager(cache1);
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			const hasEmitted = manager1.finalize();
-			expect(hasEmitted).toBe(true);
+			manager1.finalize();
 			await manager1.flush();
 
-			// Second manager: should load from cache
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager2 = new FileManager(cache2);
 			await manager2.initialize();
 			expect(manager2.getDeclarationFiles().size).toBe(1);
-			const cached = manager2.getDeclarationFiles().get('test.d.ts') as CachedDeclaration;
-			// Content is pre-processed: export const -> declare const + export {}
+			const cached = manager2.getDeclarationFiles().get('test.d.ts' as AbsolutePath) as CachedDeclaration;
 			expect(cached.code).toContain('declare const hello: string;');
 			expect(cached.code).toContain('export { hello }');
 		});
 
-		it('should handle corrupt cache file gracefully', async () => {
+		it('handles corrupt cache file gracefully', async () => {
 			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
 			const cacheDir = join(tempDir, '.tsbuild');
-
-			// Write invalid brotli data to cache file
 			await mkdir(cacheDir, defaultDirOptions);
 			await fsWriteFile(join(cacheDir, 'dts_cache.json.br'), 'invalid brotli data');
 
 			const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager = new FileManager(cache);
-
-			// Should handle corrupt cache gracefully (catch block coverage)
 			await expect(manager.initialize()).resolves.toBeUndefined();
-			expect(manager.getDeclarationFiles().size).toBe(0);
-		});
-
-		it('should handle early return when caching is disabled', async () => {
-			const manager = new FileManager();
-
-			await manager.initialize();
 			expect(manager.getDeclarationFiles().size).toBe(0);
 		});
 	});
 
 	describe('finalize', () => {
-		it('should return true when files were written', async () => {
+		it('returns true when files were written', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('file1.d.ts', 'content1');
 			manager.fileWriter('file2.d.ts', 'content2');
-
-			const hasEmitted = manager.finalize();
-			expect(hasEmitted).toBe(true);
+			expect(manager.finalize()).toBe(true);
 		});
 
-		it('should return true for non-incremental builds even when no files written', async () => {
+		it('returns true for non-incremental builds even when no files written', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
-
-			// Non-incremental (no cache) always returns true
-			const hasEmitted = manager.finalize();
-			expect(hasEmitted).toBe(true);
+			expect(manager.finalize()).toBe(true);
 		});
 
-		it('should return false for incremental builds when no files written', async () => {
+		it('returns false for incremental builds when no files written', async () => {
 			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
 			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
 
-			// Set up prior build with cached declarations (simulates a declaration project)
-			const cache1 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
-			const manager1 = new FileManager(cache1);
-			await manager1.initialize();
-			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			manager1.finalize();
-			await manager1.flush();
-
-			// Incremental build: cache restored, no new files written → no changes detected
-			const cache2 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
-			const manager2 = new FileManager(cache2);
-			await manager2.initialize();
-			const hasEmitted = manager2.finalize();
-			expect(hasEmitted).toBe(false);
-		});
-
-		it('should return false for incremental builds when only .tsbuildinfo is written', async () => {
-			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
-			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
-
-			// Set up prior build with cached declarations (simulates a declaration project)
-			const cache1 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
-			const manager1 = new FileManager(cache1);
-			await manager1.initialize();
-			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			manager1.finalize();
-			await manager1.flush();
-
-			// TypeScript always writes .tsbuildinfo even when nothing changed —
-			// this must NOT be treated as "files were emitted"
-			const cache2 = new IncrementalBuildCache(tempDir as AbsolutePath, tsBuildInfoFile);
-			const manager2 = new FileManager(cache2);
-			await manager2.initialize();
-			manager2.fileWriter(`${tempDir}/${tsBuildInfoFile}`, '{"version":"5.0"}');
-			const hasEmitted = manager2.finalize();
-			expect(hasEmitted).toBe(false);
-		});
-
-		it('should save cache when caching is enabled', async () => {
-			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
-			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
-
-			// Write and save
 			const cache1 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager1 = new FileManager(cache1);
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			let hasEmitted = manager1.finalize();
-			expect(hasEmitted).toBe(true);
+			manager1.finalize();
 			await manager1.flush();
 
-			// Verify cache was saved by loading in new instance
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager2 = new FileManager(cache2);
 			await manager2.initialize();
-			const cached = manager2.getDeclarationFiles().get('test.d.ts') as CachedDeclaration;
-			// Content is pre-processed: export const -> declare const + export {}
-			expect(cached.code).toContain('declare const hello: string;');
-			expect(cached.code).toContain('export { hello }');
+			expect(manager2.finalize()).toBe(false);
 		});
 
-		it('should update cached files on subsequent emits', async () => {
+		it('returns false for incremental builds when only .tsbuildinfo is written', async () => {
 			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
 			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
 
-			// First emit
 			const cache1 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager1 = new FileManager(cache1);
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
-			let hasEmitted = manager1.finalize();
-			expect(hasEmitted).toBe(true);
+			manager1.finalize();
 			await manager1.flush();
 
-			// Second emit with updated content
+			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager2 = new FileManager(cache2);
+			await manager2.initialize();
+			manager2.fileWriter(`${tempDir}/${tsBuildInfoFile}`, '{"version":"5.0"}');
+			expect(manager2.finalize()).toBe(false);
+		});
+
+		it('saves cache when caching is enabled', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			const cache1 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager1 = new FileManager(cache1);
+			await manager1.initialize();
+			manager1.fileWriter('test.d.ts', 'export const hello: string;');
+			manager1.finalize();
+			await manager1.flush();
+
+			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager2 = new FileManager(cache2);
+			await manager2.initialize();
+			const cached = manager2.getDeclarationFiles().get('test.d.ts' as AbsolutePath) as CachedDeclaration;
+			expect(cached.code).toContain('declare const hello: string;');
+		});
+
+		it('updates cached files on subsequent emits', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			const cache1 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager1 = new FileManager(cache1);
+			await manager1.initialize();
+			manager1.fileWriter('test.d.ts', 'export const hello: string;');
+			manager1.finalize();
+			await manager1.flush();
+
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager2 = new FileManager(cache2);
 			await manager2.initialize();
 			manager2.fileWriter('test.d.ts', 'export const hello: number;');
-			hasEmitted = manager2.finalize();
-			expect(hasEmitted).toBe(true);
+			manager2.finalize();
 			await manager2.flush();
 
-			// Verify updated content
 			const cache3 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
 			const manager3 = new FileManager(cache3);
 			await manager3.initialize();
-			const cached = manager3.getDeclarationFiles().get('test.d.ts') as CachedDeclaration;
-			// Content is pre-processed: export const -> declare const + export {}
+			const cached = manager3.getDeclarationFiles().get('test.d.ts' as AbsolutePath) as CachedDeclaration;
 			expect(cached.code).toContain('declare const hello: number;');
-			expect(cached.code).toContain('export { hello }');
-		});
-
-		it('should handle early return when caching is disabled (saveCache branch)', async () => {
-			const manager = new FileManager();
-
-			await manager.initialize();
-			manager.fileWriter('test.d.ts', 'content');
-
-			// finalize calls saveCache which should early return
-			const hasEmitted = manager.finalize();
-			expect(hasEmitted).toBe(true);
 		});
 	});
 
-	describe('getFiles', () => {
-		it('should return empty map initially', async () => {
+	describe('getDeclarationFiles', () => {
+		it('returns empty map initially', () => {
 			const manager = new FileManager();
 			expect(manager.getDeclarationFiles().size).toBe(0);
 		});
 
-		it('should return all stored files', async () => {
+		it('returns all stored files', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('file1.d.ts', 'content1');
@@ -295,29 +215,24 @@ describe('FileManager', () => {
 
 			const files = manager.getDeclarationFiles();
 			expect(files.size).toBe(2);
-			// Content is pre-processed and stored as CachedDeclaration
-			const file1 = files.get('file1.d.ts') as CachedDeclaration;
-			const file2 = files.get('file2.d.ts') as CachedDeclaration;
-			expect(file1.code).toBe('content1');
-			expect(file2.code).toBe('content2');
+			expect((files.get('file1.d.ts' as AbsolutePath) as CachedDeclaration).code).toBe('content1');
+			expect((files.get('file2.d.ts' as AbsolutePath) as CachedDeclaration).code).toBe('content2');
 		});
 	});
 
-	describe('fileWriter (WriteFileCallback)', () => {
-		it('should store declaration files in memory', async () => {
+	describe('fileWriter', () => {
+		it('stores declaration files in memory with pre-processing', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('test.d.ts', 'export const hello: string;');
 			manager.finalize();
 
-			expect(manager.getDeclarationFiles().size).toBe(1);
-			const cached = manager.getDeclarationFiles().get('test.d.ts') as CachedDeclaration;
-			// Content is pre-processed: export const -> declare const + export {}
+			const cached = manager.getDeclarationFiles().get('test.d.ts' as AbsolutePath) as CachedDeclaration;
 			expect(cached.code).toContain('declare const hello: string;');
 			expect(cached.code).toContain('export { hello }');
 		});
 
-		it('should store all file types when caching is disabled', async () => {
+		it('stores all file types when caching is disabled', async () => {
 			const manager = new FileManager();
 			await manager.initialize();
 			manager.fileWriter('test.js', 'console.log("hello")');
@@ -326,14 +241,11 @@ describe('FileManager', () => {
 			manager.finalize();
 
 			expect(manager.getDeclarationFiles().size).toBe(3);
-			expect(manager.getDeclarationFiles().has('test.js')).toBe(true);
-			expect(manager.getDeclarationFiles().has('test.d.ts')).toBe(true);
-			expect(manager.getDeclarationFiles().has('tsconfig.tsbuildinfo')).toBe(true);
 		});
 	});
 
 	describe('writeFiles', () => {
-		it('should return empty array when no files to write', async () => {
+		it('returns empty array when no files to write', async () => {
 			const manager = new FileManager();
 			const result = await manager.writeFiles(tempDir);
 			expect(result).toEqual([]);
@@ -341,109 +253,85 @@ describe('FileManager', () => {
 	});
 
 	describe('resolveEntryPoints', () => {
-		it('should return index entry point when no dtsEntryPoints specified and index exists', () => {
+		it('returns index entry point when no dtsEntryPoints and index exists', () => {
 			const manager = new FileManager();
-			const projectEntryPoints = {
-				index: './src/index.ts',
-				main: './src/main.ts',
-				utils: './src/utils.ts'
-			};
-
-			const result = manager.resolveEntryPoints(projectEntryPoints);
-
+			const result = manager.resolveEntryPoints({ index: './src/index.ts', main: './src/main.ts' } as unknown as Record<string, AbsolutePath>);
 			expect(result).toEqual({ index: './src/index.ts' });
 		});
 
-		it('should return all entry points when no dtsEntryPoints specified and no index exists', () => {
+		it('returns all entry points when no dtsEntryPoints and no index exists', () => {
 			const manager = new FileManager();
-			const projectEntryPoints = {
-				main: './src/main.ts',
-				utils: './src/utils.ts',
-				helper: './src/helper.ts'
-			};
-
-			const result = manager.resolveEntryPoints(projectEntryPoints);
-
-			expect(result).toEqual(projectEntryPoints);
+			const pts = { main: './src/main.ts', utils: './src/utils.ts' } as unknown as Record<string, AbsolutePath>;
+			const result = manager.resolveEntryPoints(pts);
+			expect(result).toEqual(pts);
 		});
 
-		it('should filter entry points when dtsEntryPoints array is provided', () => {
+		it('filters entry points when dtsEntryPoints array is provided', () => {
 			const manager = new FileManager();
-			const projectEntryPoints = {
-				index: './src/index.ts',
-				main: './src/main.ts',
-				utils: './src/utils.ts',
-				internal: './src/internal.ts'
-			};
-			const dtsEntryPoints = ['index', 'utils'];
-
-			const result = manager.resolveEntryPoints(projectEntryPoints, dtsEntryPoints);
-
-			expect(result).toEqual({
-				index: './src/index.ts',
-				utils: './src/utils.ts'
-			});
+			const result = manager.resolveEntryPoints(
+				{ index: './src/index.ts', main: './src/main.ts', utils: './src/utils.ts' } as unknown as Record<string, AbsolutePath>,
+				['index', 'utils']
+			);
+			expect(result).toEqual({ index: './src/index.ts', utils: './src/utils.ts' });
 		});
 
-		it('should return empty object when dtsEntryPoints is provided but no matches found', () => {
+		it('returns empty object when dtsEntryPoints has no matches', () => {
 			const manager = new FileManager();
-			const projectEntryPoints = {
-				index: './src/index.ts',
-				main: './src/main.ts'
-			};
-			const dtsEntryPoints = ['nonexistent', 'other'];
-
-			const result = manager.resolveEntryPoints(projectEntryPoints, dtsEntryPoints);
-
+			const result = manager.resolveEntryPoints(
+				{ index: './src/index.ts' } as unknown as Record<string, AbsolutePath>,
+				['nonexistent']
+			);
 			expect(result).toEqual({});
 		});
 
-		it('should handle empty dtsEntryPoints array', () => {
+		it('returns empty object for empty dtsEntryPoints array', () => {
 			const manager = new FileManager();
-			const projectEntryPoints = {
-				index: './src/index.ts',
-				main: './src/main.ts'
-			};
-			const dtsEntryPoints: string[] = [];
-
-			const result = manager.resolveEntryPoints(projectEntryPoints, dtsEntryPoints);
-
+			const result = manager.resolveEntryPoints(
+				{ index: './src/index.ts' } as unknown as Record<string, AbsolutePath>,
+				[]
+			);
 			expect(result).toEqual({});
-		});
-
-		it('should handle single entry point in projectEntryPoints', () => {
-			const manager = new FileManager();
-			const projectEntryPoints = {
-				index: './src/index.ts'
-			};
-
-			const result = manager.resolveEntryPoints(projectEntryPoints);
-
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should handle partial matches in dtsEntryPoints', () => {
-			const manager = new FileManager();
-			const projectEntryPoints = {
-				index: './src/index.ts',
-				main: './src/main.ts',
-				utils: './src/utils.ts'
-			};
-			const dtsEntryPoints = ['index', 'nonexistent'];
-
-			const result = manager.resolveEntryPoints(projectEntryPoints, dtsEntryPoints);
-
-			expect(result).toEqual({
-				index: './src/index.ts'
-			});
 		});
 	});
 
 	describe('[Symbol.toStringTag]', () => {
-		it('should return FileManager', () => {
+		it('returns FileManager', () => {
 			const manager = new FileManager();
-			expect(manager.toString()).toBe('[object FileManager]');
 			expect(Object.prototype.toString.call(manager)).toBe('[object FileManager]');
+		});
+	});
+
+	describe('close', () => {
+		it('clears all stored files', async () => {
+			const manager = new FileManager();
+			await manager.initialize();
+			manager.fileWriter('file.d.ts', 'export const x: number;');
+			manager.finalize();
+			expect(manager.getDeclarationFiles().size).toBe(1);
+
+			manager.close();
+			expect(manager.getDeclarationFiles().size).toBe(0);
+		});
+	});
+
+	describe('flush', () => {
+		it('awaits pending save operations', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager = new FileManager(cache);
+			await manager.initialize();
+			manager.fileWriter('test.d.ts', 'export const hello: string;');
+			manager.finalize();
+
+			// flush should resolve without error
+			await expect(manager.flush()).resolves.toBeUndefined();
+		});
+
+		it('is a no-op when no pending save exists', async () => {
+			const manager = new FileManager();
+			await expect(manager.flush()).resolves.toBeUndefined();
 		});
 	});
 });

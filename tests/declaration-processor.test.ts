@@ -1,427 +1,276 @@
 import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
-import { DeclarationProcessor } from '../src/dts/declaration-processor';
-import { UnsupportedSyntaxError } from '../src/errors';
+import { DeclarationProcessor } from 'src/dts/declaration-processor';
+import { UnsupportedSyntaxError } from 'src/errors';
 
-const createMockSourceFile = (text: string): ts.SourceFile => {
-	return ts.createSourceFile('test.d.ts', text, ts.ScriptTarget.ESNext, true);
-};
+const parse = (text: string): ts.SourceFile => ts.createSourceFile('test.d.ts', text, ts.ScriptTarget.ESNext, true);
 
 describe('DeclarationProcessor', () => {
 	describe('preProcess', () => {
-		describe('Modifiers', () => {
-			it('should remove export modifiers and add declare modifiers', () => {
-				const sourceText = `
-					export class MyClass {}
-					export function myFunction(): void {}
-					export enum MyEnum { A, B }
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+		describe('modifier rewriting', () => {
+			it('removes export and adds declare for classes', () => {
+				const result = DeclarationProcessor.preProcess(parse('export class MyClass {}'));
 				expect(result.code).toContain('declare class MyClass {}');
-				expect(result.code).toContain('declare function myFunction(): void {}');
-				expect(result.code).toContain('declare enum MyEnum');
 				expect(result.code).not.toContain('export class');
+			});
+
+			it('removes export and adds declare for functions', () => {
+				const result = DeclarationProcessor.preProcess(parse('export function myFn(): void;'));
+				expect(result.code).toContain('declare function myFn(): void');
 				expect(result.code).not.toContain('export function');
+			});
+
+			it('removes export and adds declare for enums', () => {
+				const result = DeclarationProcessor.preProcess(parse('export enum MyEnum { A, B }'));
+				expect(result.code).toContain('declare enum MyEnum');
 				expect(result.code).not.toContain('export enum');
 			});
 
-			it('should handle default exports', () => {
-				const sourceText = `
-					export default class MyClass {}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('handles export default class', () => {
+				const result = DeclarationProcessor.preProcess(parse('export default class MyClass {}'));
 				expect(result.code).toContain('declare class MyClass {}');
 				expect(result.code).toContain('export default MyClass;');
 			});
 
-			it('should generate name for anonymous default export class', () => {
-				const sourceText = `
-					export default class {}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('generates name for anonymous default export class', () => {
+				const result = DeclarationProcessor.preProcess(parse('export default class {}'));
 				expect(result.code).toMatch(/declare class \w+\{\}/);
 				expect(result.code).toContain('export default');
 			});
 
-			it('should generate name for anonymous default export class extending another', () => {
-				const sourceText = `
-					export class Base {}
-					export default class extends Base {}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('generates name for anonymous default export class with extends', () => {
+				const result = DeclarationProcessor.preProcess(parse('export class Base {}\nexport default class extends Base {}'));
 				expect(result.code).toMatch(/declare class \w+ extends Base \{\}/);
-				expect(result.code).toContain('export default');
 			});
 
-			it('should generate name for anonymous default export function', () => {
-				const sourceText = `
-					export default function() {}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('generates name for anonymous default export function', () => {
+				const result = DeclarationProcessor.preProcess(parse('export default function() {}'));
 				expect(result.code).toMatch(/declare function \w+\(\)/);
 				expect(result.code).toContain('export default');
 			});
 
-			it('should handle let and var variable declarations', () => {
-				const sourceText = `
-					export let x = 1;
-					export var y = 2;
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('handles let and var variable declarations', () => {
+				const result = DeclarationProcessor.preProcess(parse('export let x = 1;\nexport var y = 2;'));
 				expect(result.code).toContain('declare let x = 1');
 				expect(result.code).toContain('declare var y = 2');
 			});
 
-			it('should preserve interface declarations', () => {
-				const sourceText = `
-					export interface MyInterface {
-						prop: string;
-					}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('preserves interface declarations', () => {
+				const result = DeclarationProcessor.preProcess(parse('export interface MyInterface { prop: string; }'));
 				expect(result.code).toContain('interface MyInterface');
 				expect(result.code).not.toContain('declare interface');
 			});
 
-			it('should handle module declarations', () => {
-				const sourceText = `
-					export module MyModule {
-						export class MyClass {}
-					}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('handles module declarations', () => {
+				const result = DeclarationProcessor.preProcess(parse('export module MyModule { export class MyClass {} }'));
 				expect(result.code).toContain('declare module MyModule');
 				expect(result.code).not.toContain('export module');
 			});
 		});
 
-		describe('Variables', () => {
-			it('should split compound variable statements', () => {
-				const sourceText = `
-					export const a = 1, b = 2, c = 3;
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
-				// Note: NodeFlags.Const outputs as "2" in the prefix logic of preProcess
-				// "declare 2 b = 2;" seems to be the actual output based on previous tests
-				// Let's verify if we can fix the test expectation or if the code logic is weird but consistent
+		describe('variable splitting', () => {
+			it('splits compound variable statements', () => {
+				const result = DeclarationProcessor.preProcess(parse('export const a = 1, b = 2, c = 3;'));
 				expect(result.code).toContain('declare const a = 1;');
 				expect(result.code).toContain('declare const b = 2;');
 				expect(result.code).toContain('declare const c = 3;');
 			});
 
-			it('should split compound variable statements without whitespace', () => {
-				const sourceText = 'export const a=1,b=2;';
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('splits compound variables without whitespace', () => {
+				const result = DeclarationProcessor.preProcess(parse('export const a=1,b=2;'));
 				expect(result.code).toContain('declare const a=1;');
 				expect(result.code).toContain('declare const b=2;');
 			});
 		});
 
-		describe('Exports', () => {
-			it('should collect exported names', () => {
-				const sourceText = `
+		describe('exports', () => {
+			it('collects exported names into consolidated export statement', () => {
+				const result = DeclarationProcessor.preProcess(parse(`
 					export class MyClass {}
 					export interface MyInterface {}
 					export type MyType = string;
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+				`));
 				expect(result.code).toContain('export { MyClass, MyInterface, MyType }');
 			});
 
-			it('should remove empty export statements', () => {
-				const sourceText = `
-					export {};
-					export class MyClass {}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
-				const exportMatches = result.code.match(/export\s*{/g);
-				expect(exportMatches?.length).toBe(1);
+			it('removes empty export statements', () => {
+				const result = DeclarationProcessor.preProcess(parse('export {};\nexport class MyClass {}'));
+				const matches = result.code.match(/export\s*{/g);
+				expect(matches?.length).toBe(1);
 			});
 
-			it('should strip type keyword from export type statements', () => {
-				const sourceText = `
-					export type { Foo } from './foo';
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('strips type keyword from export type statements', () => {
+				const result = DeclarationProcessor.preProcess(parse("export type { Foo } from './foo';"));
 				expect(result.code).toContain("export { Foo } from './foo';");
 				expect(result.code).not.toContain('export type');
 			});
 
-			it('should duplicate namespace exports for renaming', () => {
-				const sourceText = `
-					export namespace MyNamespace {
-						export { Foo };
-					}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('duplicates namespace exports for renaming', () => {
+				const result = DeclarationProcessor.preProcess(parse('export namespace MyNS { export { Foo }; }'));
 				expect(result.code).toContain('export { Foo as Foo }');
 			});
 		});
 
-		describe('Imports', () => {
-			it('should strip type keyword from import type statements', () => {
-				const sourceText = `
-					import type { Foo } from './foo';
-					import type Bar from './bar';
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+		describe('imports', () => {
+			it('strips type keyword from import type statements', () => {
+				const result = DeclarationProcessor.preProcess(parse("import type { Foo } from './foo';\nimport type Bar from './bar';"));
 				expect(result.code).toContain("import { Foo } from './foo';");
 				expect(result.code).toContain("import Bar from './bar';");
 			});
 
-			it('should handle import type with no whitespace', () => {
-				const sourceText = "import type{Foo}from'./foo';";
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('handles import type with no whitespace', () => {
+				const result = DeclarationProcessor.preProcess(parse("import type{Foo}from'./foo';"));
 				expect(result.code).toContain("import {Foo}from'./foo';");
 			});
 
-			it('should strip inline type specifiers from imports', () => {
-				const sourceText = `
-					import { foo, type Bar, baz } from './module';
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('strips inline type specifiers from imports', () => {
+				const result = DeclarationProcessor.preProcess(parse("import { foo, type Bar, baz } from './module';"));
 				expect(result.code).toContain("import { foo, Bar, baz } from './module';");
 				expect(result.code).not.toContain('type Bar');
 			});
 
-			it('should handle inline import() types', () => {
-				const sourceText = `
-					export type MyType = import('./module').SomeType;
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('handles inline import() types', () => {
+				const result = DeclarationProcessor.preProcess(parse("export type MyType = import('./module').SomeType;"));
 				expect(result.code).toMatch(/import \* as \w+ from ["']\.\/module["'];/);
 				expect(result.code).toMatch(/type MyType = \w+\.SomeType;/);
 			});
 
-			it('should parse and remove triple-slash type references', () => {
-				const sourceText = `/// <reference types="node" />
-					export class MyClass {}
-				`;
-				const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
+			it('parses and removes triple-slash type references', () => {
+				const result = DeclarationProcessor.preProcess(parse('/// <reference types="node" />\nexport class MyClass {}'));
 				expect(result.code).not.toContain('/// <reference');
 				expect(result.typeReferences.has('node')).toBe(true);
+			});
+		});
+
+		describe('whitespace handling', () => {
+			it('does not eat into next token when removing export at end of line', () => {
+				const result = DeclarationProcessor.preProcess(parse('export\nclass MyClass {}'));
+				expect(result.code).toContain('declare class MyClass {}');
+				expect(result.code).not.toContain('declare lass');
+			});
+
+			it('handles export default modifier removal with trailing whitespace', () => {
+				const result = DeclarationProcessor.preProcess(parse('export default class Foo {}'));
+				expect(result.code).toContain('declare class Foo {}');
+				expect(result.code).not.toMatch(/^export default class/m);
+			});
+
+			it('handles export modifier with multiple spaces', () => {
+				const result = DeclarationProcessor.preProcess(parse('export   function myFn(): void;'));
+				expect(result.code).toContain('declare function myFn(): void');
+				expect(result.code).not.toMatch(/^export\s+function/m);
+			});
+		});
+
+		describe('function overloads', () => {
+			it('handles adjacent function overload declarations', () => {
+				const input = 'export function foo(a: string): string;\nexport function foo(a: number): number;\nexport function foo(a: string | number): string | number;';
+				const result = DeclarationProcessor.preProcess(parse(input));
+				expect(result.code).toContain('declare function foo(a: string): string;');
+				expect(result.code).toContain('declare function foo(a: number): number;');
+				expect(result.code).toContain('export { foo }');
 			});
 		});
 	});
 
 	describe('postProcess', () => {
-		it('should remove empty statements', () => {
-			const sourceText = `
-				;
-				class MyClass {}
-				;
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+		it('removes empty statements', () => {
+			const result = DeclarationProcessor.postProcess(parse(';\nclass MyClass {}\n;'));
 			expect(result).toContain('class MyClass {}');
-			const semicolonCount = (result.match(/;/g) || []).length;
-			expect(semicolonCount).toBeLessThan(3);
+			const emptyStatements = result.match(/^\s*;\s*$/gm) || [];
+			expect(emptyStatements).toHaveLength(0);
 		});
 
-		it('should fix import paths from .d.ts to .js', () => {
-			const sourceText = `
-				import { a } from './other.d.ts';
-				import { b } from './another.d.ts';
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+		it('fixes import paths from .d.ts to .js', () => {
+			const result = DeclarationProcessor.postProcess(parse("import { a } from './other.d.ts';\nimport { b } from './another.d.ts';"));
 			expect(result).toContain("import { a } from './other.js';");
 			expect(result).toContain("import { b } from './another.js';");
 		});
 
-		it('should fix export paths from .d.ts to .js', () => {
-			const sourceText = `
-				export { b } from './another.d.ts';
-				export type { c } from './types.d.ts';
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+		it('fixes export paths from .d.ts to .js', () => {
+			const result = DeclarationProcessor.postProcess(parse("export { b } from './another.d.ts';\nexport type { c } from './types.d.ts';"));
 			expect(result).toContain("export { b } from './another.js';");
 			expect(result).toContain("export type { c } from './types.js';");
 		});
 
-		it('should not modify absolute or package imports', () => {
-			const sourceText = `
-				import { x } from 'typescript';
-				import { y } from '@types/node';
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+		it('does not modify package imports', () => {
+			const result = DeclarationProcessor.postProcess(parse("import { x } from 'typescript';\nimport { y } from '@types/node';"));
 			expect(result).toContain("import { x } from 'typescript';");
 			expect(result).toContain("import { y } from '@types/node';");
 		});
 
-		it('should remove redundant re-exports in a namespace', () => {
-			const sourceText = `
-				declare namespace MyNamespace {
-					export { MyClass as MyClass };
-				}
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+		it('removes redundant re-exports in namespaces', () => {
+			const result = DeclarationProcessor.postProcess(parse('declare namespace NS { export { MyClass as MyClass }; }'));
 			expect(result).not.toContain('MyClass as MyClass');
 			expect(result).toContain('export { MyClass };');
 		});
 
-		it('should keep non-redundant re-exports in a namespace', () => {
-			const sourceText = `
-				declare namespace MyNamespace {
-					export { MyClass as Renamed };
-				}
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+		it('keeps non-redundant re-exports in namespaces', () => {
+			const result = DeclarationProcessor.postProcess(parse('declare namespace NS { export { MyClass as Renamed }; }'));
 			expect(result).toContain('MyClass as Renamed');
 		});
 
-		it('should handle multiple transformations together', () => {
-			const sourceText = `
+		it('handles multiple transformations together', () => {
+			const source = `
 				;
 				import { a } from './other.d.ts';
-				declare namespace MyNamespace {
+				declare namespace NS {
 					export { Foo as Foo };
 				}
 				export { b } from './another.d.ts';
 				;
 			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+			const result = DeclarationProcessor.postProcess(parse(source));
 			expect(result).toContain("import { a } from './other.js';");
 			expect(result).toContain("export { b } from './another.js';");
 			expect(result).not.toContain('Foo as Foo');
 			expect(result).toContain('export { Foo };');
-
-			const emptyStatements = result.match(/^\s*;\s*$/gm) || [];
-			expect(emptyStatements.length).toBe(0);
+			expect(result.match(/^\s*;\s*$/gm) || []).toHaveLength(0);
 		});
 
-		it('should preserve user-written namespaces', () => {
-			const sourceText = `
+		it('preserves user-written namespaces', () => {
+			const result = DeclarationProcessor.postProcess(parse(`
 				export namespace Utils {
-					export function isString(value: unknown): value is string {
-						return typeof value === 'string';
-					}
-					export const VERSION: string = '1.0.0';
+					export function isString(value: unknown): value is string;
+					export const VERSION: string;
 				}
-			`;
-			const result = DeclarationProcessor.postProcess(createMockSourceFile(sourceText));
-
+			`));
 			expect(result).toContain('namespace Utils');
 			expect(result).toContain('isString');
 			expect(result).toContain('VERSION');
 		});
 	});
+});
 
-	describe('UnsupportedSyntaxError', () => {
-		it('should create error with node information', () => {
-			const sourceText = 'export class MyClass {}';
-			const sourceFile = createMockSourceFile(sourceText);
-			const node = sourceFile.statements[0];
-			const error = new UnsupportedSyntaxError(node);
-
-			expect(error.message).toContain('Syntax not yet supported');
-			expect(error.message).toContain('ClassDeclaration');
-			expect(error).toBeInstanceOf(Error);
-		});
-
-		it('should use custom message when provided', () => {
-			const sourceText = 'export class MyClass {}';
-			const sourceFile = createMockSourceFile(sourceText);
-			const node = sourceFile.statements[0];
-			const error = new UnsupportedSyntaxError(node, 'Custom error message');
-
-			expect(error.message).toContain('Custom error message');
-			expect(error.message).toContain('ClassDeclaration');
-		});
-
-		it('should include node text in error message', () => {
-			const sourceText = 'export class MyClass {}';
-			const sourceFile = createMockSourceFile(sourceText);
-			const node = sourceFile.statements[0];
-			const error = new UnsupportedSyntaxError(node);
-
-			expect(error.message).toContain('export class MyClass {}');
-		});
-
-		it('should truncate long node text', () => {
-			const longText = 'export class VeryLongClassName '.repeat(10) + '{}';
-			const sourceFile = createMockSourceFile(longText);
-			const node = sourceFile.statements[0];
-			const error = new UnsupportedSyntaxError(node);
-
-			expect(error.message.length).toBeLessThan(longText.length + 100);
-		});
-
-		it('should handle nodes without getText method', () => {
-			const sourceText = 'export class MyClass {}';
-			const sourceFile = createMockSourceFile(sourceText);
-			const node = sourceFile.statements[0];
-
-			const nodeWithoutGetText = {
-				kind: node.kind,
-			};
-
-			const error = new UnsupportedSyntaxError(nodeWithoutGetText as unknown as import('typescript').Node);
-
-			expect(error.message).toContain('<no text>');
-		});
-
-		it('should include syntax kind name in error message', () => {
-			const sourceText = 'export interface MyInterface {}';
-			const sourceFile = createMockSourceFile(sourceText);
-			const node = sourceFile.statements[0];
-			const error = new UnsupportedSyntaxError(node);
-
-			expect(error.message).toContain('InterfaceDeclaration');
-		});
+describe('UnsupportedSyntaxError', () => {
+	it('includes syntax kind name', () => {
+		const sf = parse('export interface MyInterface {}');
+		const error = new UnsupportedSyntaxError(sf.statements[0]);
+		expect(error.message).toContain('InterfaceDeclaration');
 	});
 
-	describe('modifier removal whitespace handling', () => {
-		it('should not eat into next token when removing export modifier at end of line', () => {
-			const sourceText = 'export\nclass MyClass {}';
-			const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
+	it('includes node text in error message', () => {
+		const sf = parse('export class MyClass {}');
+		const error = new UnsupportedSyntaxError(sf.statements[0]);
+		expect(error.message).toContain('export class MyClass {}');
+	});
 
-			expect(result.code).toContain('declare class MyClass {}');
-			// Should not eat the 'c' in 'class'
-			expect(result.code).not.toContain('declare lass');
-		});
+	it('uses custom message when provided', () => {
+		const sf = parse('export class MyClass {}');
+		const error = new UnsupportedSyntaxError(sf.statements[0], 'Custom error message');
+		expect(error.message).toContain('Custom error message');
+		expect(error.message).toContain('ClassDeclaration');
+	});
 
-		it('should properly handle export default modifier removal with trailing whitespace', () => {
-			const sourceText = 'export default class Foo {}';
-			const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
+	it('truncates long node text', () => {
+		const longText = 'export class VeryLongClassName '.repeat(10) + '{}';
+		const sf = parse(longText);
+		const error = new UnsupportedSyntaxError(sf.statements[0]);
+		expect(error.message.length).toBeLessThan(longText.length + 100);
+	});
 
-			expect(result.code).toContain('declare class Foo {}');
-			// The export/default modifiers should be removed from the class declaration itself
-			// (preProcess generates a separate `export default Foo;` line, so we check the declaration line)
-			expect(result.code).not.toMatch(/^export default class/m);
-		});
-
-		it('should handle export modifier with multiple spaces after it', () => {
-			const sourceText = 'export   function myFn(): void;';
-			const result = DeclarationProcessor.preProcess(createMockSourceFile(sourceText));
-
-			expect(result.code).toContain('declare function myFn(): void');
-			// The export modifier should be removed from the declaration itself
-			expect(result.code).not.toMatch(/^export\s+function/m);
-		});
+	it('handles nodes without getText method', () => {
+		const error = new UnsupportedSyntaxError({ kind: ts.SyntaxKind.ClassDeclaration } as ts.Node);
+		expect(error.message).toContain('<no text>');
 	});
 });

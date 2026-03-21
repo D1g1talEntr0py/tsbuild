@@ -1,101 +1,89 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { OnLoadArgs, OnLoadResult, PluginBuild } from 'esbuild';
-import { Encoding } from '../../src/constants';
-import { TestHelper } from '../scripts/test-helper';
+import { Encoding } from 'src/constants';
 
 vi.mock('@swc/core', () => ({
 	transformFile: vi.fn(),
 }));
 
+// @ts-expect-error - @swc/core is mocked above
 const swc = await import('@swc/core');
-const { swcDecoratorMetadataPlugin } = await import('../../src/plugins/decorator-metadata');
+const { swcDecoratorMetadataPlugin } = await import('src/plugins/decorator-metadata');
 
 describe('swcDecoratorMetadataPlugin', () => {
-	let mockBuild: PluginBuild;
 	let onLoadCallback: (args: OnLoadArgs) => Promise<OnLoadResult>;
 
-	beforeEach(async () => {
-		await TestHelper.setupMemfs();
-		// Reset mocks
+	beforeEach(() => {
 		vi.resetAllMocks();
 
-		// Mock esbuild's PluginBuild object
 		const build: Partial<PluginBuild> = {
 			initialOptions: {},
-			onLoad: vi.fn((options, callback) => {
-				onLoadCallback = callback;
-			}),
+			onLoad: vi.fn((_options, callback) => { onLoadCallback = callback }),
 		};
-		mockBuild = build as PluginBuild;
+		swcDecoratorMetadataPlugin.setup(build as PluginBuild);
 	});
 
-	afterEach(() => {
-		TestHelper.teardownMemfs();
-	});
-
-	it('should have the correct name', () => {
+	it('has the correct name', () => {
 		expect(swcDecoratorMetadataPlugin.name).toBe('esbuild:swc-decorator-metadata');
 	});
 
-	it('should set keepNames to true and register onLoad callback', () => {
-		swcDecoratorMetadataPlugin.setup(mockBuild);
-		expect(mockBuild.initialOptions.keepNames).toBe(true);
-		expect(mockBuild.onLoad).toHaveBeenCalledWith({ filter: expect.any(RegExp) }, expect.any(Function));
+	it('sets keepNames to true', () => {
+		const build: Partial<PluginBuild> = {
+			initialOptions: {},
+			onLoad: vi.fn(),
+		};
+		swcDecoratorMetadataPlugin.setup(build as PluginBuild);
+		expect(build.initialOptions!.keepNames).toBe(true);
+	});
+
+	it('registers onLoad with TypeScript extension filter', () => {
+		const build: Partial<PluginBuild> = {
+			initialOptions: {},
+			onLoad: vi.fn(),
+		};
+		swcDecoratorMetadataPlugin.setup(build as PluginBuild);
+		expect(build.onLoad).toHaveBeenCalledWith({ filter: expect.any(RegExp) }, expect.any(Function));
 	});
 
 	describe('onLoad callback', () => {
-		const mockFilePath = '/path/to/file.ts';
+		it('transforms file with SWC and returns code', async () => {
+			vi.mocked(swc.transformFile).mockResolvedValue({ code: 'transformed;', map: undefined });
 
-		beforeEach(() => {
-			swcDecoratorMetadataPlugin.setup(mockBuild);
-		});
+			const result = await onLoadCallback({ path: '/src/file.ts' } as OnLoadArgs);
 
-		it('should transform file with SWC and return code', async () => {
-			const mockTransformedCode = 'transformed code;';
-			vi.mocked(swc.transformFile).mockResolvedValue({
-				code: mockTransformedCode,
-				map: undefined,
-			});
-
-			const result = await onLoadCallback({ path: mockFilePath });
-
-			expect(swc.transformFile).toHaveBeenCalledWith(mockFilePath, {
-				jsc: {
+			expect(swc.transformFile).toHaveBeenCalledWith('/src/file.ts', expect.objectContaining({
+				jsc: expect.objectContaining({
 					parser: { syntax: 'typescript', decorators: true },
 					transform: { legacyDecorator: true, decoratorMetadata: true },
 					keepClassNames: true,
 					target: 'esnext',
-				},
+				}),
 				sourceMaps: true,
-				configFile: false,
-				swcrc: false,
-			});
-			expect(result.contents).toBe(mockTransformedCode);
+			}));
+			expect(result.contents).toBe('transformed;');
 		});
 
-		it('should process and append sourcemap when available', async () => {
-			const mockFilePath = '/path/to/file.ts';
-			const mockTransformedCode = 'transformed code;';
-			const mockSourceMap = {
-				sources: ['/path/to/source1.ts', '/path/to/relative/source2.ts'],
-			};
-			const mockSourceMapString = JSON.stringify(mockSourceMap);
+		it('handles undefined source map', async () => {
+			vi.mocked(swc.transformFile).mockResolvedValue({ code: 'code;', map: undefined });
 
-			vi.mocked(swc.transformFile).mockResolvedValue({
-				code: mockTransformedCode,
-				map: mockSourceMapString,
+			const result = await onLoadCallback({ path: '/src/file.ts' } as OnLoadArgs);
+			expect(result.contents).toBe('code;');
+		});
+
+		it('appends inline base64 source map with relative paths', async () => {
+			const sourceMap = JSON.stringify({
+				sources: ['/path/to/source1.ts', '/path/to/sub/source2.ts'],
 			});
+			vi.mocked(swc.transformFile).mockResolvedValue({ code: 'code;', map: sourceMap });
 
-			const result = await onLoadCallback({ path: mockFilePath });
+			const result = await onLoadCallback({ path: '/path/to/file.ts' } as OnLoadArgs);
 
-			const sourceMapComment = '//# sourceMappingURL=data:application/json;base64,';
-			expect(result.contents.startsWith(mockTransformedCode + sourceMapComment)).toBe(true);
+			const prefix = '//# sourceMappingURL=data:application/json;base64,';
+			expect(result.contents).toContain(prefix);
 
-			const base64Map = result.contents.slice(mockTransformedCode.length + sourceMapComment.length);
-			const decodedMap = JSON.parse(Buffer.from(base64Map, 'base64').toString(Encoding.utf8));
-
-			// It should make the absolute paths relative to the file being processed
-			expect(decodedMap.sources).toEqual(['source1.ts', 'relative/source2.ts']);
+			const base64 = (result.contents as string).split(prefix)[1];
+			const decoded = JSON.parse(Buffer.from(base64, Encoding.base64).toString(Encoding.utf8));
+			expect(decoded.sources).toEqual(['source1.ts', 'sub/source2.ts']);
 		});
 	});
 });

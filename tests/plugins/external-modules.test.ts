@@ -1,125 +1,130 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { externalModulesPlugin } from '../../src/plugins/external-modules';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { externalModulesPlugin } from 'src/plugins/external-modules';
 import type { OnResolveArgs, OnResolveResult, PluginBuild } from 'esbuild';
-import { TestHelper } from '../scripts/test-helper';
 
 describe('externalModulesPlugin', () => {
-	let mockBuild: PluginBuild;
 	let onResolveCallback: (args: OnResolveArgs) => OnResolveResult | undefined;
 
-	const createOnResolveArgs = (path: string): OnResolveArgs => ({
+	const args = (path: string): OnResolveArgs => ({
 		path,
 		importer: '',
 		namespace: 'file',
 		resolveDir: '',
-		kind: 'import-statement'
+		kind: 'import-statement',
+		pluginData: undefined,
+		with: {}
 	});
 
 	const setupPlugin = (options: Parameters<typeof externalModulesPlugin>[0] = {}) => {
 		const plugin = externalModulesPlugin(options);
 		const build: Partial<PluginBuild> = {
-			onResolve: vi.fn((options, callback) => {
-				expect(options.filter).toEqual(/.*/);
-				onResolveCallback = callback;
-			}),
+			onResolve: vi.fn((_options, callback) => { onResolveCallback = callback }),
 		};
-		mockBuild = build as PluginBuild;
-		plugin.setup(mockBuild);
+		plugin.setup(build as PluginBuild);
+		return { plugin, build: build as PluginBuild };
 	};
 
-	beforeEach(async () => {
-		await TestHelper.setupMemfs();
-		vi.resetAllMocks();
+	beforeEach(() => { vi.resetAllMocks() });
+
+	it('has the correct name', () => {
+		expect(externalModulesPlugin({}).name).toBe('esbuild:external-modules');
 	});
 
-	afterEach(() => {
-		TestHelper.teardownMemfs();
+	it('registers onResolve with filter /.*/  ', () => {
+		const { build } = setupPlugin();
+		expect(build.onResolve).toHaveBeenCalledWith({ filter: /.*/ }, expect.any(Function));
 	});
 
-	it('should have the correct name', () => {
-		const plugin = externalModulesPlugin({});
-		expect(plugin.name).toBe('esbuild:external-modules');
-	});
+	describe('default options', () => {
+		beforeEach(() => { setupPlugin() });
 
-	it('should register onResolve callback with the correct filter', () => {
-		setupPlugin();
-		expect(mockBuild.onResolve).toHaveBeenCalledWith({ filter: /.*/ }, expect.any(Function));
-	});
+		const bareSpecifiers: [string][] = [
+			['lodash'],
+			['react'],
+			['@scope/pkg'],
+			['node:fs'],
+			['esbuild'],
+			['@scope/pkg/deep/import'],
+		];
 
-	describe('onResolve callback logic', () => {
-		describe('with default options', () => {
-			beforeEach(() => {
-				setupPlugin();
-			});
-
-			it('should mark a bare module specifier as external', () => {
-				const result = onResolveCallback(createOnResolveArgs('some-external-module'));
-				expect(result).toEqual({ path: 'some-external-module', external: true });
-			});
-
-			it('should mark a scoped bare module specifier as external', () => {
-				const result = onResolveCallback(createOnResolveArgs('@scope/pkg'));
-				expect(result).toEqual({ path: '@scope/pkg', external: true });
-			});
-
-			it('should not mark relative paths as external', () => {
-				expect(onResolveCallback(createOnResolveArgs('./local'))).toBeUndefined();
-				expect(onResolveCallback(createOnResolveArgs('../local'))).toBeUndefined();
-			});
-
-			it('should not mark absolute paths as external', () => {
-				expect(onResolveCallback(createOnResolveArgs('/abs/path'))).toBeUndefined();
-				expect(onResolveCallback(createOnResolveArgs('C:\\win\\path'))).toBeUndefined();
-			});
+		it.each(bareSpecifiers)('marks bare specifier "%s" as external', (path) => {
+			const result = onResolveCallback(args(path));
+			expect(result).toEqual({ path, external: true });
 		});
 
-		describe('with "dependencies" option', () => {
-			it('should mark modules matching dependencies as external', () => {
-				setupPlugin({ dependencies: ['forced-external', /^@my-scope\//] });
+		const localPaths: [string][] = [
+			['./local'],
+			['../parent'],
+			['/absolute/path'],
+			['./foo/bar.js'],
+			['C:\\win\\path'],
+		];
 
-				let result = onResolveCallback(createOnResolveArgs('forced-external'));
-				expect(result).toEqual({ external: true });
+		it.each(localPaths)('does not mark local path "%s" as external', (path) => {
+			expect(onResolveCallback(args(path))).toBeUndefined();
+		});
+	});
 
-				result = onResolveCallback(createOnResolveArgs('forced-external/deep'));
-				expect(result).toEqual({ external: true });
-
-				result = onResolveCallback(createOnResolveArgs('@my-scope/pkg'));
-				expect(result).toEqual({ external: true });
-			});
-
-			it('should still mark other bare specifiers as external', () => {
-				setupPlugin({ dependencies: ['forced-external'] });
-				const result = onResolveCallback(createOnResolveArgs('another-bare-specifier'));
-				expect(result).toEqual({ path: 'another-bare-specifier', external: true });
-			});
+	describe('dependencies option', () => {
+		it('marks matching strings as external (no path in result)', () => {
+			setupPlugin({ dependencies: ['forced-external'] });
+			expect(onResolveCallback(args('forced-external'))).toEqual({ external: true });
 		});
 
-		describe('with "noExternal" option', () => {
-			it('should not mark modules matching noExternal as external', () => {
-				setupPlugin({ noExternal: ['not-external', /^@not-external\//] });
+		it('matches deep imports via package name extraction', () => {
+			setupPlugin({ dependencies: ['forced-external'] });
+			expect(onResolveCallback(args('forced-external/deep'))).toEqual({ external: true });
+		});
 
-				let result = onResolveCallback(createOnResolveArgs('not-external'));
-				expect(result).toBeUndefined();
+		it('matches regex patterns', () => {
+			setupPlugin({ dependencies: [/^@my-scope\//] });
+			expect(onResolveCallback(args('@my-scope/pkg'))).toEqual({ external: true });
+		});
 
-				result = onResolveCallback(createOnResolveArgs('not-external/deep'));
-				expect(result).toBeUndefined();
+		it('still marks other bare specifiers as external', () => {
+			setupPlugin({ dependencies: ['forced-external'] });
+			const result = onResolveCallback(args('another-bare'));
+			expect(result).toEqual({ path: 'another-bare', external: true });
+		});
+	});
 
-				result = onResolveCallback(createOnResolveArgs('@not-external/pkg'));
-				expect(result).toBeUndefined();
-			});
+	describe('noExternal option', () => {
+		it('prevents matching modules from being marked external', () => {
+			setupPlugin({ noExternal: ['not-external'] });
+			expect(onResolveCallback(args('not-external'))).toBeUndefined();
+		});
 
-			it('should prioritize noExternal over other rules', () => {
-				// 'bare-specifier' would normally be external
-				setupPlugin({ noExternal: ['bare-specifier'] });
-				const result = onResolveCallback(createOnResolveArgs('bare-specifier'));
-				expect(result).toBeUndefined();
-			});
+		it('matches deep imports via package name', () => {
+			setupPlugin({ noExternal: ['not-external'] });
+			expect(onResolveCallback(args('not-external/deep'))).toBeUndefined();
+		});
 
-			it('should prioritize noExternal over dependencies', () => {
-				setupPlugin({ dependencies: ['my-dep'], noExternal: ['my-dep'] });
-				const result = onResolveCallback(createOnResolveArgs('my-dep'));
-				expect(result).toBeUndefined();
-			});
+		it('supports regex patterns', () => {
+			setupPlugin({ noExternal: [/^@keep\//] });
+			expect(onResolveCallback(args('@keep/pkg'))).toBeUndefined();
+		});
+
+		it('takes priority over bare specifier default', () => {
+			setupPlugin({ noExternal: ['bare-specifier'] });
+			expect(onResolveCallback(args('bare-specifier'))).toBeUndefined();
+		});
+
+		it('takes priority over dependencies', () => {
+			setupPlugin({ dependencies: ['my-dep'], noExternal: ['my-dep'] });
+			expect(onResolveCallback(args('my-dep'))).toBeUndefined();
+		});
+	});
+
+	describe('packageName extraction', () => {
+		it.each([
+			['lodash/fp', 'lodash'],
+			['@scope/pkg/deep', '@scope/pkg'],
+			['react', 'react'],
+			['@scope/pkg', '@scope/pkg'],
+			['@scope', '@scope'],
+		])('dependencies match "%s" via package name "%s"', (id, pkg) => {
+			setupPlugin({ dependencies: [pkg] });
+			expect(onResolveCallback(args(id))).toEqual({ external: true });
 		});
 	});
 });

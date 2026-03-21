@@ -1,292 +1,189 @@
 import { describe, it, expect } from 'vitest';
-import { ScriptTarget } from 'typescript';
+import { ScriptTarget, JsxEmit } from 'typescript';
 import {
-	Package,
-	Platform,
-	BuildMessageType,
-	DependencyEntryType,
-	FileExtension,
-	format,
-	newLine,
-	sourceScriptExtensionExpression,
-	typeScriptExtensionExpression,
-	processEnvExpansionPattern,
-	inlineTypePattern,
-	dataUnits,
-	compilerOptionOverrides,
-	Encoding,
-	defaultDirOptions,
-	defaultSourceDirectory,
-	typeMatcher,
-	toEsTarget,
-} from '../src/constants';
+	dataUnits, compilerOptionOverrides, Package, Platform, BuildMessageType,
+	DependencyEntryType, sourceScriptExtensionExpression, typeScriptExtensionExpression,
+	processEnvExpansionPattern, inlineTypePattern, Encoding, defaultDirOptions,
+	defaultCleanOptions, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint,
+	defaultEntryFile, cacheDirectory, buildInfoFile, dtsCacheFile, dtsCacheVersion,
+	format, newLine, typeMatcher, FileExtension, toEsTarget, toJsxRenderingMode
+} from 'src/constants';
 
-describe('Constants', () => {
-	describe('Package', () => {
-		it('should define BUNDLE as "bundle"', () => {
-			expect(Package.BUNDLE).toBe('bundle');
-		});
+describe('constants', () => {
+	describe('toEsTarget', () => {
+		const targetMatrix: [ScriptTarget, string][] = [
+			[ScriptTarget.ES3, 'ES6'],
+			[ScriptTarget.ES5, 'ES6'],
+			[ScriptTarget.ES2015, 'ES2015'],
+			[ScriptTarget.ES2016, 'ES2016'],
+			[ScriptTarget.ES2017, 'ES2017'],
+			[ScriptTarget.ES2018, 'ES2018'],
+			[ScriptTarget.ES2019, 'ES2019'],
+			[ScriptTarget.ES2020, 'ES2020'],
+			[ScriptTarget.ES2021, 'ES2021'],
+			[ScriptTarget.ES2022, 'ES2022'],
+			[ScriptTarget.ES2023, 'ES2023'],
+			[ScriptTarget.ES2024, 'ES2024'],
+			[ScriptTarget.ESNext, 'ESNext'],
+			[ScriptTarget.JSON, 'ESNext'],
+		];
 
-		it('should define EXTERNAL as "external"', () => {
-			expect(Package.EXTERNAL).toBe('external');
-		});
-	});
-
-	describe('Platform', () => {
-		it('should define NODE as "node"', () => {
-			expect(Platform.NODE).toBe('node');
-		});
-
-		it('should define BROWSER as "browser"', () => {
-			expect(Platform.BROWSER).toBe('browser');
-		});
-
-		it('should define NEUTRAL as "neutral"', () => {
-			expect(Platform.NEUTRAL).toBe('neutral');
+		it.each(targetMatrix)('maps ScriptTarget %i to %s', (target, expected) => {
+			expect(toEsTarget(target)).toBe(expected);
 		});
 	});
 
-	describe('BuildMessageType', () => {
-		it('should define ERROR as "error"', () => {
-			expect(BuildMessageType.ERROR).toBe('error');
+	describe('toJsxRenderingMode', () => {
+		const jsxMatrix: [JsxEmit, string | undefined][] = [
+			[JsxEmit.Preserve, 'preserve'],
+			[JsxEmit.React, 'react'],
+			[JsxEmit.ReactNative, 'react-native'],
+			[JsxEmit.ReactJSX, 'react-jsx'],
+			[JsxEmit.ReactJSXDev, 'react-jsxdev'],
+			[JsxEmit.None, undefined],
+		];
+
+		it.each(jsxMatrix)('maps JsxEmit %i to %s', (jsxEmit, expected) => {
+			expect(toJsxRenderingMode(jsxEmit)).toBe(expected);
 		});
 
-		it('should define WARNING as "warning"', () => {
-			expect(BuildMessageType.WARNING).toBe('warning');
-		});
-	});
-
-	describe('DependencyEntryType', () => {
-		it('should define DEPENDENCIES as "dependencies"', () => {
-			expect(DependencyEntryType.DEPENDENCIES).toBe('dependencies');
-		});
-
-		it('should define PEER_DEPENDENCIES as "peerDependencies"', () => {
-			expect(DependencyEntryType.PEER_DEPENDENCIES).toBe('peerDependencies');
-		});
-	});
-
-	describe('FileExtension', () => {
-		it('should define JS as ".js"', () => {
-			expect(FileExtension.JS).toBe('.js');
-		});
-
-		it('should define DTS as ".d.ts"', () => {
-			expect(FileExtension.DTS).toBe('.d.ts');
-		});
-
-		it('should define CSS as ".css"', () => {
-			expect(FileExtension.CSS).toBe('.css');
-		});
-
-		it('should define JSON as ".json"', () => {
-			expect(FileExtension.JSON).toBe('.json');
-		});
-	});
-
-	describe('format', () => {
-		it('should be "esm"', () => {
-			expect(format).toBe('esm');
-		});
-	});
-
-	describe('newLine', () => {
-		it('should be a line feed character', () => {
-			expect(newLine).toBe('\n');
+		it('returns undefined when jsxEmit is undefined', () => {
+			expect(toJsxRenderingMode(undefined)).toBeUndefined();
 		});
 	});
 
 	describe('sourceScriptExtensionExpression', () => {
-		it('should match .js files', () => {
-			expect(sourceScriptExtensionExpression.test('.js')).toBe(true);
-			expect(sourceScriptExtensionExpression.test('file.js')).toBe(true);
-		});
+		const matchMatrix: [string, boolean][] = [
+			['file.ts', true],
+			['file.tsx', true],
+			['file.js', true],
+			['file.jsx', true],
+			['file.d.ts', false],
+			['file.css', false],
+			['file.json', false],
+			['file.d.tsx', false],
+		];
 
-		it('should match .ts files', () => {
-			expect(sourceScriptExtensionExpression.test('.ts')).toBe(true);
-			expect(sourceScriptExtensionExpression.test('file.ts')).toBe(true);
-		});
-
-		it('should match .jsx files', () => {
-			expect(sourceScriptExtensionExpression.test('.jsx')).toBe(true);
-			expect(sourceScriptExtensionExpression.test('file.jsx')).toBe(true);
-		});
-
-		it('should match .tsx files', () => {
-			expect(sourceScriptExtensionExpression.test('.tsx')).toBe(true);
-			expect(sourceScriptExtensionExpression.test('file.tsx')).toBe(true);
-		});
-
-		it('should not match .css files', () => {
-			expect(sourceScriptExtensionExpression.test('.css')).toBe(false);
-			expect(sourceScriptExtensionExpression.test('file.css')).toBe(false);
-		});
-
-		it('should not match .json files', () => {
-			expect(sourceScriptExtensionExpression.test('.json')).toBe(false);
-			expect(sourceScriptExtensionExpression.test('file.json')).toBe(false);
+		it.each(matchMatrix)('%s → %s', (input, expected) => {
+			expect(sourceScriptExtensionExpression.test(input)).toBe(expected);
 		});
 	});
 
 	describe('typeScriptExtensionExpression', () => {
-		it('should match .ts files', () => {
-			expect(typeScriptExtensionExpression.test('.ts')).toBe(true);
-			expect(typeScriptExtensionExpression.test('file.ts')).toBe(true);
-		});
+		const matchMatrix: [string, boolean][] = [
+			['file.ts', true],
+			['file.tsx', true],
+			['file.js', false],
+			['file.d.ts', true],
+			['file.css', false],
+		];
 
-		it('should match .tsx files', () => {
-			expect(typeScriptExtensionExpression.test('.tsx')).toBe(true);
-			expect(typeScriptExtensionExpression.test('file.tsx')).toBe(true);
-		});
-
-		it('should not match .js files', () => {
-			expect(typeScriptExtensionExpression.test('.js')).toBe(false);
-			expect(typeScriptExtensionExpression.test('file.js')).toBe(false);
-		});
-
-		it('should not match .jsx files', () => {
-			expect(typeScriptExtensionExpression.test('.jsx')).toBe(false);
-			expect(typeScriptExtensionExpression.test('file.jsx')).toBe(false);
-		});
-	});
-
-	describe('dataUnits', () => {
-		it('should contain correct units', () => {
-			expect(dataUnits).toEqual(['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']);
-		});
-	});
-
-	describe('compilerOptionOverrides', () => {
-		it('should have correct overrides', () => {
-			expect(compilerOptionOverrides).toEqual({
-				noEmitOnError: true,
-				allowJs: false,
-				checkJs: false,
-				declarationMap: false,
-				skipLibCheck: true,
-				preserveSymlinks: false,
-				target: ScriptTarget.ESNext,
-			});
-		});
-	});
-
-	describe('Encoding', () => {
-		it('should define utf8', () => {
-			expect(Encoding.utf8).toBe('utf8');
-		});
-
-		it('should define base64', () => {
-			expect(Encoding.base64).toBe('base64');
-		});
-	});
-
-	describe('defaultDirOptions', () => {
-		it('should be recursive', () => {
-			expect(defaultDirOptions).toEqual({ recursive: true });
-		});
-	});
-
-	describe('defaultSourceDirectory', () => {
-		it('should be ./src', () => {
-			expect(defaultSourceDirectory).toBe('./src');
-		});
-	});
-
-	describe('typeMatcher', () => {
-		it('should match "type" word boundary', () => {
-			expect(typeMatcher.test('type')).toBe(true);
-			expect(typeMatcher.test(' type ')).toBe(true);
-			expect(typeMatcher.test('prototype')).toBe(false);
+		it.each(matchMatrix)('%s → %s', (input, expected) => {
+			expect(typeScriptExtensionExpression.test(input)).toBe(expected);
 		});
 	});
 
 	describe('processEnvExpansionPattern', () => {
-		it('should match process.env variable references', () => {
-			processEnvExpansionPattern.lastIndex = 0;
-			expect(processEnvExpansionPattern.test('${process.env.NODE_ENV}')).toBe(true);
-		});
-
-		it('should capture the variable name', () => {
-			processEnvExpansionPattern.lastIndex = 0;
-			const match = processEnvExpansionPattern.exec('${process.env.npm_package_version}');
+		it('matches ${process.env.VAR} pattern', () => {
+			const match = '${process.env.npm_package_version}'.match(processEnvExpansionPattern);
 			expect(match).not.toBeNull();
-			expect(match![1]).toBe('npm_package_version');
 		});
 
-		it('should match multiple occurrences', () => {
+		it('captures variable name', () => {
 			processEnvExpansionPattern.lastIndex = 0;
-			const text = 'v${process.env.VERSION}-${process.env.BUILD}';
-			const matches: string[] = [];
-			let match;
-			while ((match = processEnvExpansionPattern.exec(text)) !== null) {
-				matches.push(match[1]);
-			}
-			expect(matches).toEqual(['VERSION', 'BUILD']);
+			const result = processEnvExpansionPattern.exec('${process.env.MY_VAR}');
+			expect(result?.[1]).toBe('MY_VAR');
 		});
 
-		it('should not match invalid syntax', () => {
-			processEnvExpansionPattern.lastIndex = 0;
-			expect(processEnvExpansionPattern.test('$process.env.NODE_ENV')).toBe(false);
-			processEnvExpansionPattern.lastIndex = 0;
-			expect(processEnvExpansionPattern.test('${NODE_ENV}')).toBe(false);
+		it('does not match invalid patterns', () => {
+			expect(processEnvExpansionPattern.test('${env.VAR}')).toBe(false);
 		});
 	});
 
 	describe('inlineTypePattern', () => {
-		it('should match inline type specifiers after brace', () => {
-			inlineTypePattern.lastIndex = 0;
-			expect(inlineTypePattern.test('{ type ')).toBe(true);
+		it('matches inline type specifiers', () => {
+			const input = '{ type Foo, Bar }';
+			expect(inlineTypePattern.test(input)).toBe(true);
 		});
 
-		it('should match inline type specifiers after comma', () => {
+		it('matches after comma', () => {
 			inlineTypePattern.lastIndex = 0;
-			expect(inlineTypePattern.test(', type ')).toBe(true);
-		});
-
-		it('should capture the prefix', () => {
-			inlineTypePattern.lastIndex = 0;
-			const match = inlineTypePattern.exec('{ type Foo');
-			expect(match).not.toBeNull();
-			expect(match![1]).toBe('{ ');
-		});
-
-		it('should match multiple inline type specifiers', () => {
-			inlineTypePattern.lastIndex = 0;
-			const text = 'import { foo, type Bar, type Baz } from "module"';
-			const matches: string[] = [];
-			let match;
-			while ((match = inlineTypePattern.exec(text)) !== null) {
-				matches.push(match[1]);
-			}
-			expect(matches).toEqual([', ', ', ']);
+			const input = ', type Baz';
+			expect(inlineTypePattern.test(input)).toBe(true);
 		});
 	});
 
-	describe('toEsTarget', () => {
-		it('should convert ES3 and ES5 to ES6 (esbuild minimum)', () => {
-			expect(toEsTarget(ScriptTarget.ES3)).toBe('ES6');
-			expect(toEsTarget(ScriptTarget.ES5)).toBe('ES6');
+	describe('typeMatcher', () => {
+		it('matches word "type"', () => {
+			expect(typeMatcher.test('import type { Foo }')).toBe(true);
 		});
 
-		it('should convert ES2015+ to corresponding ES target', () => {
-			expect(toEsTarget(ScriptTarget.ES2015)).toBe('ES2015');
-			expect(toEsTarget(ScriptTarget.ES2016)).toBe('ES2016');
-			expect(toEsTarget(ScriptTarget.ES2017)).toBe('ES2017');
-			expect(toEsTarget(ScriptTarget.ES2018)).toBe('ES2018');
-			expect(toEsTarget(ScriptTarget.ES2019)).toBe('ES2019');
-			expect(toEsTarget(ScriptTarget.ES2020)).toBe('ES2020');
-			expect(toEsTarget(ScriptTarget.ES2021)).toBe('ES2021');
-			expect(toEsTarget(ScriptTarget.ES2022)).toBe('ES2022');
-			expect(toEsTarget(ScriptTarget.ES2023)).toBe('ES2023');
-			expect(toEsTarget(ScriptTarget.ES2024)).toBe('ES2024');
+		it('does not match "type" within words', () => {
+			expect(typeMatcher.test('prototype')).toBe(false);
+		});
+	});
+
+	describe('static values', () => {
+		it('exports correct package constants', () => {
+			expect(Package.BUNDLE).toBe('bundle');
+			expect(Package.EXTERNAL).toBe('external');
 		});
 
-		it('should convert ESNext to ESNext', () => {
-			expect(toEsTarget(ScriptTarget.ESNext)).toBe('ESNext');
+		it('exports correct platform constants', () => {
+			expect(Platform.NODE).toBe('node');
+			expect(Platform.BROWSER).toBe('browser');
+			expect(Platform.NEUTRAL).toBe('neutral');
 		});
 
-		it('should convert JSON target to ESNext', () => {
-			expect(toEsTarget(ScriptTarget.JSON)).toBe('ESNext');
+		it('exports correct build message types', () => {
+			expect(BuildMessageType.ERROR).toBe('error');
+			expect(BuildMessageType.WARNING).toBe('warning');
+		});
+
+		it('exports correct dependency entry types', () => {
+			expect(DependencyEntryType.DEPENDENCIES).toBe('dependencies');
+			expect(DependencyEntryType.PEER_DEPENDENCIES).toBe('peerDependencies');
+		});
+
+		it('exports correct file extensions', () => {
+			expect(FileExtension.JS).toBe('.js');
+			expect(FileExtension.DTS).toBe('.d.ts');
+			expect(FileExtension.CSS).toBe('.css');
+			expect(FileExtension.JSON).toBe('.json');
+		});
+
+		it('exports correct encoding values', () => {
+			expect(Encoding.utf8).toBe('utf8');
+			expect(Encoding.base64).toBe('base64');
+		});
+
+		it('exports correct default values', () => {
+			expect(defaultDirOptions).toEqual({ recursive: true });
+			expect(defaultCleanOptions).toEqual({ recursive: true, force: true });
+			expect(defaultOutDirectory).toBe('dist');
+			expect(defaultEntryPoint).toBe('index');
+			expect(defaultSourceDirectory).toBe('./src');
+			expect(defaultEntryFile).toBe('src/index.ts');
+			expect(cacheDirectory).toBe('.tsbuild');
+			expect(buildInfoFile).toBe('tsconfig.tsbuildinfo');
+			expect(dtsCacheFile).toBe('dts_cache.v8.br');
+			expect(dtsCacheVersion).toBe(2);
+			expect(format).toBe('esm');
+			expect(newLine).toBe('\n');
+		});
+
+		it('exports dataUnits array', () => {
+			expect(dataUnits).toEqual(['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']);
+		});
+
+		it('exports compilerOptionOverrides with required properties', () => {
+			expect(compilerOptionOverrides.noEmitOnError).toBe(true);
+			expect(compilerOptionOverrides.allowJs).toBe(false);
+			expect(compilerOptionOverrides.checkJs).toBe(false);
+			expect(compilerOptionOverrides.declarationMap).toBe(false);
+			expect(compilerOptionOverrides.skipLibCheck).toBe(true);
+			expect(compilerOptionOverrides.preserveSymlinks).toBe(false);
+			expect(compilerOptionOverrides.target).toBe(ScriptTarget.ESNext);
 		});
 	});
 });

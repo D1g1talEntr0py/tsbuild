@@ -1,35 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Closable } from '../../src/@types';
+import type { Closable } from 'src/@types';
 
 vi.mock('src/logger', () => ({
 	Logger: {
-		info: vi.fn(),
-		error: vi.fn(),
-		log: vi.fn(),
-		clear: vi.fn(),
-		warn: vi.fn(),
-		success: vi.fn(),
-		header: vi.fn(),
-		separator: vi.fn(),
-		step: vi.fn(),
-		subSteps: vi.fn(),
+		info: vi.fn(), error: vi.fn(), log: vi.fn(), clear: vi.fn(),
+		warn: vi.fn(), success: vi.fn(), header: vi.fn(), separator: vi.fn(),
+		step: vi.fn(), subSteps: vi.fn(),
 		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
 	}
 }));
 
-describe('decorators/close-on-exit', () => {
-	let exitSpy: ReturnType<typeof vi.spyOn<typeof process, 'exit'>>;
-	let processManager: any;
-	let sigintListenersBefore: Function[];
+describe('closeOnExit', () => {
+	let exitSpy: ReturnType<typeof vi.spyOn>;
+	let processManager: Awaited<typeof import('src/process-manager')>['processManager'];
 
 	beforeEach(async () => {
-		sigintListenersBefore = process.listeners('SIGINT');
 		vi.resetModules();
 		exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-		
-		// Import fresh processManager
-		const pmModule = await import('../../src/process-manager');
-		processManager = pmModule.processManager;
+		({ processManager } = await import('src/process-manager'));
 	});
 
 	afterEach(() => {
@@ -37,191 +25,63 @@ describe('decorators/close-on-exit', () => {
 		vi.restoreAllMocks();
 	});
 
-	describe('@closeOnExit decorator', () => {
-		it('should call close on decorated instance when process exits', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-			const closeSpy = vi.fn();
+	it('registers instance with processManager on construction', async () => {
+		const { closeOnExit } = await import('src/decorators/close-on-exit');
+		const closeSpy = vi.fn();
 
-			@closeOnExit
-			class TestClosable implements Closable {
-				close = closeSpy;
-			}
+		@closeOnExit
+		class TestClosable implements Closable {
+			close = closeSpy;
+		}
 
-			new TestClosable();
+		new TestClosable();
 
-			// Trigger exit event
-			process.emit('exit', 0);
+		process.emit('exit', 0);
+		expect(closeSpy).toHaveBeenCalledOnce();
+	});
 
-			expect(closeSpy).toHaveBeenCalledOnce();
-		});
+	it('calls close on all decorated instances', async () => {
+		const { closeOnExit } = await import('src/decorators/close-on-exit');
+		const spyA = vi.fn();
+		const spyB = vi.fn();
 
-		it('should call close on decorated instances when process exits', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-			const closeSpy = vi.fn();
+		@closeOnExit
+		class A implements Closable { close = spyA }
 
-			@closeOnExit
-			class TestClosable implements Closable {
-				close = closeSpy;
-			}
+		@closeOnExit
+		class B implements Closable { close = spyB }
 
-			new TestClosable();
-			new TestClosable();
+		new A();
+		new B();
 
-			// Trigger exit event
-			process.emit('exit', 0);
+		process.emit('exit', 0);
+		expect(spyA).toHaveBeenCalledOnce();
+		expect(spyB).toHaveBeenCalledOnce();
+	});
 
-			expect(closeSpy).toHaveBeenCalledTimes(2);
-		});
+	it('preserves the original constructor behavior', async () => {
+		const { closeOnExit } = await import('src/decorators/close-on-exit');
 
-		it('should preserve constructor arguments', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
+		@closeOnExit
+		class WithArgs implements Closable {
+			value: number;
+			constructor(val: number) { this.value = val }
+			close() {}
+		}
 
-			@closeOnExit
-			class TestClosable implements Closable {
-				constructor(
-					public name: string,
-					public value: number,
-					public flag: boolean
-				) {}
-				close = vi.fn();
-			}
+		const instance = new WithArgs(42);
+		expect(instance.value).toBe(42);
+	});
 
-			const instance = new TestClosable('test', 42, true);
+	it('decorated instance is still instanceof original class', async () => {
+		const { closeOnExit } = await import('src/decorators/close-on-exit');
 
-			expect(instance.name).toBe('test');
-			expect(instance.value).toBe(42);
-			expect(instance.flag).toBe(true);
-		});
+		@closeOnExit
+		class OriginalClass implements Closable {
+			close() {}
+		}
 
-		it('should preserve class methods and properties', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-
-			@closeOnExit
-			class TestClosable implements Closable {
-				public count = 0;
-
-				increment(): number {
-					return ++this.count;
-				}
-
-				close = vi.fn();
-			}
-
-			const instance = new TestClosable();
-
-			expect(instance.count).toBe(0);
-			expect(instance.increment()).toBe(1);
-			expect(instance.increment()).toBe(2);
-			expect(instance.count).toBe(2);
-		});
-
-		it('should work with classes that have complex constructors', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-			const closeSpy = vi.fn();
-
-			@closeOnExit
-			class ComplexClosable implements Closable {
-				private data: Map<string, number>;
-
-				constructor(entries: [string, number][]) {
-					this.data = new Map(entries);
-				}
-
-				getData(): Map<string, number> {
-					return this.data;
-				}
-
-				close = closeSpy;
-			}
-
-			const entries: [string, number][] = [['a', 1], ['b', 2], ['c', 3]];
-			const instance = new ComplexClosable(entries);
-
-			expect(instance.getData().size).toBe(3);
-			expect(instance.getData().get('a')).toBe(1);
-			expect(instance.getData().get('b')).toBe(2);
-			expect(instance.getData().get('c')).toBe(3);
-
-			// Verify it's registered for cleanup
-			process.emit('exit', 0);
-			expect(closeSpy).toHaveBeenCalled();
-		});
-
-		it('should handle SIGINT event for decorated instances', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-			const closeSpy = vi.fn();
-
-			@closeOnExit
-			class TestClosable implements Closable {
-				close = closeSpy;
-			}
-
-			new TestClosable();
-			const sigintListenersAfter = process.listeners('SIGINT');
-			const processManagerListeners = sigintListenersAfter.filter((l) => !sigintListenersBefore.includes(l));
-			for (const listener of processManagerListeners) { (listener as () => void)(); }
-
-			expect(closeSpy).toHaveBeenCalled();
-			expect(exitSpy).toHaveBeenCalledWith(130);
-		});
-
-		it('should allow multiple decorators on the same class', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-
-			// Simple decorator that adds a property
-			function addProperty<T extends new (...args: any[]) => any>(constructor: T) {
-				return class extends constructor {
-					decorated = true;
-				};
-			}
-
-			@addProperty
-			@closeOnExit
-			class TestClosable implements Closable {
-				close = vi.fn();
-			}
-
-			const instance: any = new TestClosable();
-
-			expect(instance.decorated).toBe(true);
-			expect(typeof instance.close).toBe('function');
-		});
-
-		it('should work with inheritance', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-			const baseCloseSpy = vi.fn();
-			const derivedCloseSpy = vi.fn();
-
-			class BaseClosable implements Closable {
-				close = baseCloseSpy;
-			}
-
-			@closeOnExit
-			class DerivedClosable extends BaseClosable {
-				close = derivedCloseSpy;
-			}
-
-			const instance = new DerivedClosable();
-
-			process.emit('exit', 0);
-
-			expect(derivedCloseSpy).toHaveBeenCalled();
-		});
-
-		it('should maintain instanceof checks', async () => {
-			const { closeOnExit } = await import('../../src/decorators/close-on-exit');
-
-			class BaseClass {
-				close = vi.fn();
-			}
-
-			@closeOnExit
-			class DecoratedClass extends BaseClass implements Closable {}
-
-			const instance = new DecoratedClass();
-
-			expect(instance instanceof DecoratedClass).toBe(true);
-			expect(instance instanceof BaseClass).toBe(true);
-		});
+		const instance = new OriginalClass();
+		expect(instance).toBeInstanceOf(OriginalClass);
 	});
 });

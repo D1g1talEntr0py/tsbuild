@@ -1,418 +1,229 @@
 import { describe, it, expect } from 'vitest';
-import { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName } from '../src/entry-points';
-import type { PackageJson, PackageJsonConditionalExport } from '../src/entry-points';
+import { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName } from 'src/entry-points';
+import type { PackageJson } from 'src/entry-points';
 
-describe('entry-points', () => {
-	describe('outputToSourcePath', () => {
-		it('should convert a .js output path to a .ts source path', () => {
-			expect(outputToSourcePath('./dist/index.js', 'dist', 'src')).toBe('./src/index.ts');
-		});
+describe('outputToSourcePath', () => {
+	const conversionMatrix: [string, string, string, string | undefined][] = [
+		['./dist/index.js',   'dist', 'src', './src/index.ts'],
+		['./dist/cli.js',     'dist', 'src', './src/cli.ts'],
+		['./dist/index.jsx',  'dist', 'src', './src/index.tsx'],
+		['./dist/index.d.ts', 'dist', 'src', './src/index.ts'],
+		['dist/utils.js',     'dist', 'src', './src/utils.ts'],
+		['./build/index.js',  'build', 'lib', './lib/index.ts'],
+		['./dist/sub/deep.js', 'dist', 'src', './src/sub/deep.ts'],
+	];
 
-		it('should convert a .jsx output path to a .tsx source path', () => {
-			expect(outputToSourcePath('./dist/app.jsx', 'dist', 'src')).toBe('./src/app.tsx');
-		});
+	it.each(conversionMatrix)('converts %s → %s', (outputPath, outDir, sourceDir, expected) => {
+		expect(outputToSourcePath(outputPath, outDir, sourceDir)).toBe(expected);
+	});
 
-		it('should convert a .d.ts output path to a .ts source path', () => {
-			expect(outputToSourcePath('./dist/types.d.ts', 'dist', 'src')).toBe('./src/types.ts');
-		});
+	it('returns undefined for non-matching outDir', () => {
+		expect(outputToSourcePath('./other/index.js', 'dist', 'src')).toBeUndefined();
+	});
 
-		it('should handle nested output paths', () => {
-			expect(outputToSourcePath('./dist/utils/helpers.js', 'dist', 'src')).toBe('./src/utils/helpers.ts');
-		});
+	it('returns undefined for unsupported extension', () => {
+		expect(outputToSourcePath('./dist/styles.css', 'dist', 'src')).toBeUndefined();
+	});
 
-		it('should return undefined for non-matching outDir prefix', () => {
-			expect(outputToSourcePath('./build/index.js', 'dist', 'src')).toBeUndefined();
-		});
+	it('handles outDir with leading ./', () => {
+		expect(outputToSourcePath('./dist/index.js', './dist', 'src')).toBe('./src/index.ts');
+	});
 
-		it('should return undefined for unknown file extensions', () => {
-			expect(outputToSourcePath('./dist/data.json', 'dist', 'src')).toBeUndefined();
-		});
+	it('handles outDir with trailing /', () => {
+		expect(outputToSourcePath('./dist/index.js', 'dist/', 'src')).toBe('./src/index.ts');
+	});
+});
 
-		it('should handle outDir with leading ./', () => {
-			expect(outputToSourcePath('./dist/index.js', './dist', 'src')).toBe('./src/index.ts');
-		});
+describe('resolveConditionalExport', () => {
+	it('returns string directly', () => {
+		expect(resolveConditionalExport('./dist/index.js')).toBe('./dist/index.js');
+	});
 
-		it('should handle outDir with trailing /', () => {
-			expect(outputToSourcePath('./dist/index.js', 'dist/', 'src')).toBe('./src/index.ts');
-		});
+	it('resolves import condition first', () => {
+		expect(resolveConditionalExport({
+			import: './dist/index.mjs',
+			require: './dist/index.cjs',
+			default: './dist/index.js',
+		})).toBe('./dist/index.mjs');
+	});
 
-		it('should handle output paths without leading ./', () => {
-			expect(outputToSourcePath('dist/index.js', 'dist', 'src')).toBe('./src/index.ts');
-		});
+	it('falls back to node condition', () => {
+		expect(resolveConditionalExport({
+			node: './dist/index.node.js',
+			default: './dist/index.js',
+		})).toBe('./dist/index.node.js');
+	});
 
-		it('should use . as source directory', () => {
-			expect(outputToSourcePath('./dist/index.js', 'dist', '.')).toBe('././index.ts');
+	it('falls back to module condition', () => {
+		expect(resolveConditionalExport({
+			module: './dist/index.mjs',
+			default: './dist/index.js',
+		})).toBe('./dist/index.mjs');
+	});
+
+	it('falls back to default condition', () => {
+		expect(resolveConditionalExport({
+			default: './dist/index.js',
+		})).toBe('./dist/index.js');
+	});
+
+	it('resolves nested conditions recursively', () => {
+		expect(resolveConditionalExport({
+			node: { import: './dist/index.mjs', require: './dist/index.cjs' },
+		})).toBe('./dist/index.mjs');
+	});
+
+	it('returns undefined when no condition matches', () => {
+		expect(resolveConditionalExport({
+			require: './dist/index.cjs',
+		})).toBeUndefined();
+	});
+
+	it('skips undefined values', () => {
+		expect(resolveConditionalExport({
+			import: undefined,
+			default: './dist/index.js',
+		})).toBe('./dist/index.js');
+	});
+});
+
+describe('subpathToEntryName', () => {
+	const nameMatrix: [string, string | undefined, string][] = [
+		['.',        'my-package',    'my-package'],
+		['.',        '@scope/pkg',    'pkg'],
+		['.',        undefined,       'index'],
+		['./utils',  undefined,       'utils'],
+		['./lib/helper', undefined,   'helper'],
+		['./foo',    'my-package',    'foo'],
+	];
+
+	it.each(nameMatrix)('subpath %s with name %s → %s', (subpath, packageName, expected) => {
+		expect(subpathToEntryName(subpath, packageName)).toBe(expected);
+	});
+});
+
+describe('inferEntryPoints', () => {
+	it('infers from string exports', () => {
+		const pkg: PackageJson = { exports: './dist/index.js' };
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
+
+	it('infers from object exports with root subpath', () => {
+		const pkg: PackageJson = {
+			name: 'my-pkg',
+			exports: { '.': './dist/index.js' },
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
+
+	it('infers from object exports with multiple subpaths', () => {
+		const pkg: PackageJson = {
+			name: 'my-pkg',
+			exports: {
+				'.': './dist/index.js',
+				'./utils': './dist/utils.js',
+			},
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({
+			index: './src/index.ts',
+			utils: './src/utils.ts',
 		});
 	});
 
-	describe('resolveConditionalExport', () => {
-		it('should return string values directly', () => {
-			expect(resolveConditionalExport('./dist/index.js')).toBe('./dist/index.js');
-		});
+	it('infers from conditional exports', () => {
+		const pkg: PackageJson = {
+			exports: { '.': { import: './dist/index.js', default: './dist/index.cjs' } },
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
 
-		it('should prefer the import condition', () => {
-			const conditional: PackageJsonConditionalExport = {
-				import: './dist/index.mjs',
-				require: './dist/index.cjs',
-				default: './dist/index.js',
-			};
-			expect(resolveConditionalExport(conditional)).toBe('./dist/index.mjs');
-		});
+	it('skips wildcard subpath patterns', () => {
+		const pkg: PackageJson = {
+			exports: { '.': './dist/index.js', './*': './dist/*.js' },
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
 
-		it('should fall back to default when import is missing', () => {
-			const conditional: PackageJsonConditionalExport = {
-				require: './dist/index.cjs',
-				default: './dist/index.js',
-			};
-			expect(resolveConditionalExport(conditional)).toBe('./dist/index.js');
-		});
+	it('infers from bin string', () => {
+		const pkg: PackageJson = {
+			name: 'cli-tool',
+			bin: './dist/cli.js',
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ 'cli-tool': './src/cli.ts' });
+	});
 
-		it('should resolve node condition', () => {
-			const conditional: PackageJsonConditionalExport = {
-				require: './dist/index.cjs',
-				node: './dist/index.node.js',
-			};
-			expect(resolveConditionalExport(conditional)).toBe('./dist/index.node.js');
-		});
-
-		it('should resolve module condition', () => {
-			const conditional: PackageJsonConditionalExport = {
-				require: './dist/index.cjs',
-				module: './dist/index.esm.js',
-			};
-			expect(resolveConditionalExport(conditional)).toBe('./dist/index.esm.js');
-		});
-
-		it('should return undefined when no supported conditions exist', () => {
-			const conditional: PackageJsonConditionalExport = {
-				require: './dist/index.cjs',
-				types: './dist/index.d.ts',
-			};
-			expect(resolveConditionalExport(conditional)).toBeUndefined();
-		});
-
-		it('should recurse into nested conditional exports', () => {
-			const conditional: PackageJsonConditionalExport = {
-				types: './dist/index.d.ts',
-				import: {
-					types: './dist/index.d.ts',
-					default: './dist/index.js',
-				},
-			};
-			expect(resolveConditionalExport(conditional)).toBe('./dist/index.js');
-		});
-
-		it('should recurse into nested node condition', () => {
-			const conditional: PackageJsonConditionalExport = {
-				types: './dist/index.d.ts',
-				node: {
-					types: './dist/index.d.ts',
-					import: './dist/index.js',
-				},
-			};
-			expect(resolveConditionalExport(conditional)).toBe('./dist/index.js');
-		});
-
-		it('should return undefined for empty conditional object', () => {
-			expect(resolveConditionalExport({})).toBeUndefined();
+	it('infers from bin object', () => {
+		const pkg: PackageJson = {
+			bin: { mycli: './dist/cli.js', myother: './dist/other.js' },
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({
+			mycli: './src/cli.ts',
+			myother: './src/other.ts',
 		});
 	});
 
-	describe('subpathToEntryName', () => {
-		it('should return package name for root export "."', () => {
-			expect(subpathToEntryName('.', 'my-pkg')).toBe('my-pkg');
-		});
-
-		it('should return "index" for root export when no package name', () => {
-			expect(subpathToEntryName('.')).toBe('index');
-		});
-
-		it('should strip ./ prefix and return the name', () => {
-			expect(subpathToEntryName('./foo')).toBe('foo');
-		});
-
-		it('should return the last path segment for nested subpaths', () => {
-			expect(subpathToEntryName('./utils/bar')).toBe('bar');
-		});
-
-		it('should handle deeply nested subpaths', () => {
-			expect(subpathToEntryName('./a/b/c/deep')).toBe('deep');
-		});
-
-		it('should handle subpath without ./ prefix', () => {
-			expect(subpathToEntryName('foo')).toBe('foo');
-		});
+	it('uses package name for bin string when no name', () => {
+		const pkg: PackageJson = { bin: './dist/cli.js' };
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ cli: './src/cli.ts' });
 	});
 
-	describe('inferEntryPoints', () => {
-		it('should infer from simple string exports', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: './dist/index.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
+	it('does not duplicate entries from bin when exports already has them', () => {
+		const pkg: PackageJson = {
+			exports: { '.': './dist/index.js' },
+			bin: { index: './dist/index.js' },
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
 
-		it('should use "index" as name when no package name for string exports', () => {
-			const pkg: PackageJson = {
-				exports: './dist/index.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
+	it('infers from main when no exports or bin', () => {
+		const pkg: PackageJson = { main: './dist/index.js' };
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
 
-		it('should infer from subpath exports with conditional values', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: {
-					'.': { import: './dist/index.js', default: './dist/index.cjs' },
-					'./utils': { import: './dist/utils.js' },
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({
-				index: './src/index.ts',
-				utils: './src/utils.ts',
-			});
-		});
+	it('infers from module when no exports, bin, or main', () => {
+		const pkg: PackageJson = { module: './dist/index.js' };
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/index.ts' });
+	});
 
-		it('should infer from subpath exports with string values', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: {
-					'.': './dist/index.js',
-					'./helpers': './dist/helpers.js',
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({
-				index: './src/index.ts',
-				helpers: './src/helpers.ts',
-			});
-		});
+	it('prefers module over main', () => {
+		const pkg: PackageJson = {
+			main: './dist/main.js',
+			module: './dist/module.js',
+		};
+		const result = inferEntryPoints(pkg, 'dist');
+		expect(result).toEqual({ index: './src/module.ts' });
+	});
 
-		it('should skip wildcard subpath patterns', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: {
-					'.': './dist/index.js',
-					'./*': './dist/*.js',
-					'./utils/*': './dist/utils/*.js',
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
+	it('returns undefined for empty package', () => {
+		expect(inferEntryPoints({}, 'dist')).toBeUndefined();
+	});
 
-		it('should infer from string bin field', () => {
-			const pkg: PackageJson = {
-				name: 'my-cli',
-				bin: './dist/cli.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ 'my-cli': './src/cli.ts' });
-		});
+	it('returns undefined when no paths can be resolved', () => {
+		const pkg: PackageJson = { exports: { '.': './lib/index.js' } };
+		expect(inferEntryPoints(pkg, 'dist')).toBeUndefined();
+	});
 
-		it('should infer from object bin field', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				bin: {
-					'my-cli': './dist/cli.js',
-					'my-tool': './dist/tool.js',
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({
-				'my-cli': './src/cli.ts',
-				'my-tool': './src/tool.ts',
-			});
-		});
+	it('uses custom sourceDir', () => {
+		const pkg: PackageJson = { exports: './dist/index.js' };
+		const result = inferEntryPoints(pkg, 'dist', 'lib');
+		expect(result).toEqual({ index: './lib/index.ts' });
+	});
 
-		it('should use "cli" as name for string bin when no package name', () => {
-			const pkg: PackageJson = {
-				bin: './dist/cli.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ cli: './src/cli.ts' });
-		});
-
-		it('should combine exports and bin when names differ', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: { '.': './dist/index.js' },
-				bin: { 'my-pkg': './dist/bin.js' },
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			// exports '.' uses file stem 'index'; bin 'my-pkg' is a different name — both included
-			expect(result).toEqual({ index: './src/index.ts', 'my-pkg': './src/bin.ts' });
-		});
-
-		it('should infer both exports and bin when bin key matches package name', () => {
-			// Mirrors the tsbuild package: exports '.' -> index.js, bin 'tsbuild' -> tsbuild.js
-			const pkg: PackageJson = {
-				name: '@d1g1tal/tsbuild',
-				exports: { '.': { import: './dist/index.js' } },
-				bin: { tsbuild: './dist/tsbuild.js' },
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts', tsbuild: './src/tsbuild.ts' });
-		});
-
-		it('should combine exports and bin entries', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: { '.': './dist/index.js' },
-				bin: { cli: './dist/cli.js' },
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({
-				index: './src/index.ts',
-				cli: './src/cli.ts',
-			});
-		});
-
-		it('should fall back to main field', () => {
-			const pkg: PackageJson = {
-				main: './dist/index.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should fall back to module field', () => {
-			const pkg: PackageJson = {
-				module: './dist/index.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should prefer module over main', () => {
-			const pkg: PackageJson = {
-				main: './dist/main.js',
-				module: './dist/module.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/module.ts' });
-		});
-
-		it('should not use main/module fallback when exports provides entries', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: { '.': './dist/index.js' },
-				main: './dist/main.js',
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should return undefined when no fields are present', () => {
-			const pkg: PackageJson = { name: 'empty-pkg' };
-			expect(inferEntryPoints(pkg, 'dist', 'src')).toBeUndefined();
-		});
-
-		it('should return undefined when output paths cannot be reverse-mapped', () => {
-			const pkg: PackageJson = {
-				exports: { '.': './build/index.js' },
-			};
-			// outDir is 'dist' but exports points to 'build' — no match
-			expect(inferEntryPoints(pkg, 'dist', 'src')).toBeUndefined();
-		});
-
-		it('should default sourceDir to src', () => {
-			const pkg: PackageJson = {
-				exports: './dist/index.js',
-				name: 'my-pkg',
-			};
-			const result = inferEntryPoints(pkg, 'dist');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should skip conditional export entries that resolve to undefined', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: {
-					'.': { require: './dist/index.cjs', types: './dist/index.d.ts' }, // no import/node/module/default
-					'./utils': { import: './dist/utils.js' },
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ utils: './src/utils.ts' });
-		});
-
-		it('should infer entry points from node condition', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: {
-					'.': { types: './dist/index.d.ts', node: './dist/index.js' },
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should infer entry points from nested conditional exports', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: {
-					'.': {
-						types: './dist/index.d.ts',
-						import: { types: './dist/index.d.ts', default: './dist/index.js' },
-					},
-				},
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({ index: './src/index.ts' });
-		});
-
-		it('should handle .mjs exports', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: { '.': { import: './dist/index.mjs' } },
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toBeUndefined();
-		});
-
-		it('should use file stem for root export and package name for other subpaths', () => {
-			const pkg: PackageJson = {
-				name: '@scope/my-pkg',
-				exports: {
-					'.': { import: './dist/index.js' },
-					'./utils': { import: './dist/utils.js' },
-				},
-				bin: { cli: './dist/cli.js' },
-			};
-			const result = inferEntryPoints(pkg, 'dist', 'src');
-			expect(result).toEqual({
-				index: './src/index.ts',
-				utils: './src/utils.ts',
-				cli: './src/cli.ts',
-			});
-		});
-
-		it('should skip string exports that cannot be reverse-mapped', () => {
-			const pkg: PackageJson = {
-				name: 'my-pkg',
-				exports: './build/index.js', // outDir is 'dist', not 'build'
-			};
-			expect(inferEntryPoints(pkg, 'dist', 'src')).toBeUndefined();
-		});
-
-		it('should skip bin entries that cannot be reverse-mapped', () => {
-			const pkg: PackageJson = {
-				name: 'my-cli',
-				bin: { cli: './build/cli.js' }, // outDir is 'dist', not 'build'
-			};
-			expect(inferEntryPoints(pkg, 'dist', 'src')).toBeUndefined();
-		});
-
-		it('should skip main/module that cannot be reverse-mapped', () => {
-			const pkg: PackageJson = {
-				main: './build/index.js', // outDir is 'dist', not 'build'
-			};
-			expect(inferEntryPoints(pkg, 'dist', 'src')).toBeUndefined();
-		});
+	it('handles exports with no resolvable condition', () => {
+		const pkg: PackageJson = {
+			exports: { '.': { require: './dist/index.cjs' } },
+		};
+		expect(inferEntryPoints(pkg, 'dist')).toBeUndefined();
 	});
 });

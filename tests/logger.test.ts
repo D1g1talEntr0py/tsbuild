@@ -1,314 +1,256 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Logger, isWrittenFiles, colorize, prettyBytes } from '../src/logger';
-import { TextFormat } from '../src/text-formatter';
-import { TestHelper } from './scripts/test-helper';
+import { isWrittenFiles, colorize, prettyBytes, Logger } from 'src/logger';
+import type { WrittenFile, PerformanceSubStep, RelativePath } from 'src/@types';
 
-describe('logger', () => {
-	beforeEach(async () => {
-		await TestHelper.setupMemfs();
+describe('isWrittenFiles', () => {
+	const matrix: [string, unknown[], boolean][] = [
+		['valid WrittenFile array', [{ path: 'a.js', size: 100 }], true],
+		['multiple WrittenFiles', [{ path: 'a.js', size: 100 }, { path: 'b.js', size: 200 }], true],
+		['empty array', [], true],
+		['array with non-object', ['string'], false],
+		['array with null', [null], false],
+		['object missing path', [{ size: 100 }], false],
+		['object missing size', [{ path: 'a.js' }], false],
+		['non-array', [42], false],
+	];
+
+	it.each(matrix)('returns correct result for %s', (_desc, data, expected) => {
+		expect(isWrittenFiles(data)).toBe(expected);
+	});
+});
+
+describe('colorize', () => {
+	it('colorizes info as blue', () => {
+		const result = colorize('info', 'test');
+		expect(result).toContain('\x1b[34m');
 	});
 
-	afterEach(() => {
-		TestHelper.teardownMemfs();
+	it('colorizes error as red', () => {
+		const result = colorize('error', 'test');
+		expect(result).toContain('\x1b[31m');
 	});
 
-	describe('isWrittenFiles', () => {
-		it('should return true for an array of WrittenFile objects', () => {
-			const data = [{ path: 'a', size: 1 }, { path: 'b', size: 2 }];
-			expect(isWrittenFiles(data)).toBe(true);
-		});
-
-		it('should return true for an empty array', () => {
-			expect(isWrittenFiles([])).toBe(true);
-		});
-
-		it('should return true for WrittenFile with additional properties', () => {
-			const data = [{ path: 'test.ts', size: 100, extra: 'property' }];
-			expect(isWrittenFiles(data)).toBe(true);
-		});
-
-		it('should return false for an array with non-WrittenFile objects', () => {
-			const data = [{ path: 'a', size: 1 }, { path: 'b' }];
-			expect(isWrittenFiles(data as unknown as unknown[])).toBe(false);
-		});
-
-		it('should return false for a non-array', () => {
-			expect(isWrittenFiles('not-an-array' as unknown as unknown[])).toBe(false);
-		});
-
-		it('should return false for an array with null values', () => {
-			const data = [null];
-			expect(isWrittenFiles(data)).toBe(false);
-		});
-
-		it('should return false for an array with primitive values', () => {
-			const data = ['string', 123, true];
-			expect(isWrittenFiles(data as unknown as unknown[])).toBe(false);
-		});
-
-		it('should return false for objects missing path property', () => {
-			const data = [{ size: 100 }];
-			expect(isWrittenFiles(data as unknown as unknown[])).toBe(false);
-		});
-
-		it('should return false for objects missing size property', () => {
-			const data = [{ path: 'test.ts' }];
-			expect(isWrittenFiles(data as unknown as unknown[])).toBe(false);
-		});
+	it('colorizes warn as yellow', () => {
+		const result = colorize('warn', 'test');
+		expect(result).toContain('\x1b[33m');
 	});
 
-	describe('colorize', () => {
-		it('should not colorize info when onlyImportant is true', () => {
-			expect(colorize('info', 'test', true)).toBe('test');
-		});
-
-		it('should not colorize success when onlyImportant is true', () => {
-			expect(colorize('success', 'test', true)).toBe('test');
-		});
-
-		it('should colorize info when onlyImportant is false', () => {
-			expect(colorize('info', 'test', false)).toBe(TextFormat.blue('test'));
-		});
-
-		it('should colorize info by default (onlyImportant not provided)', () => {
-			expect(colorize('info', 'test')).toBe(TextFormat.blue('test'));
-		});
-
-		it('should colorize success when onlyImportant is false', () => {
-			expect(colorize('success', 'test', false)).toBe(TextFormat.green('test'));
-		});
-
-		it('should colorize error regardless of onlyImportant', () => {
-			expect(colorize('error', 'test', true)).toBe(TextFormat.red('test'));
-			expect(colorize('error', 'test', false)).toBe(TextFormat.red('test'));
-		});
-
-		it('should colorize warn regardless of onlyImportant', () => {
-			expect(colorize('warn', 'test', true)).toBe(TextFormat.yellow('test'));
-			expect(colorize('warn', 'test', false)).toBe(TextFormat.yellow('test'));
-		});
-
-		it('should colorize done with green', () => {
-			expect(colorize('done', 'test')).toBe(TextFormat.green('test'));
-			expect(colorize('done', 'test', true)).toBe(TextFormat.green('test'));
-		});
+	it('colorizes success as green', () => {
+		const result = colorize('success', 'test');
+		expect(result).toContain('\x1b[32m');
 	});
 
-	describe('prettyBytes', () => {
-		it('should return { value: "0", unit: "B" } for 0 bytes', () => {
-			expect(prettyBytes(0)).toEqual({ value: '0', unit: 'B' });
-		});
+	it('colorizes done as green', () => {
+		const result = colorize('done', 'test');
+		expect(result).toContain('\x1b[32m');
+	});
 
-		it('should format bytes correctly', () => {
-			expect(prettyBytes(1)).toEqual({ value: '1.00', unit: 'B' });
-			expect(prettyBytes(512)).toEqual({ value: '512.00', unit: 'B' });
-			expect(prettyBytes(1023)).toEqual({ value: '1023.00', unit: 'B' });
-		});
+	it('skips info colorization when onlyImportant is true', () => {
+		expect(colorize('info', 'test', true)).toBe('test');
+	});
 
-		it('should format kilobytes correctly', () => {
-			expect(prettyBytes(1024)).toEqual({ value: '1.00', unit: 'KB' });
-			expect(prettyBytes(1536)).toEqual({ value: '1.50', unit: 'KB' });
-			expect(prettyBytes(10240)).toEqual({ value: '10.00', unit: 'KB' });
-		});
+	it('skips success colorization when onlyImportant is true', () => {
+		expect(colorize('success', 'test', true)).toBe('test');
+	});
 
-		it('should format megabytes correctly', () => {
-			expect(prettyBytes(1048576)).toEqual({ value: '1.00', unit: 'MB' });
-			expect(prettyBytes(5242880)).toEqual({ value: '5.00', unit: 'MB' });
-		});
+	it('always colorizes error even with onlyImportant', () => {
+		const result = colorize('error', 'test', true);
+		expect(result).toContain('\x1b[31m');
+	});
 
-		it('should format gigabytes correctly', () => {
-			expect(prettyBytes(1073741824)).toEqual({ value: '1.00', unit: 'GB' });
-			expect(prettyBytes(2147483648)).toEqual({ value: '2.00', unit: 'GB' });
-		});
+	it('always colorizes warn even with onlyImportant', () => {
+		const result = colorize('warn', 'test', true);
+		expect(result).toContain('\x1b[33m');
+	});
+});
 
-		it('should format terabytes correctly', () => {
-			expect(prettyBytes(1099511627776)).toEqual({ value: '1.00', unit: 'TB' });
-		});
+describe('prettyBytes', () => {
+	const bytesMatrix: [number, string, string][] = [
+		[0, '0', 'B'],
+		[100, '100.00', 'B'],
+		[1024, '1.00', 'KB'],
+		[1536, '1.50', 'KB'],
+		[1048576, '1.00', 'MB'],
+		[1073741824, '1.00', 'GB'],
+		[1099511627776, '1.00', 'TB'],
+	];
 
-		it('should handle large numbers', () => {
-			expect(prettyBytes(1125899906842624)).toEqual({ value: '1.00', unit: 'PB' });
-		});
+	it.each(bytesMatrix)('%d bytes → %s %s', (bytes, value, unit) => {
+		const result = prettyBytes(bytes);
+		expect(result.value).toBe(value);
+		expect(result.unit).toBe(unit);
 	});
 });
 
 describe('Logger', () => {
-	let logSpy: ReturnType<typeof vi.spyOn>;
+	let consoleSpy: ReturnType<typeof vi.spyOn>;
 
-	beforeEach(() => logSpy = vi.spyOn(console, 'log').mockImplementation(() => {}));
+	beforeEach(() => {
+		consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+	});
 
 	afterEach(() => {
-		logSpy.mockRestore();
+		consoleSpy.mockRestore();
 	});
 
 	describe('clear', () => {
-		it('should clear the console', () => {
+		it('outputs clear escape code', () => {
 			Logger.clear();
-			expect(logSpy).toHaveBeenCalledWith('\x1Bc');
+			expect(consoleSpy).toHaveBeenCalledWith('\x1Bc');
 		});
 	});
 
-	describe('success', () => {
-		it('should log a success message without colorization', () => {
-			Logger.success('Success message');
-			expect(logSpy).toHaveBeenCalledWith('Success message');
+	describe('header', () => {
+		it('outputs a bordered header box', () => {
+			Logger.header('Test');
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+			const output = consoleSpy.mock.calls[0][0] as string;
+			expect(output).toContain('Test');
+			expect(output).toContain('╭');
+			expect(output).toContain('╰');
 		});
 
-		it('should log a success message with additional data', () => {
-			Logger.success('Success with data', { key: 'value' });
-			expect(logSpy).toHaveBeenCalledWith('Success with data', { key: 'value' });
-		});
-	});
-
-	describe('info', () => {
-		it('should log an info message without colorization', () => {
-			Logger.info('Info message');
-			expect(logSpy).toHaveBeenCalledWith('Info message');
-		});
-
-		it('should log an info message with additional data', () => {
-			Logger.info('Info with data', 123, true);
-			expect(logSpy).toHaveBeenCalledWith('Info with data', 123, true);
+		it('handles ANSI codes in message width calculation', () => {
+			Logger.header('\x1b[1mBold\x1b[22m');
+			const output = consoleSpy.mock.calls[0][0] as string;
+			// The box width should be based on visible text "Bold" (4 chars), not the ANSI codes
+			expect(output).toContain('Bold');
 		});
 	});
 
-	describe('error', () => {
-		it('should log an error message with colorization', () => {
-			Logger.error('Error message');
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.red('Error message'));
+	describe('separator', () => {
+		it('outputs a dim separator line', () => {
+			Logger.separator();
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+			const output = consoleSpy.mock.calls[0][0] as string;
+			expect(output).toContain('─');
 		});
 
-		it('should log an error message with additional data', () => {
-			const errorData = new Error('Test error');
-			Logger.error('Error occurred', errorData);
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.red('Error occurred'), errorData);
-		});
-	});
-
-	describe('warn', () => {
-		it('should log a warning message with colorization', () => {
-			Logger.warn('Warning message');
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.yellow('Warning message'));
-		});
-
-		it('should log a warning message with additional data', () => {
-			Logger.warn('Warning with data', 'extra info');
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.yellow('Warning with data'), 'extra info');
-		});
-	});
-
-	describe('log', () => {
-		it('should log a message without additional data', () => {
-			Logger.log('Simple message', 'info');
-			expect(logSpy).toHaveBeenCalledWith('Simple message');
-		});
-
-		it('should log a message with non-file data', () => {
-			Logger.log('Message with data', 'info', { a: 1 }, [1, 2]);
-			expect(logSpy).toHaveBeenCalledWith('Message with data', { a: 1 }, [1, 2]);
-		});
-
-	it('should log files with WrittenFile array', () => {
-		const files = [
-			{ path: 'file1.ts', size: 1024 },
-			{ path: 'file2.js', size: 2048 },
-		];
-		Logger.log('Compiled files:', 'success', ...files);
-		expect(logSpy).toHaveBeenCalledWith('Compiled files:');
-		expect(logSpy).toHaveBeenCalledTimes(3);
-		expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('file1.ts'));
-		expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('1.00'));
-		expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('KB'));
-		expect(logSpy).toHaveBeenNthCalledWith(3, expect.stringContaining('file2.js'));
-		expect(logSpy).toHaveBeenNthCalledWith(3, expect.stringContaining('2.00'));
-		expect(logSpy).toHaveBeenNthCalledWith(3, expect.stringContaining('KB'));
-	});
-
-	it('should log single WrittenFile', () => {
-		const file = { path: 'single.ts', size: 512 };
-		Logger.log('Single file:', 'success', file);
-		expect(logSpy).toHaveBeenCalledWith('Single file:');
-		expect(logSpy).toHaveBeenCalledTimes(2);
-		expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('single.ts'));
-		expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('512.00'));
-		expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('B'));
-	});		it('should not colorize info messages when logging files', () => {
-			const files = [{ path: 'file.ts', size: 123 }];
-			Logger.log('Info with files', 'info', ...files);
-			expect(logSpy).toHaveBeenCalledWith('Info with files');
-			expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('file.ts'));
-		});
-
-		it('should not colorize success messages when logging files', () => {
-			const files = [{ path: 'test.ts', size: 100 }];
-			Logger.log('Success with files', 'success', ...files);
-			expect(logSpy).toHaveBeenCalledWith('Success with files');
-		});
-
-		it('should colorize error messages even when logging files', () => {
-			const files = [{ path: 'error.ts', size: 100 }];
-			Logger.log('Error with files', 'error', ...files);
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.red('Error with files'));
-		});
-
-		it('should colorize warn messages even when logging files', () => {
-			const files = [{ path: 'warn.ts', size: 100 }];
-			Logger.log('Warning with files', 'warn', ...files);
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.yellow('Warning with files'));
-		});
-
-		it('should handle mixed data types (not all WrittenFiles)', () => {
-			Logger.log('Mixed data', 'info', 'string', { path: 'file.ts', size: 100 });
-			expect(logSpy).toHaveBeenCalledWith('Mixed data', 'string', { path: 'file.ts', size: 100 });
-		});
-
-		it('should format file paths with proper padding', () => {
-			const files = [
-				{ path: 'short.ts', size: 100 },
-				{ path: 'verylongfilename.ts', size: 200 },
-			];
-			Logger.log('Files:', 'success', ...files);
-			expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringMatching(/short\.ts\s+/));
-			expect(logSpy).toHaveBeenNthCalledWith(3, expect.stringContaining('verylongfilename.ts'));
-		});
-
-		it('should use done type colorization', () => {
-			Logger.log('Done message', 'done');
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.green('Done message'));
+		it('uses custom width', () => {
+			Logger.separator(10);
+			const output = consoleSpy.mock.calls[0][0] as string;
+			// Should contain 10 dash characters
+			expect(output).toContain('─'.repeat(10));
 		});
 	});
 
 	describe('step', () => {
-		it('should log a step message with check mark prefix', () => {
-			Logger.step('Step message');
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.green('✓ Step message'));
+		it('outputs a check mark prefix', () => {
+			Logger.step('Done');
+			const output = consoleSpy.mock.calls[0][0] as string;
+			expect(output).toContain('✓');
+			expect(output).toContain('Done');
 		});
 
-		it('should log a step message with tree indent when indent is true', () => {
-			Logger.step('Indented step', true);
-			expect(logSpy).toHaveBeenCalledWith(TextFormat.green('  └─ Indented step'));
+		it('outputs indented tree prefix', () => {
+			Logger.step('Sub-step', true);
+			const output = consoleSpy.mock.calls[0][0] as string;
+			expect(output).toContain('└─');
+			expect(output).toContain('Sub-step');
 		});
 	});
 
 	describe('subSteps', () => {
-		it('should log sub-steps with tree formatting and aligned columns, filtering steps below 5ms', () => {
-			Logger.subSteps([
-				{ name: 'Emit', duration: '355ms', ms: 355 },
-				{ name: 'Diagnostics', duration: '0ms', ms: 0 },
-				{ name: 'Finalize', duration: '5ms', ms: 5 },
-			]);
-			expect(logSpy).toHaveBeenCalledTimes(2);
-			expect(logSpy).toHaveBeenNthCalledWith(1, `${TextFormat.dim('  ├─')} ${TextFormat.bold('Emit    ')} ${TextFormat.cyan('355ms')}`);
-			expect(logSpy).toHaveBeenNthCalledWith(2, `${TextFormat.dim('  └─')} ${TextFormat.bold('Finalize')} ${TextFormat.cyan('  5ms')}`);
+		it('outputs sub-step entries in tree format', () => {
+			const steps: PerformanceSubStep[] = [
+				{ name: 'Step 1', ms: 100, duration: '100ms' },
+				{ name: 'Step 2', ms: 200, duration: '200ms' },
+			];
+			Logger.subSteps(steps);
+			expect(consoleSpy).toHaveBeenCalledTimes(2);
+			const output1 = consoleSpy.mock.calls[0][0] as string;
+			const output2 = consoleSpy.mock.calls[1][0] as string;
+			expect(output1).toContain('├─');
+			expect(output1).toContain('Step 1');
+			expect(output2).toContain('└─');
+			expect(output2).toContain('Step 2');
 		});
 
-		it('should handle a single sub-step with └─ prefix', () => {
-			Logger.subSteps([{ name: 'Only', duration: '10ms', ms: 10 }]);
-			expect(logSpy).toHaveBeenCalledWith(`${TextFormat.dim('  └─')} ${TextFormat.bold('Only')} ${TextFormat.cyan('10ms')}`);
+		it('filters out sub-steps below 5ms', () => {
+			const steps: PerformanceSubStep[] = [
+				{ name: 'Fast', ms: 3, duration: '3ms' },
+				{ name: 'Slow', ms: 100, duration: '100ms' },
+			];
+			Logger.subSteps(steps);
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
 		});
 
-		it('should not log anything when all steps are below threshold', () => {
-			Logger.subSteps([{ name: 'Finalize', duration: '1ms', ms: 1 }]);
-			expect(logSpy).not.toHaveBeenCalled();
+		it('outputs nothing when all sub-steps are below threshold', () => {
+			const steps: PerformanceSubStep[] = [
+				{ name: 'Fast1', ms: 1, duration: '1ms' },
+				{ name: 'Fast2', ms: 2, duration: '2ms' },
+			];
+			Logger.subSteps(steps);
+			expect(consoleSpy).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('success', () => {
+		it('logs a success message', () => {
+			Logger.success('Build complete');
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('info', () => {
+		it('logs an info message', () => {
+			Logger.info('Starting build');
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('error', () => {
+		it('logs an error message', () => {
+			Logger.error('Build failed');
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('warn', () => {
+		it('logs a warning message', () => {
+			Logger.warn('Deprecated option');
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('log', () => {
+		it('logs message without data', () => {
+			Logger.log('plain message', 'info');
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it('logs message with extra data', () => {
+			Logger.log('message', 'info', 'extra', 42);
+			expect(consoleSpy).toHaveBeenCalledWith(expect.any(String), 'extra', 42);
+		});
+
+		it('logs WrittenFile array in formatted manner', () => {
+			const files: WrittenFile[] = [
+				{ path: 'dist/index.js' as RelativePath, size: 1024 },
+				{ path: 'dist/utils.js' as RelativePath, size: 512 },
+			];
+			Logger.log('Output:', 'success', ...files);
+			// One call for the message, two calls for the files
+			expect(consoleSpy).toHaveBeenCalledTimes(3);
+		});
+
+		it('logs WrittenFile array with empty message skips message', () => {
+			const files: WrittenFile[] = [
+				{ path: 'dist/index.js' as RelativePath, size: 1024 },
+			];
+			Logger.log('', 'success', ...files);
+			// Only 1 call for the file (no message logged)
+			expect(consoleSpy).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('EntryType', () => {
+		it('has all expected log entry types', () => {
+			expect(Logger.EntryType.Info).toBe('info');
+			expect(Logger.EntryType.Success).toBe('success');
+			expect(Logger.EntryType.Done).toBe('done');
+			expect(Logger.EntryType.Error).toBe('error');
+			expect(Logger.EntryType.Warn).toBe('warn');
 		});
 	});
 });

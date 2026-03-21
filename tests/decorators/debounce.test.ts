@@ -1,98 +1,213 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce } from '../../src/decorators/debounce';
+import { debounce } from 'src/decorators/debounce';
 
-describe('debounce decorator', () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-	});
+describe('debounce', () => {
+	beforeEach(() => { vi.useFakeTimers() });
+	afterEach(() => { vi.useRealTimers() });
 
-	afterEach(() => {
-		vi.useRealTimers();
-	});
+	describe('decorator behavior', () => {
+		it('delays method execution until wait expires', async () => {
+			class Counter {
+				count = 0;
 
-	it('should debounce a method', async () => {
-		class TestClass {
-			count = 0;
-
-			@debounce(100)
-			increment() {
-				this.count++;
+				@debounce(100)
+				increment() { this.count++ }
 			}
-		}
 
-		const instance = new TestClass();
-		instance.increment();
-		instance.increment();
-		instance.increment();
+			const instance = new Counter();
+			instance.increment();
+			expect(instance.count).toBe(0);
 
-		expect(instance.count).toBe(0);
+			vi.advanceTimersByTime(100);
+			await Promise.resolve();
 
-		vi.advanceTimersByTime(100);
+			expect(instance.count).toBe(1);
+		});
 
-		// Wait for promise resolution (debounce returns a promise internally)
-		await Promise.resolve();
+		it('only executes once for rapid calls', async () => {
+			class Counter {
+				count = 0;
 
-		expect(instance.count).toBe(1);
+				@debounce(100)
+				increment() { this.count++ }
+			}
+
+			const instance = new Counter();
+			instance.increment();
+			instance.increment();
+			instance.increment();
+
+			vi.advanceTimersByTime(100);
+			await Promise.resolve();
+
+			expect(instance.count).toBe(1);
+		});
+
+		it('preserves this context', async () => {
+			class Context {
+				value = 'test';
+				result = '';
+
+				@debounce(100)
+				capture() { this.result = this.value }
+			}
+
+			const instance = new Context();
+			instance.capture();
+
+			vi.advanceTimersByTime(100);
+			await Promise.resolve();
+
+			expect(instance.result).toBe('test');
+		});
+
+		it('passes arguments to the debounced method', async () => {
+			class Adder {
+				sum = 0;
+
+				@debounce(50)
+				add(a: number, b: number) { this.sum = a + b }
+			}
+
+			const instance = new Adder();
+			instance.add(3, 4);
+
+			vi.advanceTimersByTime(50);
+			await Promise.resolve();
+
+			expect(instance.sum).toBe(7);
+		});
+
+		it('uses last call arguments when debounced', async () => {
+			class Tracker {
+				lastArg = '';
+
+				@debounce(100)
+				track(val: string) { this.lastArg = val }
+			}
+
+			const instance = new Tracker();
+			instance.track('first');
+			instance.track('second');
+			instance.track('third');
+
+			vi.advanceTimersByTime(100);
+			await Promise.resolve();
+
+			expect(instance.lastArg).toBe('third');
+		});
 	});
 
-	it('should preserve context', async () => {
-		class TestClass {
-			value = 'test';
-			result = '';
-
-			@debounce(100)
-			method() {
-				this.result = this.value;
+	describe('promise behavior', () => {
+		it('returns a promise', () => {
+			class Test {
+				@debounce(100)
+				method() { return 'value' }
 			}
-		}
 
-		const instance = new TestClass();
-		instance.method();
+			const instance = new Test();
+			const result = instance.method();
+			expect(result).toBeInstanceOf(Promise);
+		});
 
-		vi.advanceTimersByTime(100);
-		await Promise.resolve();
+		it('resolves earlier calls with undefined on cancellation', async () => {
+			class Test {
+				@debounce(100)
+				method() { return 'final' }
+			}
 
-		expect(instance.result).toBe('test');
+			const instance = new Test();
+			const first = instance.method();
+			const second = instance.method();
+
+			vi.advanceTimersByTime(100);
+
+			expect(await first).toBeUndefined();
+			expect(await second).toBe('final');
+		});
 	});
 
-	it('should throw if wait is negative', () => {
-		expect(() => {
-			class TestClass {
-				@debounce(-10)
-				method() {}
+	describe('error handling', () => {
+		it('throws if wait is negative', () => {
+			expect(() => {
+				class Test {
+					@debounce(-10)
+					method() {}
+				}
+			}).toThrow('wait must be non-negative');
+		});
+
+		it('rejects promise when method throws Error', async () => {
+			class Test {
+				@debounce(100)
+				bad() { throw new Error('method failed') }
 			}
-		}).toThrow('wait must be non-negative');
+
+			const instance = new Test();
+			const promise = instance.bad();
+
+			vi.advanceTimersByTime(100);
+
+			await expect(promise).rejects.toThrow('method failed');
+		});
+
+		it('rejects with casted error for non-Error throws', async () => {
+			class Test {
+				@debounce(100)
+				bad() { throw 'string error' }
+			}
+
+			const instance = new Test();
+			const promise = instance.bad();
+
+			vi.advanceTimersByTime(100);
+
+			await expect(promise).rejects.toThrow('string error');
+		});
 	});
 
-	it('should reject with casted error when method throws', async () => {
-		class TestClass {
-			@debounce(100)
-			throwingMethod() {
-				throw new Error('method failed');
+	describe('zero wait', () => {
+		it('supports wait of 0', async () => {
+			class Test {
+				called = false;
+
+				@debounce(0)
+				run() { this.called = true }
 			}
-		}
 
-		const instance = new TestClass();
-		const promise = instance.throwingMethod();
+			const instance = new Test();
+			instance.run();
 
-		vi.advanceTimersByTime(100);
+			vi.advanceTimersByTime(0);
+			await Promise.resolve();
 
-		await expect(promise).rejects.toThrow('method failed');
+			expect(instance.called).toBe(true);
+		});
 	});
 
-	it('should reject with casted error for non-Error throws', async () => {
-		class TestClass {
-			@debounce(100)
-			throwingMethod() {
-				throw 'string error';
+	describe('DebounceManager.close via process exit', () => {
+		it('clears all active timers when process exits', async () => {
+			class Test {
+				count = 0;
+
+				@debounce(200)
+				increment() { this.count++ }
 			}
-		}
 
-		const instance = new TestClass();
-		const promise = instance.throwingMethod();
+			const instance = new Test();
+			// Create pending timers
+			instance.increment();
+			instance.increment();
 
-		vi.advanceTimersByTime(100);
+			// Trigger process exit handler which calls close() on all closeables
+			// including the module-level DebounceManager instance
+			process.emit('exit', 0);
 
-		await expect(promise).rejects.toThrow('string error');
+			// Advance timers — the pending debounce should have been cleared
+			vi.advanceTimersByTime(200);
+			await vi.advanceTimersByTimeAsync(0);
+
+			expect(instance.count).toBe(0);
+		});
 	});
 });

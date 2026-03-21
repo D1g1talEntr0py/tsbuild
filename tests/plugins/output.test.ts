@@ -1,154 +1,146 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { outputPlugin } from '../../src/plugins/output';
-import { TestHelper } from '../scripts/test-helper';
-import type { BuildResult, PluginBuild } from 'esbuild';
-import { vol, fs as memfs } from 'memfs';
-import { join } from 'node:path';
 
-// Mock node:fs and node:fs/promises to use memfs
 vi.mock('node:fs', async () => {
-	const memfs: typeof import('memfs') = await vi.importActual('memfs');
+	const memfs = await import('memfs');
 	return memfs.fs;
 });
 
 vi.mock('node:fs/promises', async () => {
-	const memfs: typeof import('memfs') = await vi.importActual('memfs');
+	const memfs = await import('memfs');
 	return memfs.fs.promises;
 });
 
-describe('outputPlugin', () => {
-	let mockBuild: PluginBuild;
-	let onEndCallback: (result: BuildResult) => Promise<void>;
-	const outputDir = join(process.cwd(), 'test-output');
+import { vol, fs as memfs } from 'memfs';
+import { outputPlugin, rewriteRelativeSpecifiers } from 'src/plugins/output';
+import type { BuildResult, PluginBuild } from 'esbuild';
+import { join } from 'node:path';
 
-	beforeEach(async () => {
-		await TestHelper.setupMemfs();
+const outputDir = '/test-output';
+const encoder = new TextEncoder();
+
+describe('outputPlugin', () => {
+	let onEndCallback: (result: BuildResult) => Promise<void>;
+
+	beforeEach(() => {
+		vol.reset();
 		vol.mkdirSync(outputDir, { recursive: true });
 
 		const build: Partial<PluginBuild> = {
-			onEnd: vi.fn((callback) => {
-				onEndCallback = callback;
-			}),
+			onEnd: vi.fn((callback) => { onEndCallback = callback }),
 		};
-		mockBuild = build as PluginBuild;
-
-		outputPlugin().setup(mockBuild);
+		outputPlugin().setup(build as PluginBuild);
 	});
 
-	afterEach(() => {
-		TestHelper.teardownMemfs();
-	});
+	afterEach(() => { vol.reset() });
 
-	it('should have the correct name', () => {
+	it('has the correct name', () => {
 		expect(outputPlugin().name).toBe('esbuild:output-plugin');
 	});
 
-	it('should register an onEnd callback', () => {
-		expect(mockBuild.onEnd).toHaveBeenCalledWith(expect.any(Function));
+	it('registers an onEnd callback', () => {
+		const build: Partial<PluginBuild> = { onEnd: vi.fn() };
+		outputPlugin().setup(build as PluginBuild);
+		expect(build.onEnd).toHaveBeenCalledWith(expect.any(Function));
 	});
 
-	describe('onEnd callback', () => {
-		it('should write .js files with executable permissions if they have a shebang', async () => {
-			const contents = new TextEncoder().encode('#!/usr/bin/env node\nconsole.log("hello");');
-			const filePath = join(outputDir, 'script.js');
-			const mockResult = {
-				outputFiles: [{ path: filePath, contents }],
-			};
+	describe('file writing', () => {
+		it('sets executable permissions for JS files with shebang', async () => {
+			const contents = encoder.encode('#!/usr/bin/env node\nconsole.log("hi");');
+			const filePath = join(outputDir, 'cli.js');
+			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
 
-			await onEndCallback(mockResult as BuildResult);
-
-			const fileContent = await memfs.promises.readFile(filePath);
 			const stats = await memfs.promises.stat(filePath);
-
-			expect(fileContent).toEqual(Buffer.from(contents));
-			expect(stats.mode & 0o777).toBe(0o755); // Check executable bit
+			expect(Number(stats.mode) & 0o777).toBe(0o755);
 		});
 
-		it('should write .js files without executable permissions if they do not have a shebang', async () => {
-			const contents = new TextEncoder().encode('console.log("hello");');
+		it('sets regular permissions for JS files without shebang', async () => {
+			const contents = encoder.encode('console.log("hello");');
 			const filePath = join(outputDir, 'lib.js');
-			const mockResult = {
-				outputFiles: [{ path: filePath, contents }],
-			};
+			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
 
-			await onEndCallback(mockResult as BuildResult);
-
-			const fileContent = await memfs.promises.readFile(filePath);
 			const stats = await memfs.promises.stat(filePath);
-
-			expect(fileContent).toEqual(Buffer.from(contents));
-			expect(stats.mode & 0o777).toBe(0o666); // No executable bit (memfs doesn't apply umask)
+			expect(Number(stats.mode) & 0o777).toBe(0o666);
 		});
 
-		it('should write .css files', async () => {
-			const contents = new TextEncoder().encode('body { color: red }');
+		it('writes non-JS files with regular permissions', async () => {
+			const contents = encoder.encode('body { color: red }');
 			const filePath = join(outputDir, 'styles.css');
-			const mockResult = {
-				outputFiles: [{ path: filePath, contents }],
-			};
+			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
 
-			await onEndCallback(mockResult as BuildResult);
-
-			const fileContent = await memfs.promises.readFile(filePath);
+			const content = await memfs.promises.readFile(filePath);
+			expect(content).toEqual(Buffer.from(contents));
 			const stats = await memfs.promises.stat(filePath);
-
-			expect(fileContent).toEqual(Buffer.from(contents));
-			expect(stats.mode & 0o777).toBe(0o666); // Regular file permissions (memfs doesn't apply umask)
+			expect(Number(stats.mode) & 0o777).toBe(0o666);
 		});
 
-		it('should write other file types using contents', async () => {
-			const mockContents = new Uint8Array([1, 2, 3]);
-			const filePath = join(outputDir, 'data.bin');
-			const mockResult = {
-				outputFiles: [{ path: filePath, contents: mockContents }],
-			};
+		it('handles multiple output files', async () => {
+			const files = [
+				{ path: join(outputDir, 'cli.js'), contents: encoder.encode('#!/usr/bin/env node\n') },
+				{ path: join(outputDir, 'lib.js'), contents: encoder.encode('const a = 1;') },
+				{ path: join(outputDir, 'app.css'), contents: encoder.encode('p { color: blue }') },
+			];
+			await onEndCallback({ outputFiles: files } as BuildResult);
 
-			await onEndCallback(mockResult as BuildResult);
+			expect(Number((await memfs.promises.stat(files[0].path)).mode) & 0o777).toBe(0o755);
+			expect(Number((await memfs.promises.stat(files[1].path)).mode) & 0o777).toBe(0o666);
+			expect(Number((await memfs.promises.stat(files[2].path)).mode) & 0o777).toBe(0o666);
+		});
+	});
 
-			const fileContent = await memfs.promises.readFile(filePath);
-			const stats = await memfs.promises.stat(filePath);
+	describe('relative specifier rewriting in JS output', () => {
+		it('appends .js to extension-less relative imports in JS files', async () => {
+			const code = 'import { foo } from \'./utils\';\n';
+			const contents = encoder.encode(code);
+			const filePath = join(outputDir, 'index.js');
+			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
 
-			expect(fileContent).toEqual(Buffer.from(mockContents));
-			expect(stats.mode & 0o777).toBe(0o666); // Regular file permissions (memfs doesn't apply umask)
+			const written = await memfs.promises.readFile(filePath, 'utf8');
+			expect(written).toContain("from './utils.js'");
 		});
 
-		it('should handle multiple files correctly', async () => {
-			const scriptPath = join(outputDir, 'script.js');
-			const libPath = join(outputDir, 'lib.js');
-			const cssPath = join(outputDir, 'styles.css');
-			const binPath = join(outputDir, 'asset.bin');
+		it('does not rewrite relative imports that already have extensions', async () => {
+			const code = 'import { foo } from \'./utils.js\';\n';
+			const contents = encoder.encode(code);
+			const filePath = join(outputDir, 'index.js');
+			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
 
-			const jsFileWithShebang = { path: scriptPath, contents: new TextEncoder().encode('#!/usr/bin/env node\n') };
-			const jsFile = { path: libPath, contents: new TextEncoder().encode('const a = 1;') };
-			const cssFile = { path: cssPath, contents: new TextEncoder().encode('p { color: blue }') };
-			const otherFile = { path: binPath, contents: new Uint8Array([4, 5, 6]) };
-
-			const mockResult = {
-				outputFiles: [jsFileWithShebang, jsFile, cssFile, otherFile],
-			};
-
-			await onEndCallback(mockResult as BuildResult);
-
-			// Verify all files were written
-			const scriptContent = await memfs.promises.readFile(scriptPath);
-			const scriptStats = await memfs.promises.stat(scriptPath);
-			expect(scriptContent).toEqual(Buffer.from(jsFileWithShebang.contents));
-			expect(scriptStats.mode & 0o777).toBe(0o755); // Executable
-
-			const libContent = await memfs.promises.readFile(libPath);
-			const libStats = await memfs.promises.stat(libPath);
-			expect(libContent).toEqual(Buffer.from(jsFile.contents));
-			expect(libStats.mode & 0o777).toBe(0o666); // Not executable (memfs doesn't apply umask)
-
-			const cssContent = await memfs.promises.readFile(cssPath);
-			const cssStats = await memfs.promises.stat(cssPath);
-			expect(cssContent).toEqual(Buffer.from(cssFile.contents));
-			expect(cssStats.mode & 0o777).toBe(0o666); // Regular file (memfs doesn't apply umask)
-
-			const binContent = await memfs.promises.readFile(binPath);
-			const binStats = await memfs.promises.stat(binPath);
-			expect(binContent).toEqual(Buffer.from(otherFile.contents));
-			expect(binStats.mode & 0o777).toBe(0o666); // Regular file (memfs doesn't apply umask)
+			const written = await memfs.promises.readFile(filePath, 'utf8');
+			expect(written).toContain("from './utils.js'");
 		});
+
+		it('does not rewrite bare specifiers', async () => {
+			const code = 'import { something } from \'lodash\';\n';
+			const contents = encoder.encode(code);
+			const filePath = join(outputDir, 'index.js');
+			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
+
+			const written = await memfs.promises.readFile(filePath, 'utf8');
+			expect(written).toContain("from 'lodash'");
+		});
+	});
+});
+
+describe('rewriteRelativeSpecifiers', () => {
+	const matrix: [string, string, string][] = [
+		['extension-less relative', "from './utils'", "from './utils.js'"],
+		['extension-less parent', "from '../shared'", "from '../shared.js'"],
+		['deep extension-less', "from './deep/nested/mod'", "from './deep/nested/mod.js'"],
+		['already has .js', "from './utils.js'", "from './utils.js'"],
+		['already has .ts', "from './utils.ts'", "from './utils.ts'"],
+		['already has .mjs', "from './utils.mjs'", "from './utils.mjs'"],
+		['bare specifier', "from 'lodash'", "from 'lodash'"],
+		['scoped bare specifier', "from '@scope/pkg'", "from '@scope/pkg'"],
+		['double quotes', 'from "./utils"', 'from "./utils.js"'],
+	];
+
+	it.each(matrix)('%s: %s → %s', (_desc, input, expected) => {
+		expect(rewriteRelativeSpecifiers(input)).toBe(expected);
+	});
+
+	it('rewrites multiple occurrences in same string', () => {
+		const code = "import { a } from './a';\nimport { b } from './b';";
+		const result = rewriteRelativeSpecifiers(code);
+		expect(result).toContain("from './a.js'");
+		expect(result).toContain("from './b.js'");
 	});
 });

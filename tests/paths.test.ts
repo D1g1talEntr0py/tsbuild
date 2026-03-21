@@ -1,147 +1,154 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Paths } from '../src/paths';
-import { resolve, relative, join } from 'node:path';
-import { vol } from 'memfs';
-import { TestHelper } from './scripts/test-helper';
-
-vi.mock('node:fs', async () => {
-	const memfs: typeof import('memfs') = await vi.importActual('memfs');
-	return memfs.fs;
-});
 
 vi.mock('node:fs/promises', async () => {
-	const memfs: typeof import('memfs') = await vi.importActual('memfs');
+	const memfs = await import('memfs');
 	return memfs.fs.promises;
 });
 
+import { vol } from 'memfs';
+import { Paths } from 'src/paths';
+import { resolve, relative, parse } from 'node:path';
+
+beforeEach(() => { vol.reset() });
+afterEach(() => { vol.reset() });
+
 describe('Paths', () => {
-	beforeEach(async () => {
-		await TestHelper.setupMemfs();
-	});
-
-	afterEach(() => {
-		TestHelper.teardownMemfs();
-	});
-
 	describe('absolute', () => {
-		it('should resolve to an absolute path', () => {
-			const path = Paths.absolute('src', 'index.ts');
-			expect(path).toBe(resolve('src', 'index.ts'));
+		it('resolves a single path to absolute', () => {
+			const result = Paths.absolute('/foo/bar');
+			expect(result).toBe('/foo/bar');
 		});
 
-		it('should handle multiple segments', () => {
-			const path = Paths.absolute('a', 'b', 'c');
-			expect(path).toBe(resolve('a', 'b', 'c'));
+		it('joins multiple segments into absolute path', () => {
+			const result = Paths.absolute('/foo', 'bar', 'baz');
+			expect(result).toBe(resolve('/foo', 'bar', 'baz'));
+		});
+
+		it('resolves relative path against cwd', () => {
+			const result = Paths.absolute('relative');
+			expect(result).toBe(resolve('relative'));
 		});
 	});
 
 	describe('relative', () => {
-		it('should return relative path', () => {
-			const from = '/a/b';
-			const to = '/a/b/c/d';
-			const path = Paths.relative(from, to);
-			expect(path).toBe(relative(from, to));
+		it('computes relative path between two locations', () => {
+			const result = Paths.relative('/foo/bar', '/foo/baz');
+			expect(result).toBe(relative('/foo/bar', '/foo/baz'));
+		});
+
+		it('handles same directory', () => {
+			expect(Paths.relative('/foo', '/foo')).toBe('');
 		});
 	});
 
-	describe('join', () => {
-		it('should join paths', () => {
-			const path = Paths.join('a', 'b', 'c');
-			expect(path).toBe(join('a', 'b', 'c'));
+	describe('parse', () => {
+		it('parses a path into its components', () => {
+			const result = Paths.parse('/home/user/file.ts');
+			expect(result).toEqual(parse('/home/user/file.ts'));
+			expect(result.base).toBe('file.ts');
+			expect(result.ext).toBe('.ts');
+			expect(result.name).toBe('file');
 		});
 
-		it('should handle absolute first segment', () => {
-			const path = Paths.join('/a', 'b');
-			expect(path).toBe(join('/a', 'b'));
+		it('handles path without extension', () => {
+			const result = Paths.parse('/home/user/file');
+			expect(result.ext).toBe('');
+			expect(result.name).toBe('file');
 		});
 	});
 
 	describe('isPath', () => {
-		it('should return false for empty string', () => {
-			expect(Paths.isPath('')).toBe(false);
-		});
+		const pathMatrix: [string, boolean][] = [
+			['/',         true],
+			['./',        true],
+			['../',       true],
+			['.',         true],
+			['..',        true],
+			['./foo',     true],
+			['../foo',    true],
+			['/foo/bar',  true],
+			['C:/',       true],
+			['C:\\foo',   true],
+			['D:/bar',    true],
+			['lodash',    false],
+			['@types/node', false],
+			['fs',        false],
+			['node:fs',   false],
+			['esbuild',   false],
+			['',          false],
+			['.ts',       false],
+			['..foo',     false],
+			['a:/test',   false],
+		];
 
-		it('should return true for absolute paths starting with /', () => {
-			expect(Paths.isPath('/path/to/file')).toBe(true);
-			expect(Paths.isPath('/file.ts')).toBe(true);
-		});
-
-		it('should return true for relative path "."', () => {
-			expect(Paths.isPath('.')).toBe(true);
-		});
-
-		it('should return true for relative path ".."', () => {
-			expect(Paths.isPath('..')).toBe(true);
-		});
-
-		it('should return true for paths starting with "./"', () => {
-			expect(Paths.isPath('./file')).toBe(true);
-			expect(Paths.isPath('./path/to/file')).toBe(true);
-		});
-
-		it('should return true for paths starting with "../"', () => {
-			expect(Paths.isPath('../file')).toBe(true);
-			expect(Paths.isPath('../path/to/file')).toBe(true);
-		});
-
-		it('should return true for Windows absolute paths', () => {
-			expect(Paths.isPath('C:/path/to/file')).toBe(true);
-			expect(Paths.isPath('C:\\path\\to\\file')).toBe(true);
-			expect(Paths.isPath('D:/file')).toBe(true);
-			expect(Paths.isPath('Z:\\file')).toBe(true);
-		});
-
-		it('should return false for bare specifiers (node modules)', () => {
-			expect(Paths.isPath('lodash')).toBe(false);
-			expect(Paths.isPath('react')).toBe(false);
-			expect(Paths.isPath('@types/node')).toBe(false);
-			expect(Paths.isPath('react/jsx-runtime')).toBe(false);
-		});
-
-		it('should return false for paths that start with dot but are not relative', () => {
-			expect(Paths.isPath('.hidden')).toBe(false);
-			expect(Paths.isPath('..something')).toBe(false);
-		});
-
-		it('should handle edge cases', () => {
-			// Single characters
-			expect(Paths.isPath('/')).toBe(true);
-			// Lowercase drive letters are not Windows paths (only A-Z)
-			expect(Paths.isPath('c:/file')).toBe(false);
-			// Drive letter without proper separator
-			expect(Paths.isPath('C:file')).toBe(false);
+		it.each(pathMatrix)('"%s" → %s', (input, expected) => {
+			expect(Paths.isPath(input)).toBe(expected);
 		});
 	});
 
 	describe('isDirectory', () => {
-		it('should return true for an existing directory', async () => {
+		it('returns true for a directory', async () => {
 			vol.mkdirSync('/test-dir', { recursive: true });
 			expect(await Paths.isDirectory('/test-dir')).toBe(true);
 		});
 
-		it('should return false for an existing file', async () => {
-			vol.writeFileSync('/test-file.ts', 'content');
-			expect(await Paths.isDirectory('/test-file.ts')).toBe(false);
+		it('returns false for a file', async () => {
+			vol.mkdirSync('/parent', { recursive: true });
+			vol.writeFileSync('/parent/file.txt', 'content');
+			expect(await Paths.isDirectory('/parent/file.txt')).toBe(false);
 		});
 
-		it('should return false for a non-existent path', async () => {
+		it('returns false for non-existent path', async () => {
 			expect(await Paths.isDirectory('/non-existent')).toBe(false);
+		});
+
+		it('re-throws non-ENOENT errors', async () => {
+			const { lstat } = await import('node:fs/promises');
+			const spy = vi.spyOn({ lstat }, 'lstat').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+			// Need to mock at module level
+			const fsp = await import('node:fs/promises');
+			const lstatSpy = vi.spyOn(fsp, 'lstat').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+			await expect(Paths.isDirectory('/any-path')).rejects.toThrow('EACCES');
+			lstatSpy.mockRestore();
+			spy.mockRestore();
 		});
 	});
 
 	describe('isFile', () => {
-		it('should return true for an existing file', async () => {
-			vol.writeFileSync('/test-file.ts', 'content');
-			expect(await Paths.isFile('/test-file.ts')).toBe(true);
+		it('returns true for a file', async () => {
+			vol.mkdirSync('/parent', { recursive: true });
+			vol.writeFileSync('/parent/file.txt', 'content');
+			expect(await Paths.isFile('/parent/file.txt')).toBe(true);
 		});
 
-		it('should return false for an existing directory', async () => {
+		it('returns false for a directory', async () => {
 			vol.mkdirSync('/test-dir', { recursive: true });
 			expect(await Paths.isFile('/test-dir')).toBe(false);
 		});
 
-		it('should return false for a non-existent path', async () => {
+		it('returns false for non-existent path', async () => {
 			expect(await Paths.isFile('/non-existent')).toBe(false);
+		});
+
+		it('re-throws non-ENOENT errors', async () => {
+			const fsp = await import('node:fs/promises');
+			const lstatSpy = vi.spyOn(fsp, 'lstat').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+			await expect(Paths.isFile('/any-path')).rejects.toThrow('EACCES');
+			lstatSpy.mockRestore();
+		});
+	});
+
+	describe('join', () => {
+		it('joins path segments', () => {
+			expect(Paths.join('/foo', 'bar', 'baz')).toBe('/foo/bar/baz');
+		});
+
+		it('normalizes redundant separators', () => {
+			expect(Paths.join('/foo/', '/bar')).toBe('/foo/bar');
+		});
+
+		it('resolves parent references', () => {
+			expect(Paths.join('/foo/bar', '..', 'baz')).toBe('/foo/baz');
 		});
 	});
 });

@@ -1,106 +1,151 @@
-import { castError, BuildError, TypeCheckError, BundleError, ConfigurationError, UnsupportedSyntaxError } from '../src/errors';
 import { describe, it, expect } from 'vitest';
-import { createSourceFile, ScriptTarget, SyntaxKind } from 'typescript';
+import { BuildError, TypeCheckError, BundleError, ConfigurationError, UnsupportedSyntaxError, castError } from 'src/errors';
+import ts from 'typescript';
 
-describe('errors', () => {
-  describe('castError', () => {
-    it('should return the error if input is already an Error', () => {
-      const error = new Error('test error');
-      expect(castError(error)).toBe(error);
-    });
+describe('castError', () => {
+	it('returns Error as-is', () => {
+		const error = new Error('test');
+		expect(castError(error)).toBe(error);
+	});
 
-    it('should create an Error from a string', () => {
-      const error = castError('test error');
-      expect(error).toBeInstanceOf(Error);
-      expect(error.message).toBe('test error');
-    });
+	it('wraps string in Error', () => {
+		const result = castError('test message');
+		expect(result).toBeInstanceOf(Error);
+		expect(result.message).toBe('test message');
+	});
 
-    it('should create an Error with "Unknown error" for other types', () => {
-      const error = castError(123);
-      expect(error).toBeInstanceOf(Error);
-      expect(error.message).toBe('Unknown error');
-    });
-  });
+	it('wraps unknown in Error with default message', () => {
+		const result = castError(42);
+		expect(result).toBeInstanceOf(Error);
+		expect(result.message).toBe('Unknown error');
+	});
 
-  describe('BuildError', () => {
-    it('should set name and code correctly', () => {
-      const error = new BuildError('test message', 5);
-      expect(error.name).toBe('BuildError');
-      expect(error.message).toBe('test message');
-      expect(error.code).toBe(5);
-    });
-  });
+	it('wraps null in Error with default message', () => {
+		const result = castError(null);
+		expect(result).toBeInstanceOf(Error);
+		expect(result.message).toBe('Unknown error');
+	});
 
-  describe('TypeCheckError', () => {
-    it('should set code to 1 and store diagnostics', () => {
-      const error = new TypeCheckError('type error', 'diagnostic output');
-      expect(error.name).toBe('TypeCheckError');
-      expect(error.code).toBe(1);
-      expect(error.diagnostics).toBe('diagnostic output');
-    });
+	it('wraps undefined in Error with default message', () => {
+		const result = castError(undefined);
+		expect(result).toBeInstanceOf(Error);
+		expect(result.message).toBe('Unknown error');
+	});
+});
 
-    it('should work without diagnostics', () => {
-      const error = new TypeCheckError('type error');
-      expect(error.diagnostics).toBeUndefined();
-    });
-  });
+describe('BuildError', () => {
+	it('sets message and default exit code 1', () => {
+		const error = new BuildError('build failed');
+		expect(error.message).toBe('build failed');
+		expect(error.code).toBe(1);
+		expect(error.name).toBe('BuildError');
+	});
 
-  describe('BundleError', () => {
-    it('should set code to 2', () => {
-      const error = new BundleError('bundle failed');
-      expect(error.name).toBe('BundleError');
-      expect(error.message).toBe('bundle failed');
-      expect(error.code).toBe(2);
-    });
-  });
+	it('accepts custom exit code', () => {
+		const error = new BuildError('custom', 4);
+		expect(error.code).toBe(4);
+	});
 
-  describe('ConfigurationError', () => {
-    it('should set code to 3', () => {
-      const error = new ConfigurationError('invalid config');
-      expect(error.name).toBe('ConfigurationError');
-      expect(error.message).toBe('invalid config');
-      expect(error.code).toBe(3);
-    });
-  });
+	it('is an instance of Error', () => {
+		expect(new BuildError('test')).toBeInstanceOf(Error);
+	});
 
-  describe('UnsupportedSyntaxError', () => {
-    it('should include syntax kind and node text in message', () => {
-      const source = createSourceFile('test.ts', 'const x = 1;', ScriptTarget.Latest, true);
-      const node = source.statements[0];
-      const error = new UnsupportedSyntaxError(node);
-      expect(error.message).toContain('Syntax not yet supported');
-      expect(error.message).toContain(SyntaxKind[node.kind]);
-      expect(error.message).toContain('const x = 1');
-    });
+	it('captures stack trace', () => {
+		const error = new BuildError('test');
+		expect(error.stack).toBeDefined();
+		expect(error.stack).toContain('errors.test.ts');
+	});
+});
 
-    it('should use custom message when provided', () => {
-      const source = createSourceFile('test.ts', 'let y = 2;', ScriptTarget.Latest, true);
-      const node = source.statements[0];
-      const error = new UnsupportedSyntaxError(node, 'Custom error');
-      expect(error.message).toContain('Custom error');
-    });
+describe('TypeCheckError', () => {
+	it('sets exit code 1 and includes diagnostics', () => {
+		const error = new TypeCheckError('type check failed', 'some diagnostics');
+		expect(error.code).toBe(1);
+		expect(error.diagnostics).toBe('some diagnostics');
+		expect(error.name).toBe('TypeCheckError');
+	});
 
-    it('should handle node without getText method', () => {
-      const fakeNode = { kind: SyntaxKind.Identifier } as unknown as import('typescript').Node;
-      const error = new UnsupportedSyntaxError(fakeNode);
-      expect(error.message).toContain('<no text>');
-      expect(error.message).toContain('Identifier');
-    });
+	it('diagnostics are optional', () => {
+		const error = new TypeCheckError('type check failed');
+		expect(error.diagnostics).toBeUndefined();
+	});
 
-    it('should handle unknown syntax kind', () => {
-      const fakeNode = { kind: 99999, getText: () => 'some text' } as unknown as import('typescript').Node;
-      const error = new UnsupportedSyntaxError(fakeNode);
-      expect(error.message).toContain('Unknown(99999)');
-    });
+	it('is an instance of BuildError', () => {
+		expect(new TypeCheckError('test')).toBeInstanceOf(BuildError);
+	});
+});
 
-    it('should be an instance of BundleError with exit code 2', () => {
-      const source = createSourceFile('test.ts', 'const x = 1;', ScriptTarget.Latest, true);
-      const node = source.statements[0];
-      const error = new UnsupportedSyntaxError(node);
-      expect(error).toBeInstanceOf(BundleError);
-      expect(error).toBeInstanceOf(BuildError);
-      expect(error.code).toBe(2);
-      expect(error.name).toBe('UnsupportedSyntaxError');
-    });
-  });
+describe('BundleError', () => {
+	it('sets exit code 2', () => {
+		const error = new BundleError('bundle failed');
+		expect(error.code).toBe(2);
+		expect(error.name).toBe('BundleError');
+	});
+
+	it('is an instance of BuildError', () => {
+		expect(new BundleError('test')).toBeInstanceOf(BuildError);
+	});
+});
+
+describe('ConfigurationError', () => {
+	it('sets exit code 3', () => {
+		const error = new ConfigurationError('bad config');
+		expect(error.code).toBe(3);
+		expect(error.name).toBe('ConfigurationError');
+	});
+
+	it('is an instance of BuildError', () => {
+		expect(new ConfigurationError('test')).toBeInstanceOf(BuildError);
+	});
+});
+
+describe('UnsupportedSyntaxError', () => {
+	it('formats syntax kind name in message', () => {
+		const sourceFile = ts.createSourceFile('test.d.ts', 'export class Foo {}', ts.ScriptTarget.ESNext, true);
+		const classNode = sourceFile.statements[0];
+		const error = new UnsupportedSyntaxError(classNode);
+		expect(error.message).toContain('ClassDeclaration');
+		expect(error.message).toContain('Syntax not yet supported');
+		expect(error.name).toBe('UnsupportedSyntaxError');
+	});
+
+	it('uses custom message', () => {
+		const sourceFile = ts.createSourceFile('test.d.ts', 'const x = 1;', ts.ScriptTarget.ESNext, true);
+		const node = sourceFile.statements[0];
+		const error = new UnsupportedSyntaxError(node, 'Custom error');
+		expect(error.message).toContain('Custom error');
+	});
+
+	it('truncates long node text to 100 characters', () => {
+		const longCode = `export const ${'x'.repeat(200)} = 1;`;
+		const sourceFile = ts.createSourceFile('test.d.ts', longCode, ts.ScriptTarget.ESNext, true);
+		const node = sourceFile.statements[0];
+		const error = new UnsupportedSyntaxError(node);
+		// The getText() slice(0, 100) should truncate
+		const textPart = error.message.split(' - "')[1];
+		expect(textPart.replace('"', '').length).toBeLessThanOrEqual(101);
+	});
+
+	it('handles node without getText method', () => {
+		const fakeNode = { kind: ts.SyntaxKind.Unknown } as ts.Node;
+		const error = new UnsupportedSyntaxError(fakeNode);
+		expect(error.message).toContain('<no text>');
+	});
+
+	it('handles unknown syntax kind', () => {
+		const fakeNode = { kind: 99999, getText: () => 'test' } as unknown as ts.Node;
+		const error = new UnsupportedSyntaxError(fakeNode);
+		expect(error.message).toContain('Unknown(99999)');
+	});
+
+	it('is an instance of BundleError', () => {
+		const sourceFile = ts.createSourceFile('test.d.ts', 'const x = 1;', ts.ScriptTarget.ESNext, true);
+		expect(new UnsupportedSyntaxError(sourceFile.statements[0])).toBeInstanceOf(BundleError);
+	});
+
+	it('has exit code 2 (inherited from BundleError)', () => {
+		const sourceFile = ts.createSourceFile('test.d.ts', 'const x = 1;', ts.ScriptTarget.ESNext, true);
+		const error = new UnsupportedSyntaxError(sourceFile.statements[0]);
+		expect(error.code).toBe(2);
+	});
 });
