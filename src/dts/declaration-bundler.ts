@@ -756,23 +756,6 @@ class DeclarationBundler {
 	}
 
 	/**
-	 * Extract exported names from a processed source file
-	 * @param processedSourceFile - The processed source file
-	 * @returns Array of exported names
-	 */
-	private getModuleExports(processedSourceFile: SourceFile): string[] {
-		const exports: string[] = [];
-		for (const statement of processedSourceFile.statements) {
-			if (isExportDeclaration(statement) && statement.exportClause && isNamedExports(statement.exportClause)) {
-				for (const element of statement.exportClause.elements) {
-					exports.push(element.name.text);
-				}
-			}
-		}
-		return exports;
-	}
-
-	/**
 	 * Main bundling orchestration method
 	 * @param entryPoint - The entry point file path
 	 * @returns The bundled declaration file content
