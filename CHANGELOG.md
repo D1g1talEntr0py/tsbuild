@@ -1,3 +1,32 @@
+## [1.6.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.3...v1.6.4) (2026-03-21)
+
+### Bug Fixes
+
+* **logging:** bypass formatting for empty error message arrays (7ced5ad268029ee763bafdfeda405c50faec8ad3)
+- Check for messages length before invoking the format function
+- Preclude unnecessary iteration over empty diagnostic outputs
+- Prevent empty lines from being emitted to the console log stream
+
+
+### Performance Improvements
+
+* **plugins:** optimize build plugins and file operations (d5669224bff868001baf43a99efb409ec33d521e)
+- Cache SWC transformFile reference lazy-loaded for decorator metadata
+- Build reusable O(1) matchers for external modules string and RegExp patterns
+- Extract package names properly handling scoped and unscoped module paths
+- Cache shared TextEncoder and TextDecoder instances for output generation
+- Preserve shebangs and set correct execute permissions on output scripts
+- Optimize extension rewriting to only trigger string replacements when modified
+
+
+### Miscellaneous Chores
+
+* **deps:** update watchr and eslint dependencies (619d559159bb358cef75b36e99223999a0c6da57)
+- Update @d1g1tal/watchr package to version 1.0.4
+- Update eslint package to version 10.1.0
+- Synchronize pnpm-lock.yaml with new dependency versions
+- Update typescript-eslint plugin and parser dependencies in lockfile
+
 ## [1.6.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.2...v1.6.3) (2026-03-18)
 
 ### Bug Fixes
