@@ -5,9 +5,11 @@ import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
 
 type PluginOptions = BuildOptions & { write: false };
 
-const FileMode = { READ_WRITE: 0o666, READ_WRITE_EXECUTE: 0o755 } as const;
-
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+const localFileIdentifier = /\.[a-z]+$/i;
 const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
+const FileMode = { READ_WRITE: 0o666, READ_WRITE_EXECUTE: 0o755 } as const;
 
 /**
  * Rewrites extension-less relative specifiers in emitted JS/DTS output to include `.js`.
@@ -17,11 +19,10 @@ const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
  * @returns The content with `.js` appended to bare relative specifiers.
  */
 export function rewriteRelativeSpecifiers(code: string): string {
-	return code.replace(relativeSpecifierPattern, (_, before: string, path: string, after: string) => {
-		if (/\.[a-z]+$/i.test(path)) return before + path + after;
-		return `${before}${path}.js${after}`;
-	});
+	return code.replace(relativeSpecifierPattern, (_, before: string, path: string, after: string) =>
+		localFileIdentifier.test(path) ? before + path + after : `${before}${path}.js${after}`);
 }
+
 
 /**
  * Maps esbuild output files to disk, preserving shebangs for JavaScript files.
@@ -29,14 +30,18 @@ export function rewriteRelativeSpecifiers(code: string): string {
  * @returns A promise that resolves when the file is written
  */
 async function fileMapper({ path, contents }: OutputFile): Promise<void> {
-	const isJs = extname(path) === FileExtension.JS;
-	// Check for shebang in first two bytes: #! (0x23 0x21)
-	const mode = isJs && contents[0] === 0x23 && contents[1] === 0x21 ? FileMode.READ_WRITE_EXECUTE : FileMode.READ_WRITE;
-	const finalContents = isJs
-		? new TextEncoder().encode(rewriteRelativeSpecifiers(new TextDecoder().decode(contents)))
-		: contents;
+	if (extname(path) !== FileExtension.JS) { return Files.write(path, contents, { mode: FileMode.READ_WRITE }) }
 
-	return Files.write(path, finalContents, { mode });
+	let rewritten = false;
+	const result = textDecoder.decode(contents).replace(relativeSpecifierPattern, (_, before: string, specPath: string, after: string) => {
+		if (localFileIdentifier.test(specPath)) { return before + specPath + after }
+
+		rewritten = true;
+		return `${before}${specPath}.js${after}`;
+	});
+
+	// Check for shebang in first two bytes: #! (0x23 0x21) and set execute permissions if present
+	return Files.write(path, rewritten ? textEncoder.encode(result) : contents, { mode: contents[0] === 0x23 && contents[1] === 0x21 ? FileMode.READ_WRITE_EXECUTE : FileMode.READ_WRITE });
 }
 
 /**

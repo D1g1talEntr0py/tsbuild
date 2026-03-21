@@ -17,6 +17,9 @@ const swcOptions = {
 	swcrc: false
 };
 
+// Cached reference to SWC's transformFile — resolved lazily on first use and reused for all subsequent files
+let swcTransformFile: typeof import('@swc/core').transformFile | undefined;
+
 // Use SWC to emit decorator metadata
 export const swcDecoratorMetadataPlugin: Plugin = {
 	name: 'esbuild:swc-decorator-metadata',
@@ -30,8 +33,8 @@ export const swcDecoratorMetadataPlugin: Plugin = {
 		// Force esbuild to keep class names as well
 		build.initialOptions.keepNames = true;
 		build.onLoad({ filter }, async ({ path }): Promise<OnLoadResult> => {
-			const { transformFile } = await import('@swc/core');
-			const result = await transformFile(path, swcOptions);
+			swcTransformFile ??= (await import('@swc/core')).transformFile;
+			const result = await swcTransformFile(path, swcOptions);
 
 			if (result.map) {
 				const sources: RelativePath[] = [];
