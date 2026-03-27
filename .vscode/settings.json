@@ -14,5 +14,6 @@
 	"cSpell.words": [
 		"Arpad",
 		"Borsos"
-	]
+	],
+	"js/ts.tsdk.path": "node_modules/typescript/lib"
 }
