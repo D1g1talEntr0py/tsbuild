@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/D1g1talEntr0py/tsbuild/graph/badge.svg)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
 [![License: MIT](https://img.shields.io/github/license/D1g1talEntr0py/tsbuild)](https://github.com/D1g1talEntr0py/tsbuild/blob/main/LICENSE)
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript->=5.6.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 A TypeScript build tool that combines three tools into one workflow: **TypeScript's type system** for correctness, **esbuild** for speed, and **SWC** for legacy decorator metadata (optional, not installed by default). Built for modern ESM-only projects on Node.js 22+.
 
@@ -125,8 +125,7 @@ By default, bare specifiers (e.g. `lodash-es`) are kept as external imports. Use
     "outDir": "./dist",
     "declaration": true,
     "incremental": true,           // redundant — tsbuild enables this by default, but explicit is clear
-    "isolatedDeclarations": true,  // recommended: enables faster parallel declaration emit
-    "isolatedModules": true,
+    "isolatedModules": true,       // required — flags constructs esbuild can't safely transpile
     "verbatimModuleSyntax": true,
     "strict": true,
     "target": "ESNext",
@@ -149,11 +148,10 @@ Set `incremental: false` to opt out of the `.tsbuildinfo` cache entirely. Every 
   "compilerOptions": {
     "outDir": "./dist",
     "declaration": true,
-    "incremental": false,          // disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
-    "isolatedDeclarations": true,
-    "isolatedModules": true,
+    "incremental": false,          	// disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
+    "isolatedModules": true,				// required — flags constructs esbuild can't safely transpile
     "verbatimModuleSyntax": true,
-    "strict": true,
+    "strict": true,									// Not needed with TypeScript 6 and above, since strict mode is enabled by default
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler", // recommended for library builds processed by a bundler
@@ -428,6 +426,24 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
 **Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. The `force` and `minify` options are generally more useful as CLI flags (`--force`, `--minify`) than as persistent config values.
 
 ## Advanced Features
+
+### Isolated Modules
+
+Because tsbuild uses esbuild for transpilation, and esbuild processes each file independently without a full type graph, you should set `isolatedModules: true` in your `tsconfig.json`:
+
+```jsonc
+{
+  "compilerOptions": {
+    "isolatedModules": true
+  }
+}
+```
+
+This tells TypeScript to flag any construct that requires cross-file knowledge to transpile correctly — things like `const enum`, ambient module augmentation, or re-exporting a type without the `type` keyword. Without this, esbuild may encounter one of these patterns and silently emit incorrect code, since it has no way to identify the problem at transpile time.
+
+With `isolatedModules: true`, TypeScript catches these issues during the type-check phase, before esbuild runs, so you get a clear error instead of a subtle runtime bug.
+
+**`verbatimModuleSyntax` implies `isolatedModules`:** If you have `verbatimModuleSyntax: true` in your config, it already enforces all of `isolatedModules` and goes further by requiring `import type` for all type-only imports. If you're using `verbatimModuleSyntax`, adding `isolatedModules` is redundant but harmless.
 
 ### Decorator Metadata
 
