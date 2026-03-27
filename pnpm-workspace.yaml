@@ -1,3 +1,5 @@
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
+overrides:
+  '@d1g1tal/watchr': link:../../../.local/share/pnpm/global/5/node_modules/@d1g1tal/watchr
