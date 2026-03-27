@@ -103,22 +103,16 @@ function mergeImports(imports: string[]) {
 class DeclarationBundler {
 	/** Project declaration files from in-memory FileManager */
 	private readonly declarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
-
 	/** External declaration files resolved from disk (node_modules) when resolve is enabled */
 	private readonly externalDeclarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
-
 	/** d.ts Bundle Options */
 	private readonly options: DtsBundleOptions;
-
 	/** WeakMap cache for identifier collection to avoid re-parsing same source files */
 	private readonly identifierCache = new WeakMap<SourceFile, IdentifierMap>();
-
 	/** Module resolution cache for this bundler instance */
 	private readonly moduleResolutionCache = new Map<string, AbsolutePath>();
-
 	/** Pre-computed set of directory prefixes from declaration file paths for O(1) directoryExists lookups */
 	private readonly declarationDirs: Set<string> = new Set();
-
 	// Create a proper module resolution host that supports both in-memory files and disk files
 	private readonly moduleResolutionHost: ModuleResolutionHost = {
 		fileExists: (fileName: AbsolutePath) => {
@@ -703,10 +697,16 @@ class DeclarationBundler {
 		}
 
 		// Deduplicate using Sets for these collections since we're combining from many modules
-		const uniqueTypeReferences = [...new Set(allTypeReferences)];
+		const typeReferencesSet = new Set(allTypeReferences);
 		const uniqueFileReferences = [...new Set(allFileReferences)];
 		// Merge imports from the same module instead of simple deduplication
 		const mergedExternalImports = mergeImports(allExternalImports);
+
+		// Infer /// <reference types="..." /> from node: protocol imports so the .d.ts is self-contained
+		for (const imp of mergedExternalImports) {
+			if (imp.includes('"node:') || imp.includes('\'node:')) { typeReferencesSet.add('node') }
+		}
+		const uniqueTypeReferences = [ ...typeReferencesSet ];
 
 		// Value exports take precedence - remove any types that are also values
 		// Use Set for O(1) lookup instead of Array.includes() O(n) to avoid O(n²) complexity

@@ -112,21 +112,20 @@ describe('DeclarationProcessor', () => {
 		});
 
 		describe('imports', () => {
-			it('strips type keyword from import type statements', () => {
+			it('preserves type keyword in import type statements', () => {
 				const result = DeclarationProcessor.preProcess(parse("import type { Foo } from './foo';\nimport type Bar from './bar';"));
-				expect(result.code).toContain("import { Foo } from './foo';");
-				expect(result.code).toContain("import Bar from './bar';");
+				expect(result.code).toContain("import type { Foo } from './foo';");
+				expect(result.code).toContain("import type Bar from './bar';");
 			});
 
-			it('handles import type with no whitespace', () => {
+			it('preserves import type with no whitespace', () => {
 				const result = DeclarationProcessor.preProcess(parse("import type{Foo}from'./foo';"));
-				expect(result.code).toContain("import {Foo}from'./foo';");
+				expect(result.code).toContain("import type{Foo}from'./foo';");
 			});
 
-			it('strips inline type specifiers from imports', () => {
+			it('preserves inline type specifiers in imports', () => {
 				const result = DeclarationProcessor.preProcess(parse("import { foo, type Bar, baz } from './module';"));
-				expect(result.code).toContain("import { foo, Bar, baz } from './module';");
-				expect(result.code).not.toContain('type Bar');
+				expect(result.code).toContain("import { foo, type Bar, baz } from './module';");
 			});
 
 			it('handles inline import() types', () => {

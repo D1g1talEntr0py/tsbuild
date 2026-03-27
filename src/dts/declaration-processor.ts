@@ -30,7 +30,7 @@ import ts, {
 } from 'typescript';
 import MagicString from 'magic-string';
 import { UnsupportedSyntaxError } from 'src/errors';
-import { FileExtension, newLine, typeMatcher, inlineTypePattern } from 'src/constants';
+import { FileExtension, newLine, typeMatcher } from 'src/constants';
 import type { NameRange, PreProcessOutput } from './@types';
 
 /**
@@ -285,43 +285,7 @@ export class DeclarationProcessor {
 
 		// Pass 1: Walk through all statements and process them
 		for (const node of sourceFile.statements) {
-			if (isImportDeclaration(node)) {
-				// Handle import declarations
-				if (node.importClause?.phaseModifier === SyntaxKind.TypeKeyword) {
-					// Strip the 'type' keyword from 'import type' statements
-					const importKeywordEnd = node.getStart() + 'import'.length;
-					// Search for 'type' after 'import'
-					const typeMatch = code.slice(importKeywordEnd, node.getEnd()).match(typeMatcher);
-
-					if (typeMatch?.index !== undefined) {
-						const typeKeywordStart = importKeywordEnd + typeMatch.index;
-						const typeKeywordEnd = typeKeywordStart + 'type'.length;
-
-						// Remove 'type' keyword and any trailing whitespace
-						// We look ahead from typeKeywordEnd to find how much whitespace to remove
-						code.remove(typeKeywordStart, typeKeywordEnd + getTrailingWhitespaceLength(typeKeywordEnd, node.getEnd()));
-					}
-				} else {
-					// For regular imports, strip inline type specifiers like: import { foo, type Bar } from 'module'
-					// Find all occurrences of ', type ' or '{ type ' within the import statement
-					// Reset lastIndex since regex is global and reused across calls
-					inlineTypePattern.lastIndex = 0;
-					let match;
-					const replacements: Array<{ start: number; end: number }> = [];
-
-					while ((match = inlineTypePattern.exec(code.slice(node.getStart(), node.getEnd()))) !== null) {
-						const typeKeywordStart = node.getStart() + match.index + match[1].length;
-						const typeKeywordEnd = typeKeywordStart + 'type'.length;
-						// Find trailing whitespace after 'type' (manual instead of regex)
-						replacements.push({ start: typeKeywordStart, end: typeKeywordEnd + getTrailingWhitespaceLength(typeKeywordEnd, node.getEnd()) });
-					}
-
-					// Apply replacements in reverse order to maintain positions
-					for (let i = replacements.length - 1; i >= 0; i--) {
-						code.remove(replacements[i].start, replacements[i].end);
-					}
-				}
-			} else if (isExportDeclaration(node)) {
+			if (isExportDeclaration(node)) {
 				// Handle export declarations
 				// Check if this is an empty export (export {};) - these are module markers from TypeScript
 				// We should remove them since we generate our own consolidated export statement

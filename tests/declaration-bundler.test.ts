@@ -187,6 +187,20 @@ describe('bundleDeclarations', () => {
 			expect(content).toContain('import { useState } from "react";');
 		});
 
+		it('adds reference types directive for node: protocol imports', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'import type { PerformanceEntry } from "node:perf_hooks";\nexport declare const entry: PerformanceEntry;'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).toContain('/// <reference types="node" />');
+			expect(content).toContain('import type { PerformanceEntry } from "node:perf_hooks"');
+		});
+
 		it('preserves side-effect imports', async () => {
 			const options = makeOptions({
 				declarationFiles: TestHelper.createDeclarationFilesMap([
