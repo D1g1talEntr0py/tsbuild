@@ -23,6 +23,7 @@ import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, Buil
 
 const globCharacters = /[*?\\[\]!].*$/;
 const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
+const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
 const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
 
 /** Class representing a TypeScript project */
@@ -55,10 +56,7 @@ export class TypeScriptProject implements Closable {
 		// Initialize file manager for tracking emissions
 		this.fileManager = new FileManager(buildCache);
 		this.builderProgram = createIncrementalProgram({ rootNames, options: this.configuration.compilerOptions, projectReferences, configFileParsingDiagnostics });
-		const entryPointsPromise = this.getEntryPoints(entryPoints);
-		// Suppress unhandled rejection warning - the rejection is handled when awaited in build()
-		entryPointsPromise.catch(() => {});
-		this.buildConfiguration = { entryPoints: entryPointsPromise, target: toEsTarget(target), outDir, ...tsbuildOptions };
+		this.buildConfiguration = { entryPoints: this.getEntryPoints(entryPoints), target: toEsTarget(target), outDir, ...tsbuildOptions };
 	}
 
 	/**
@@ -74,8 +72,7 @@ export class TypeScriptProject implements Closable {
 	 * Builds the project
 	 */
 	@logPerformance('Build')
-	async build(): Promise<void> {
-		const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
+	async build() {
 		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
 
 		try {
