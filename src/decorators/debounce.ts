@@ -19,7 +19,7 @@ class DebounceManager implements Closable {
 		let timeoutId: NodeJS.Timeout | undefined;
 		let pendingResolve: Function<OptionalReturn<T>, void> | undefined;
 
-		return function(this: ThisParameterType<T>, ...args: Parameters<T>): Promise<OptionalReturn<T>> {
+		return function(this: ThisParameterType<T>, ...args: Parameters<T>) {
 			return new Promise((resolve, reject) => {
 				// Clear previous timer
 				if (timeoutId) {
@@ -53,7 +53,7 @@ class DebounceManager implements Closable {
 	}
 
 	/** Closes the manager by clearing all active timers. */
-	close(): void {
+	close() {
 		for (const timer of DebounceManager.timers) { clearTimeout(timer) }
 		DebounceManager.timers.clear();
 	}
@@ -70,7 +70,7 @@ const debounceManager = new DebounceManager();
 export function debounce(wait: number) {
 	if (wait < 0) { throw new Error('🚨 wait must be non-negative.') }
 
-	return function(targetMethod: MethodFunction, context: ClassMethodDecoratorContext): MethodFunction {
+	return function(targetMethod: MethodFunction, context: ClassMethodDecoratorContext) {
 		context.addInitializer(function() {
 			Object.defineProperty(this, context.name, { writable: true, configurable: true, value: debounceManager.debounce(targetMethod.bind(this), wait) });
 		});

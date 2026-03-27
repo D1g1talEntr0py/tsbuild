@@ -31,7 +31,7 @@ const replaceClose = (index: number, string: string, close: string, replace: str
  * @param replace - The ANSI escape code to replace `close` with
  * @returns The processed string with cleared bleed
  */
-const clearBleed = (index: number, string: string, open: string, close: string, replace: string): string => {
+const clearBleed = (index: number, string: string, open: string, close: string, replace: string) => {
 	return index < 0 ? `${open}${string}${close}` : `${open}${replaceClose(index, string, close, replace)}${close}`;
 };
 

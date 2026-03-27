@@ -127,7 +127,7 @@ export class TypeScriptProject implements Closable {
 	 * @returns True if files were emitted (or non-incremental build), false if no changes detected
 	 */
 	@logPerformance('Type-checking')
-	private async typeCheck(): Promise<boolean> {
+	private async typeCheck() {
 		await this.fileManager.initialize();
 
 		// For incremental builds, we need to call emit() to save the .tsbuildinfo file, even in type-check-only mode.
@@ -241,7 +241,7 @@ export class TypeScriptProject implements Closable {
 				if (kind === BuildMessageType.ERROR && errors.length > 0) { return [] }
 			}
 
-			const writtenFiles: WrittenFile[] = [];
+			const writtenFiles = [];
 			for (const [ outputPath, { bytes } ] of Object.entries(outputs)) {
 				writtenFiles.push({ path: outputPath as RelativePath, size: bytes });
 			}
@@ -256,7 +256,7 @@ export class TypeScriptProject implements Closable {
 	/**
 	 * Watches for changes in the project files and rebuilds the project when changes are detected.
 	 */
-	private watch(): void {
+	private watch() {
 		const targets: AbsolutePath[] = [];
 
 		for (const path of this.configuration.include ?? [ defaultSourceDirectory ]) {
@@ -282,7 +282,7 @@ export class TypeScriptProject implements Closable {
 	}
 
 	/** Closes the project and cleans up resources. */
-	close(): void {
+	close() {
 		this.fileWatcher?.close();
 		this.fileManager.close();
 		this.buildDependencies.clear();
@@ -321,7 +321,7 @@ export class TypeScriptProject implements Closable {
 	 * Triggers a rebuild after debouncing.
 	 */
 	@debounce(100)
-	private async triggerRebuild(): Promise<void> {
+	private async triggerRebuild() {
 		if (this.pendingChanges.length === 0) { return }
 
 		Logger.clear();
@@ -477,7 +477,7 @@ export class TypeScriptProject implements Closable {
 	 * Reads package.json and caches it for reuse.
 	 * @returns A promise that resolves to an array of project dependency paths.
 	 */
-	private getProjectDependencyPaths(): Promise<string[]> {
+	private getProjectDependencyPaths() {
 		return this.dependencyPaths ??= Files.read<JsonString<PackageJson>>(Paths.absolute(this.directory, 'package.json'))
 			.then((content) => {
 				const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
@@ -491,7 +491,7 @@ export class TypeScriptProject implements Closable {
 	 * so this method only logs unexpected errors to avoid duplicate output.
 	 * @param error - The error to handle
 	 */
-	private handleBuildError(error: unknown): void {
+	private handleBuildError(error: unknown) {
 		// ConfigurationError is not logged before being thrown, so log it here
 		if (error instanceof ConfigurationError) {
 			Logger.error(error.message);
@@ -517,7 +517,7 @@ export class TypeScriptProject implements Closable {
 	 * @param diagnostics - The diagnostics to handle.
 	 * @param projectDirectory - The project directory.
 	 */
-	private static handleTypeErrors(message: string, diagnostics: ReadonlyArray<Diagnostic>, projectDirectory: AbsolutePath): void {
+	private static handleTypeErrors(message: string, diagnostics: ReadonlyArray<Diagnostic>, projectDirectory: AbsolutePath) {
 		// Print formatted diagnostics (matches tsc output)
 		Logger.error(formatDiagnosticsWithColorAndContext(diagnostics, diagnosticsHost));
 
@@ -561,11 +561,11 @@ export class TypeScriptProject implements Closable {
 	 * @param markName - The name of the performance mark to measure from
 	 * @returns Elapsed time in milliseconds
 	 */
-	private static elapsed(markName: string): number {
-		const endMark = performance.mark(`${markName}:end`);
-		const ms = ~~(endMark.startTime - performance.getEntriesByName(markName, 'mark')[0].startTime);
+	private static elapsed(markName: string) {
+		const { name, startTime } = performance.mark(`${markName}:end`);
+		const ms = ~~(startTime - performance.getEntriesByName(markName, 'mark')[0].startTime);
 		performance.clearMarks(markName);
-		performance.clearMarks(endMark.name);
+		performance.clearMarks(name);
 
 		return ms;
 	}

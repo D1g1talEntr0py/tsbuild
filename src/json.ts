@@ -9,7 +9,7 @@ export class Json {
 	 * @param jsonString The JSON string to parse.
 	 * @returns The parsed object of type T.
 	 */
-	static parse<T>(jsonString: JsonString<T>): T {
+	static parse<T>(jsonString: JsonString<T>) {
 		return JSON.parse(jsonString) as T;
 	}
 
@@ -18,7 +18,7 @@ export class Json {
 	 * @param data The object to serialize.
 	 * @returns The serialized JSON string.
 	 */
-	static serialize<T>(data: T): JsonString<T> {
+	static serialize<T>(data: T) {
 		return JSON.stringify(data) as JsonString<T>;
 	}
 }

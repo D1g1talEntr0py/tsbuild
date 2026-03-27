@@ -36,7 +36,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Loads the cache file asynchronously using V8 deserialization.
 	 * @returns The cache or undefined if cache doesn't exist, is corrupted, or has incompatible version.
 	 */
-	private async loadCache(): Promise<VersionedCache | undefined> {
+	private async loadCache() {
 		try {
 			const cache = await Files.readCompressed<VersionedCache>(this.cacheFilePath);
 
@@ -55,7 +55,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * which overwrite cached entries. Unchanged files remain valid and skip re-emission.
 	 * @param target - The map to populate with cached declarations
 	 */
-	async restore(target: Map<string, CachedDeclaration>): Promise<void> {
+	async restore(target: Map<string, CachedDeclaration>) {
 		// If the cache was invalidated, skip restoration even if the pre-load completed before invalidation
 		if (this.invalidated) { return }
 
@@ -73,7 +73,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Uses V8 serialization for faster read performance on subsequent builds.
 	 * @param source - The declaration files to cache
 	 */
-	async save(source: ReadonlyMap<string, CachedDeclaration>): Promise<void> {
+	async save(source: ReadonlyMap<string, CachedDeclaration>) {
 		await Files.writeCompressed(this.cacheFilePath, { version, files: Object.fromEntries(source) });
 	}
 
@@ -88,7 +88,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * @param filePath - The file path to check
 	 * @returns True if the path matches the build info file
 	 */
-	isBuildInfoFile(filePath: AbsolutePath): boolean {
+	isBuildInfoFile(filePath: AbsolutePath) {
 		return filePath === this.buildInfoPath;
 	}
 
@@ -96,7 +96,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Checks if the cache is valid (not invalidated).
 	 * @returns True if the cache is valid, false if it has been invalidated
 	 */
-	isValid(): boolean {
+	isValid() {
 		return !this.invalidated;
 	}
 
@@ -104,7 +104,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Custom inspection tag for type.
 	 * @returns The string 'IncrementalBuildCache'
 	 */
-	get [Symbol.toStringTag](): string {
+	get [Symbol.toStringTag]() {
 		return 'IncrementalBuildCache';
 	}
 }

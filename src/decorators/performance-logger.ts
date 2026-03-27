@@ -13,7 +13,7 @@ class PerformanceLogger implements Closable {
 	private readonly performanceObserver: PerformanceObserver;
 
 	constructor() {
-		this.performanceObserver = new PerformanceObserver((list): void => {
+		this.performanceObserver = new PerformanceObserver((list) => {
 			// Reverse the list to display the most recent entries first
 			for (const { name, duration, detail: { message, result = [], steps } } of list.getEntriesByType(type).reverse() as DetailedPerformanceEntry<WrittenFile[]>[]) {
 				// Special formatting for top-level "Build" step ⚡
@@ -78,7 +78,7 @@ class PerformanceLogger implements Closable {
 	/**
 	 * Closes the performance logger.
 	 */
-	close(): void {
+	close() {
 		this.performanceObserver.disconnect();
 	}
 
@@ -87,7 +87,7 @@ class PerformanceLogger implements Closable {
 	 * @param duration - The duration to format.
 	 * @returns The formatted duration string.
 	 */
-	private static formatDuration(duration: number): string {
+	private static formatDuration(duration: number) {
 		const minutes = ~~(duration / 60000) % 60;
 		const seconds = ~~(duration / 1000) % 60;
 		const ms = ~~duration % 1000;
@@ -106,7 +106,7 @@ const measure: typeof PerformanceLogger.prototype.measure = new PerformanceLogge
  * @param name - The name of the sub-step.
  * @param ms - The elapsed time in milliseconds.
  */
-function addPerformanceStep(name: string, ms: number): void {
+function addPerformanceStep(name: string, ms: number) {
 	pendingSteps.push({ name, duration: `${ms}ms`, ms });
 }
 

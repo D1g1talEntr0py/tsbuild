@@ -22,12 +22,12 @@ class ProcessManager implements Closable {
 	 * Adds a closeable class to be closed on exit.
 	 * @param closeable The closeable class to add.
 	 */
-	addCloseable(closeable: Closable): void {
+	addCloseable(closeable: Closable) {
 		this.closeableClasses.push(closeable);
 	}
 
 	/** Closes the process manager and removes all listeners */
-	close(): void {
+	close() {
 		this.closeableClasses.length = 0;
 		process.removeListener(ProcessEvent.exit, this.handleExit);
 		process.removeListener(ProcessEvent.sigint, this.consoleExit);
@@ -35,14 +35,14 @@ class ProcessManager implements Closable {
 	}
 
 	/** Handles normal process exit */
-	private handleExit = (): void => {
+	private handleExit = () => {
 		if (this.hasHandledExit) { return }
 		for (const closeable of this.closeableClasses) { closeable.close() }
 		this.close();
 	};
 
 	/** Handles console exit (ctrl+c) */
-	private consoleExit = (): void => {
+	private consoleExit = () => {
 		Logger.warn('\nProcess terminated by user');
 		this.hasHandledExit = true;
 
@@ -60,7 +60,7 @@ class ProcessManager implements Closable {
 	 * Handles uncaught exceptions and exits the process.
 	 * @param e The error that was uncaught.
 	 */
-	private handleUncaughtException = (e: Error): void => {
+	private handleUncaughtException = (e: Error) => {
 		Logger.error('Uncaught Exception...', e.stack);
 		process.exit(99);
 	};

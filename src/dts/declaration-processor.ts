@@ -87,7 +87,7 @@ export class DeclarationProcessor {
 		 * @param pos The position to check.
 		 * @returns True if there is a newline at the given position, false otherwise.
 		 */
-		function newlineAt(node: Node, pos: number): boolean {
+		function newlineAt(node: Node, pos: number) {
 			return node.getSourceFile().getFullText()[pos] === newLine;
 		}
 
@@ -96,7 +96,7 @@ export class DeclarationProcessor {
 		 * @param node The node to get the start position for.
 		 * @returns The start position of the node.
 		 */
-		function getStart(node: Node): number {
+		function getStart(node: Node) {
 			const start = node.getFullStart();
 			return start + (newlineAt(node, start) ? 1 : 0);
 		}
@@ -106,7 +106,7 @@ export class DeclarationProcessor {
 		 * @param node The node to get the end position for.
 		 * @returns The end position of the node.
 		 */
-		function getEnd(node: Node): number {
+		function getEnd(node: Node) {
 			const end = node.getEnd();
 			return end + (newlineAt(node, end) ? 1 : 0);
 		}
@@ -116,7 +116,7 @@ export class DeclarationProcessor {
 		 * @param fileReferences The file references to parse.
 		 * @returns A Set of file names.
 		 */
-		function parseReferenceDirectives(fileReferences: readonly FileReference[]): Set<string> {
+		function parseReferenceDirectives(fileReferences: readonly FileReference[]) {
 			const referenceDirectives = new Set<string>();
 			const lineStarts = sourceFile.getLineStarts();
 
@@ -145,7 +145,7 @@ export class DeclarationProcessor {
 		 * Recursively checks the node for inline imports and replaces them with namespace imports.
 		 * @param node The node to check.
 		 */
-		function checkInlineImport(node: Node): void {
+		function checkInlineImport(node: Node) {
 			forEachChild(node, checkInlineImport);
 
 			if (isImportTypeNode(node)) {
@@ -165,7 +165,7 @@ export class DeclarationProcessor {
 		 * @param fileId The file ID to create a namespace import for.
 		 * @returns The name of the created namespace import.
 		 */
-		function createNamespaceImport(fileId: string): string {
+		function createNamespaceImport(fileId: string) {
 			let importName = inlineImports.get(fileId);
 
 			if (importName === undefined) {
@@ -193,7 +193,7 @@ export class DeclarationProcessor {
 		 * @param hint The hint to base the unique name on.
 		 * @returns The generated unique name.
 		 */
-		function generateUniqueName(hint: string): string {
+		function generateUniqueName(hint: string) {
 			while (declaredNames.has(hint)) { hint = `_${hint}` }
 
 			declaredNames.add(hint);
@@ -206,7 +206,7 @@ export class DeclarationProcessor {
 		 * @param name The name of the node.
 		 * @param range The range of the node.
 		 */
-		function pushNamedNode(name: string, range: NameRange): void {
+		function pushNamedNode(name: string, range: NameRange) {
 			const nodes = nameRanges.get(name);
 
 			if (nodes === undefined) {
@@ -270,7 +270,7 @@ export class DeclarationProcessor {
 		 * @param end The maximum end position.
 		 * @returns The length of the whitespace.
 		 */
-		function getTrailingWhitespaceLength(start: number, end: number): number {
+		function getTrailingWhitespaceLength(start: number, end: number) {
 			let length = 0;
 			while (start + length < end) {
 				const char = code.original[start + length];
@@ -502,7 +502,7 @@ export class DeclarationProcessor {
 	 * @param sourceFile The source file to process
 	 * @returns The processed source code
 	 */
-	static postProcess(sourceFile: SourceFile): string {
+	static postProcess(sourceFile: SourceFile) {
 		const magic = new MagicString(sourceFile.getFullText());
 
 		/**

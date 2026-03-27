@@ -8,7 +8,7 @@ const importConditions = [ 'import', 'node', 'module', 'default' ] as const;
  * @param filePath A file path
  * @returns The stem of the filename
  */
-function stemOf(filePath: string): string {
+function stemOf(filePath: string) {
 	const base = filePath.split('/').at(-1) ?? '';
 	const dot = base.indexOf('.');
 	return dot === -1 ? base : base.slice(0, dot);
@@ -97,7 +97,7 @@ function resolveConditionalExport(exportValue: string | PackageJsonConditionalEx
  * @param packageName The package name used for the root export
  * @returns The derived entry point name (e.g., `"index"`, `"foo"`), or the package name for the root export if subpath is `"."`
  */
-function subpathToEntryName(subpath: string, packageName?: string): string {
+function subpathToEntryName(subpath: string, packageName?: string) {
 	if (subpath === '.') { return packageName !== undefined ? unscope(packageName) : 'index' }
 
 	const withoutPrefix = subpath.replace(/^\.\//, '');

@@ -84,7 +84,7 @@ export class UnsupportedSyntaxError extends BundleError {
  * @param exception - The exception to cast.
  * @returns The casted Error.
  */
-export const castError = (exception: unknown): Error => {
+export const castError = (exception: unknown) => {
 	if (exception instanceof Error) { return exception }
 
 	return new Error(typeof exception === 'string' ? exception : 'Unknown error');

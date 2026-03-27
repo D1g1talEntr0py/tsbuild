@@ -46,7 +46,7 @@ const typePrefixPattern = /^type:/;
  * @param imports - Array of import statements
  * @returns Array of merged, deduplicated import statements
  */
-function mergeImports(imports: string[]): string[] {
+function mergeImports(imports: string[]) {
 	// Map from module specifier to Set of imported names
 	const moduleImports = new Map<string, { names: Set<string>; isType: boolean }>();
 	const nonMergeableImports: string[] = [];
@@ -184,7 +184,7 @@ class DeclarationBundler {
 	 * Clears external declaration files and module resolution cache to free memory.
 	 * Called after all entry points have been bundled.
 	 */
-	clearExternalFiles(): void {
+	clearExternalFiles() {
 		this.externalDeclarationFiles.clear();
 		this.moduleResolutionCache.clear();
 	}
@@ -242,7 +242,7 @@ class DeclarationBundler {
 	 * @param sourceFile - The parsed source file AST
 	 * @returns Array of module specifiers that are imported
 	 */
-	private extractImports({ statements }: SourceFile): string[] {
+	private extractImports({ statements }: SourceFile) {
 		const imports: string[] = [];
 
 		for (const statement of statements) {
@@ -262,7 +262,7 @@ class DeclarationBundler {
 	 * @param patterns - Array of patterns to match against
 	 * @returns True if the module matches any pattern
 	 */
-	private matchesPattern(moduleSpecifier: string, patterns: readonly Pattern[]): boolean {
+	private matchesPattern(moduleSpecifier: string, patterns: readonly Pattern[]) {
 		return patterns.some((pattern) => {
 			return typeof pattern === 'string' ? moduleSpecifier === pattern || moduleSpecifier.startsWith(`${pattern}/`) : pattern.test(moduleSpecifier);
 		});
@@ -383,7 +383,7 @@ class DeclarationBundler {
 	 * @param entryPoint - Starting point for sorting
 	 * @returns Array of modules in dependency order
 	 */
-	private sortModules(modules: ReadonlyMap<string, ModuleInfo>, entryPoint: string): ModuleInfo[] {
+	private sortModules(modules: ReadonlyMap<string, ModuleInfo>, entryPoint: string) {
 		const sorted: ModuleInfo[] = [];
 		const visited = new Set<string>();
 		const visiting = new Set<string>();
@@ -433,7 +433,7 @@ class DeclarationBundler {
 	 * @param sourceFile - Optional source file for caching results
 	 * @returns Sets of type and value identifiers
 	 */
-	private collectIdentifiers<const S extends Iterable<Node>>(statements: S, sourceFile?: SourceFile): IdentifierMap {
+	private collectIdentifiers<const S extends Iterable<Node>>(statements: S, sourceFile?: SourceFile) {
 		let result: IdentifierMap | undefined;
 
 		// Check cache if we have the source file
@@ -760,7 +760,7 @@ class DeclarationBundler {
 	 * @param entryPoint - The entry point file path
 	 * @returns The bundled declaration file content
 	 */
-	bundle(entryPoint: AbsolutePath): string {
+	bundle(entryPoint: AbsolutePath) {
 		// Convert source path to declaration path
 		const dtsEntryPoint = this.resolveEntryPoint(entryPoint, this.options.compilerOptions);
 
@@ -810,7 +810,7 @@ class DeclarationBundler {
  * @param options Bundling options
  * @returns The bundled declaration file content
  */
-export async function bundleDeclarations(options: DtsBundleOptions): Promise<WrittenFile[]> {
+export async function bundleDeclarations(options: DtsBundleOptions) {
 	// Ensure output directory exists
 	await mkdir(options.compilerOptions.outDir, defaultDirOptions);
 
@@ -826,7 +826,7 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 		return { path: Paths.relative(options.currentDirectory, outPath), size: content.length };
 	});
 
-	const results = await Promise.all(bundleTasks);
+	const results: WrittenFile[] = await Promise.all(bundleTasks);
 
 	// Free memory used by externally-resolved declaration files (node_modules)
 	dtsBundler.clearExternalFiles();

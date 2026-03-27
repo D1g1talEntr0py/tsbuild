@@ -70,7 +70,7 @@ export class FileManager implements Closable {
 	 * await manager.finalize();
 	 * ```
 	 */
-	async initialize(): Promise<void> {
+	async initialize() {
 		// Ensure any in-flight cache save from the previous build completes before restoring
 		if (this.pendingSave) { await this.pendingSave; this.pendingSave = undefined }
 
@@ -101,7 +101,7 @@ export class FileManager implements Closable {
 	 * if (hasEmitted) { // Continue with build }
 	 * ```
 	 */
-	finalize(): boolean {
+	finalize() {
 		// Pre-process all declaration files captured during emit.
 		// This work was deferred from the synchronous fileWriter callback to
 		// reduce the time spent inside TypeScript's synchronous emit() call.
@@ -146,7 +146,7 @@ export class FileManager implements Closable {
 	 * @param projectDirectory - Project root for calculating relative paths
 	 * @returns Array of written file metadata
 	 */
-	async writeFiles(projectDirectory: AbsolutePath): Promise<WrittenFile[]> {
+	async writeFiles(projectDirectory: AbsolutePath) {
 		if (this.declarationFiles.size === 0) { return [] }
 
 		const writeTasks: Promise<WrittenFile>[] = [];
@@ -184,7 +184,7 @@ export class FileManager implements Closable {
 	 * Closes the file manager and releases resources.
 	 * Clears all stored declaration files.
 	 */
-	close(): void {
+	close() {
 		// Await any in-flight cache save to prevent data loss on exit.
 		// ProcessManager calls close() synchronously, so we can only best-effort here.
 		// The pendingSave promise is lightweight (already running), so this is safe.
@@ -200,7 +200,7 @@ export class FileManager implements Closable {
 	 * Call this when you need to guarantee all pending writes have completed,
 	 * e.g., before reading the cache file from a different instance.
 	 */
-	async flush(): Promise<void> {
+	async flush() {
 		if (this.pendingSave) { await this.pendingSave; this.pendingSave = undefined }
 	}
 
@@ -242,7 +242,7 @@ export class FileManager implements Closable {
 	 * Runs createSourceFile + DeclarationProcessor.preProcess for each pending file,
 	 * then clears the pending queue.
 	 */
-	private processEmittedFiles(): void {
+	private processEmittedFiles() {
 		for (const { path, text } of this.pendingFiles) {
 			this.declarationFiles.set(path, DeclarationProcessor.preProcess(createSourceFile(path, text, ScriptTarget.Latest, true)));
 		}
@@ -255,7 +255,7 @@ export class FileManager implements Closable {
 	 * @returns The string 'FileManager'
 	 * @internal
 	 */
-	get [Symbol.toStringTag](): string {
+	get [Symbol.toStringTag]() {
 		return 'FileManager';
 	}
 }
