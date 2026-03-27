@@ -23,7 +23,9 @@ describe('constants', () => {
 			[ScriptTarget.ES2021, 'ES2021'],
 			[ScriptTarget.ES2022, 'ES2022'],
 			[ScriptTarget.ES2023, 'ES2023'],
-			[ScriptTarget.ES2024, 'ES2024'],
+			// ES2024+ may not exist in older TypeScript versions
+			...(ScriptTarget.ES2024 !== undefined ? [[ScriptTarget.ES2024, 'ES2024'] as [ScriptTarget, string]] : []),
+			...(ScriptTarget.ES2025 !== undefined ? [[ScriptTarget.ES2025, 'ES2025'] as [ScriptTarget, string]] : []),
 			[ScriptTarget.ESNext, 'ESNext'],
 			[ScriptTarget.JSON, 'ESNext'],
 		];

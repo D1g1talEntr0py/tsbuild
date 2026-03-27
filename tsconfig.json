@@ -1,25 +1,19 @@
 {
 	"compilerOptions": {
-		"strict": true,
 		"declaration": true,
-		"isolatedDeclarations": true,
 		"isolatedModules": true,
-		"verbatimModuleSyntax": true,
-		"resolveJsonModule": true,
-		"noUncheckedSideEffectImports": true,
-		"useUnknownInCatchVariables": true,
 		"forceConsistentCasingInFileNames": true,
 		"allowUnusedLabels": false,
 		"allowUnreachableCode": false,
 		"noImplicitOverride": true,
 		"noImplicitReturns": true,
 		"noUncheckedIndexedAccess": false,
+		"rootDir": "./src",
 		"lib": [ "ESNext" ],
-		"target": "ESNext",
-		"module": "ESNext",
+		"types": [ "node" ],
 		"moduleResolution": "Bundler",
 		"paths": { "src/*": [ "./src/*" ] }
 	},
-	"include": [ "src/" ],
+	"include": [ "./src" ],
   "tsbuild": { "env": { "tsbuild_version": "${process.env.npm_package_version}" } }
 }
