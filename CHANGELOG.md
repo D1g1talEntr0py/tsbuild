@@ -1,3 +1,83 @@
+## [1.7.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.5...v1.7.0) (2026-03-27)
+
+### Features
+
+* **build:** add support for ES2025 ScriptTarget (2aecca9dc4ac67cd3e27021e34054a7c7552ebe9)
+- Add `ES2025` targeting map for TS `ScriptTarget.ES2025` so newly produced esbuild configurations will honor it.
+
+
+### Bug Fixes
+
+* **dts:** infer reference types for node protocols and correct module mapping (03c4ec5859b3741b7f30d590b38ea9c729128eea)
+- Add logic in the `DeclarationBundler` to automatically infer `/// <reference types="node" />` when `node:` protocol imports are merged in, so the generated `.d.ts` file remains self-contained.
+- Stop stripping inline `type` keywords from import statements in the `DeclarationProcessor`, preserving them for `.d.ts` output correctness.
+- Remove unused `inlineTypePattern` import due to removing the stripping logic.
+- Fix minor property initialization order formatting in `DeclarationBundler`.
+- Add testing specific to these fixes in `declaration-bundler.test.ts` and `declaration-processor.test.ts`.
+
+* **env:** support dynamic process.env extraction in config values (9469b5963d9ac5c1473bf500e96baa841b04b586)
+- Expand `process.env` references dynamically in ESBuild `define` objects to support runtime-bound values instead of just static strings.
+
+* **release:** manually update the workspace file since pnpm can't seem to get it right (8795a7497ab9cc26991001ef09145f8d92097841)
+
+### Code Refactoring
+
+* **core:** simplify promise handling in TypeScript build configuration (e7b154ad9cf38347bf93cb3a48301753cead58e0)
+- Remove intermediate `entryPointsPromise` variable and `.catch()` swallowing since rejection is natively handled when awaited later in the `build()` process.
+- Improve the `tsbuildOptions` setup.
+
+* **style:** remove explicit return types and clean up syntax (c306735aefb8ff4d4227f5bdaae21e7d0ed53f32)
+- Remove redundant explicit return types from internal utility functions across several files (`constants`, `decorators`, `dts`, `file-manager`, `files`, `json`, `logger`, `paths`, etc.).
+- Allow TypeScript to infer these return types automatically, reducing visual noise.
+- Simplify closures to arrow functions or shortened arrow syntax where applicable.
+
+
+### Documentation
+
+* **EADDRINUSE:** add issue draft for WSL2 network issue (5f5ea0d31f6df8e85a4e586c5f8018a56e5b2702)
+- Add a detailed bug report draft describing the `EADDRINUSE` issue that occurs on every single activation attempt when running under WSL2 with `networkingMode=Mirrored`.
+- Include a minimal reproduction case that demonstrates the underlying Node.js `net.createServer().listen()` race condition in WSL2 mirrored networking.
+- Provide expected behavior and output logs for the VS Code extension failure.
+- Suggest a direct bind and instance retention fix instead of the current close-and-reopen approach.
+
+* **README:** update isolatedModules and TS strict requirements (c4a491791b8ad9d90c909ce9a2f8d03e1aeb0521)
+- Update the minimum supported TypeScript badge to `>=5.6.3`.
+- Clarify that `isolatedModules` is strictly required due to the reliance on esbuild for transpilation.
+- Remove the `strict` option note for newer TS versions since it is enabled by default in TypeScript 6.0+.
+- Add an "Advanced Features" section explicitly explaining *why* `isolatedModules` is necessary for esbuild.
+
+
+### Miscellaneous Chores
+
+* **deps:** update package and lockfile dependencies (5a9f0623ffc63b42ddcdd7d2bc1882510f0a7d60)
+- Update various devDependencies, including `typescript` to `^6.0.2` and related `@typescript-eslint` packages.
+- Update `vitest` and coverage plugins to `^4.1.2`.
+- Remove `@babel/plugin-proposal-decorators` and `@rolldown/plugin-babel` and replace Babel decorator handling in vitest config with a custom `esbuild` transformer.
+- Add a `test:compat` script entry to test against 5 minor versions of TypeScript.
+- Specify a peer dependency requirement for `typescript: >=5.6.3`.
+- Modify `package.json` `types` field.
+- Refresh and resolve `pnpm-lock.yaml` according to the new dependency state.
+
+* **vscode:** set TS SDK path in settings (6e6622483d6648ba6cf283b362622665bd1dbede)
+- Configure `.vscode/settings.json` to use the workspace `node_modules/typescript/lib` for the TypeScript language server.
+
+
+### Tests
+
+* **compat:** introduce multi-version TypeScript testing script (3ad98b8cc914d6e7c37237713b11568e97ef1bbf)
+- Add a new compatibility test script `test-ts-compat.ts` that iterates through minor TypeScript versions dynamically.
+- Conditionally add support for testing `ES2024` and `ES2025` script targets only if the installed version of TS contains them.
+- Implement a comprehensive type-guard/API compatibility test in `typescript-compatibility.test.ts` to guarantee runtime API availability.
+- Update `tsconfig.json` for tests with required strict compatibility changes.
+
+
+### Continuous Integration
+
+* **github:** add workflow for testing TypeScript compatibility (0c9bbbf8301ad66c4321fa9878169d66bbb1eda7)
+- Create a new GitHub Actions workflow to run the test suite against multiple versions of TypeScript (5.6.3 to 6.0).
+- Ensure backwards compatibility of the tools when run with older minimal supported TypeScript versions.
+- Set up basic jobs utilizing `pnpm` and Node.js 24.
+
 ## [1.6.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.4...v1.6.5) (2026-03-21)
 
 ### Code Refactoring
