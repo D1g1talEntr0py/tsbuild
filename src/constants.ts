@@ -38,6 +38,7 @@ const scriptTargetToEsTarget: Record<ScriptTarget, EsTarget> = {
 	[ScriptTarget.ES2022]: 'ES2022',
 	[ScriptTarget.ES2023]: 'ES2023',
 	[ScriptTarget.ES2024]: 'ES2024',
+	[ScriptTarget.ES2025]: 'ES2025',
 	[ScriptTarget.ESNext]: 'ESNext',
 	[ScriptTarget.JSON]: 'ESNext'
 };
