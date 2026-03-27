@@ -183,9 +183,9 @@ export class TypeScriptProject implements Closable {
 		const define: Record<string, string> = {};
 		if (this.buildConfiguration.env !== undefined) {
 			for (const [ key, value ] of Object.entries(this.buildConfiguration.env)) {
-				// Expand process.env references (e.g., "${process.env.npm_package_version}")
 				// Reset lastIndex since regex is global and reused across iterations
 				processEnvExpansionPattern.lastIndex = 0;
+				// Expand process.env references (e.g., "${process.env.npm_package_version}") in env values to allow dynamic values in esbuild define, which only supports static strings
 				define[`import.meta.env.${key}`] = Json.serialize(value.replace(processEnvExpansionPattern, (_, envVar: string) => process.env[envVar] ?? ''));
 			}
 		}
