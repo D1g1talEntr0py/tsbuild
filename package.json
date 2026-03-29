@@ -27,11 +27,11 @@
     "access": "public"
   },
   "type": "module",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/type-script-project.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/type-script-project.d.ts",
+      "import": "./dist/type-script-project.js"
     }
   },
   "files": [

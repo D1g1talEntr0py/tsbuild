@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { TestHelper } from './scripts/test-helper';
 import { Logger } from 'src/logger';
 import type { AbsolutePath } from 'src/@types';
-import type { bundleDeclarations as BundleDeclarationsFn } from 'src/dts';
+import type { bundleDeclarations as BundleDeclarationsFn } from 'src/dts/declaration-bundler';
 import type { DtsBundleOptions } from 'src/dts/@types';
 
 vi.mock('node:fs', async () => {
@@ -32,7 +32,7 @@ describe('bundleDeclarations', () => {
 
 	beforeEach(async () => {
 		await TestHelper.setupMemfs();
-		({ bundleDeclarations } = await import('src/dts'));
+		({ bundleDeclarations } = await import('src/dts/declaration-bundler'));
 	});
 
 	afterEach(() => { TestHelper.teardownMemfs() });

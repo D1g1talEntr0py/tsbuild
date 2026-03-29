@@ -30,6 +30,7 @@ import {
 import type { SourceFile, Node, StringLiteral, ModuleResolutionHost } from 'typescript';
 import type { AbsolutePath, CachedDeclaration, Pattern, WrittenFile } from 'src/@types';
 import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, BundledDeclaration } from './@types';
+import { Files } from 'src/files';
 
 const nodeModules = '/node_modules/';
 const importPattern = /^import\s*(?:type\s*)?\{\s*([^}]+)\s*\}\s*from\s*['"]([^'"]+)['"]\s*;?\s*$/;
@@ -494,7 +495,6 @@ class DeclarationBundler {
 		const { types: typeIdentifiers, values: valueIdentifiers } = identifiers;
 		// Use MagicString for efficient code manipulation
 		const magic = new MagicString(code);
-
 		const moduleRenames = new Map<string, string>();
 		const exportsMapper = (name: string) => moduleRenames.get(name) ?? name;
 
@@ -607,8 +607,7 @@ class DeclarationBundler {
 
 		// Value exports take precedence - remove any types that are also values
 		const finalValueExports = [...new Set(valueExports.map(exportsMapper))];
-		const valueExportsSet = new Set(finalValueExports);
-		const finalTypeExports = [...new Set(typeExports.map(exportsMapper).filter(t => !valueExportsSet.has(t)))];
+		const finalTypeExports = [...new Set(typeExports.map(exportsMapper).filter(t => !(new Set(finalValueExports).has(t))))];
 
 		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: finalValueExports };
 	}
@@ -647,11 +646,10 @@ class DeclarationBundler {
 		// Second pass: generate unique names for conflicting identifiers
 		for (const [name, sourcesSet] of declarationSources) {
 			if (sourcesSet.size > 1) {
-				const sources = Array.from(sourcesSet);
 				// First module keeps original name, subsequent modules get $1, $2, etc.
 				// Each candidate is verified against all known declarations to avoid collisions
 				let suffix = 1;
-				for (const modulePath of sources.slice(1)) {
+				for (const modulePath of Array.from(sourcesSet).slice(1)) {
 					let candidate = `${name}$${suffix}`;
 					while (declarationSources.has(candidate)) { candidate = `${name}$${++suffix}` }
 					renameMap.set(`${name}:${modulePath}`, candidate);
@@ -764,6 +762,9 @@ class DeclarationBundler {
 		// Convert source path to declaration path
 		const dtsEntryPoint = this.resolveEntryPoint(entryPoint, this.options.compilerOptions);
 
+		// Entry points with no declaration file were never stored (empty d.ts from TypeScript)
+		if (dtsEntryPoint === undefined) { return '' }
+
 		// Build the module dependency graph
 		const { modules, bundledSpecifiers } = this.buildModuleGraph(dtsEntryPoint);
 
@@ -781,27 +782,27 @@ class DeclarationBundler {
 	 * @param compilerOptions - Minimal compiler options with outDir and rootDir
 	 * @returns Resolved declaration entry point path
 	 */
-	private resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions): AbsolutePath {
+	private resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions): AbsolutePath | undefined {
 		// Convert source path to declaration path and normalize to POSIX format (TypeScript expects forward slashes)
 		const dtsEntryPoint = sys.resolvePath(entryPoint.endsWith(FileExtension.DTS) ? entryPoint : this.sourceToDeclarationPath(entryPoint)) as AbsolutePath;
 
-		// Validate the file exists
-		if (!this.declarationFiles.has(dtsEntryPoint)) {
-			// Provide detailed error for debugging
-			const availableFiles = Array.from(this.declarationFiles.keys());
-			const entryPointFilename = basename(entryPoint);
-			const similarFiles = availableFiles.filter((filePath) => filePath.includes(entryPointFilename));
+		if (this.declarationFiles.has(dtsEntryPoint)) { return dtsEntryPoint }
 
-			throw new BundleError(
-				`Entry point declaration file not found: ${dtsEntryPoint || 'unknown'}\n` +
-				`Original entry: ${entryPoint}\n` +
-				`Compiler options: outDir=${compilerOptions.outDir || 'dist'}, rootDir=${compilerOptions.rootDir || 'not set'}\n` +
-				`Similar files found:\n${similarFiles.map(f => `  - ${f}`).join('\n')}\n` +
-				`Total available files: ${availableFiles.length}`
-			);
-		}
+		// Source entry points with no declaration file have no exportable API (e.g. CLI scripts)
+		if (!entryPoint.endsWith(FileExtension.DTS)) { return undefined }
 
-		return dtsEntryPoint;
+		// A .d.ts was passed directly but not found — this is a real error
+		const availableFiles = Array.from(this.declarationFiles.keys());
+		const entryPointFilename = basename(entryPoint);
+		const similarFiles = availableFiles.filter((filePath) => filePath.includes(entryPointFilename));
+
+		throw new BundleError(
+			`Entry point declaration file not found: ${dtsEntryPoint || 'unknown'}\n` +
+			`Original entry: ${entryPoint}\n` +
+			`Compiler options: outDir=${compilerOptions.outDir || 'dist'}, rootDir=${compilerOptions.rootDir || 'not set'}\n` +
+			`Similar files found:\n${similarFiles.map(f => `  - ${f}`).join('\n')}\n` +
+			`Total available files: ${availableFiles.length}`
+		);
 	}
 }
 
@@ -812,21 +813,23 @@ class DeclarationBundler {
  */
 export async function bundleDeclarations(options: DtsBundleOptions) {
 	// Ensure output directory exists
-	await mkdir(options.compilerOptions.outDir, defaultDirOptions);
+	if (!(await Files.exists(options.compilerOptions.outDir))) {
+		await mkdir(options.compilerOptions.outDir, defaultDirOptions);
+	}
 
 	const dtsBundler = new DeclarationBundler(options);
 
 	// Bundle each entry point in parallel for better performance
-	const bundleTasks = Object.entries(options.entryPoints).map(async ([entryName, entryPoint]) => {
-		const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}.d.ts`);
+	const bundleTasks: Promise<WrittenFile>[] = [];
+	for (const [ entryName, entryPoint ] of Object.entries(options.entryPoints)) {
 		const content = dtsBundler.bundle(entryPoint);
+		if (content.length > 0) {
+			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}.d.ts`);
+			bundleTasks.push(writeFile(outPath, content, Encoding.utf8).then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length })));
+		}
+	}
 
-		await writeFile(outPath, content, Encoding.utf8);
-
-		return { path: Paths.relative(options.currentDirectory, outPath), size: content.length };
-	});
-
-	const results: WrittenFile[] = await Promise.all(bundleTasks);
+	const results = await Promise.all(bundleTasks);
 
 	// Free memory used by externally-resolved declaration files (node_modules)
 	dtsBundler.clearExternalFiles();

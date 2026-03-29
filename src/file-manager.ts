@@ -149,12 +149,13 @@ export class FileManager implements Closable {
 	async writeFiles(projectDirectory: AbsolutePath) {
 		if (this.declarationFiles.size === 0) { return [] }
 
-		const writeTasks: Promise<WrittenFile>[] = [];
+		const writeTasks: Promise<WrittenFile | undefined>[] = [];
 		for (const [ filePath, { code } ] of this.declarationFiles) {
-			writeTasks.push(this.writeFile(projectDirectory, filePath, code));
+			// Skip writing empty declaration files
+			if (code.length > 0) { writeTasks.push(this.writeFile(projectDirectory, filePath, code)) }
 		}
 
-		return Promise.all(writeTasks);
+		return (await Promise.all(writeTasks)).filter((result): result is WrittenFile => result !== undefined);
 	}
 
 	/**
@@ -244,7 +245,9 @@ export class FileManager implements Closable {
 	 */
 	private processEmittedFiles() {
 		for (const { path, text } of this.pendingFiles) {
-			this.declarationFiles.set(path, DeclarationProcessor.preProcess(createSourceFile(path, text, ScriptTarget.Latest, true)));
+			const result = DeclarationProcessor.preProcess(createSourceFile(path, text, ScriptTarget.Latest, true));
+			// Skip declarations with no meaningful content (e.g. CLI entry points with no exports)
+			if (result.code.length > 0) { this.declarationFiles.set(path, result) }
 		}
 
 		this.pendingFiles.length = 0;
@@ -253,7 +256,6 @@ export class FileManager implements Closable {
 	/**
 	 * Custom inspection method for better type representation.
 	 * @returns The string 'FileManager'
-	 * @internal
 	 */
 	get [Symbol.toStringTag]() {
 		return 'FileManager';
