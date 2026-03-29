@@ -1,3 +1,23 @@
+## [1.7.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.0...v1.7.1) (2026-03-29)
+
+### Code Refactoring
+
+* **bundler:** remove internal index files and improve declaration bundling (0299420b919a09fab5f3988124296e8105a21c7f)
+- Updates package.json types and exports to point to type-script-project instead of index
+- Removes src/index.ts and src/dts/index.ts files
+- Updates test imports to reference declaration-bundler directly instead of via index
+- Fixes declaration bundler to gracefully handle entry points without declaration files
+- Updates declaration bundler to ensure the output directory exists before writing
+- Refines declaration identifier conflict mapping to use Set for finalTypeExports
+- Updates file-manager to skip processing and writing empty declaration files
+- Removes internal Symbol.toStringTag from FileManager
+
+
+### Styles
+
+* update editorconfig indent size to 2 (e56b2b6dc13e4b53ff064db8a8b950cc1c6b23ae)
+- Changes indent_size from 1 to 2 in .editorconfig
+
 ## [1.7.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.6.5...v1.7.0) (2026-03-27)
 
 ### Features
