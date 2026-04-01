@@ -305,7 +305,7 @@ export class TypeScriptProject implements Closable {
 			// Extract only the minimal compiler options needed for DTS bundling from configuration
 			// All these properties are guaranteed to exist in TypeScriptConfiguration
 			compilerOptions: {
-				paths: this.configuration.compilerOptions.paths as Record<string, RelativePath[]>,
+				paths: this.configuration.compilerOptions.paths as Record<string, string[]>,
 				rootDir: this.configuration.compilerOptions.rootDir as AbsolutePath,
 				outDir: this.configuration.compilerOptions.outDir as AbsolutePath,
 				moduleResolution: this.configuration.compilerOptions.moduleResolution

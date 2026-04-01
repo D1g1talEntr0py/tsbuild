@@ -16,13 +16,14 @@ type KnownKeys<T> = keyof RemoveIndex<T>;
 type MarkRequired<T, K extends keyof T> = Prettify<T & { [P in K]-?: T[P] }>;
 type RemoveIndex<T> = { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
 type PrettyModify<T, R extends Partial<Record<keyof T, unknown>>> = Prettify<Omit<T, keyof R> & R>;
+type Modify<T, R extends Partial<Record<keyof T, unknown>>> = Omit<T, keyof R> & R;
 
 type Optional<T> = T | undefined | void;
 type OptionalReturn<T extends (...args: any[]) => any> = Optional<ReturnType<T>>;
 
-type Function<P = any, R = any> = (...args: P[]) => R;
+type Fn<P = any, R = any> = (...args: P[]) => R;
 type TypedFunction<T extends (...args: any[]) => any> = (...args: Parameters<T>) => ReturnType<T>;
-type InferredFunction<T = Function> = T extends (...args: infer P) => infer R ? (...args: P) => R : never;
+type InferredFunction<T = Fn> = T extends (...args: infer P) => infer R ? (...args: P) => R : never;
 /**
  * Type representing a method function signature with typed this, arguments, and return type.
  * Used to avoid inlining the method signature type repeatedly in decorator code.
@@ -32,7 +33,7 @@ type InferredFunction<T = Function> = T extends (...args: infer P) => infer R ? 
  * @template R - The return type of the method
  */
 type MethodFunction<T = any, A extends any[] = any[], R = any> = (this: T, ...args: A) => R;
-type Callable = Function<never, void>;
+type Callable = Fn<never, void>;
 type Constructor<P extends unknown[] = unknown[], R = unknown> = new (...args: P) => R;
 
 interface Closable { close: Callable };
@@ -40,8 +41,8 @@ type ClosableConstructor = Constructor<any[], Closable>;
 
 type PerformanceSubStep = { name: string; duration: string; ms: number };
 type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[] };
-type DetailedPerformanceMeasureOptions<R> = PrettyModify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
-type DetailedPerformanceEntry<D> = Prettify<PerformanceEntry & { detail: PerformanceEntryDetail<D> }>;
+type DetailedPerformanceMeasureOptions<R> = Modify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
+type DetailedPerformanceEntry<D> = PerformanceEntry & { detail: PerformanceEntryDetail<D> };
 
 type Pattern = string | RegExp;
 
@@ -147,14 +148,14 @@ type EntryPoints<out T extends Path> = Record<string, T>;
 type AsyncEntryPoints = Promise<EntryPoints<AbsolutePath>>;
 
 /** Project build options used internally (includes values from both tsbuild config and compiler options) */
-type ProjectBuildConfiguration = Readonly<PrettyModify<BuildConfiguration, {
+type ProjectBuildConfiguration = Readonly<Modify<BuildConfiguration, {
 	entryPoints: AsyncEntryPoints,
 	target: EsTarget,
 	outDir: string,
 	sourceMap: boolean | 'inline' | 'external' | 'both'
 }>>;
 
-type TypeScriptCompilerOptions = PrettyModify<Pick<CompilerOptions, KnownKeys<CompilerOptions>>, { target?: ScriptTarget }>;
+type TypeScriptCompilerOptions = Modify<Pick<CompilerOptions, KnownKeys<CompilerOptions>>, { target?: ScriptTarget }>;
 type TypeScriptCompilerConfiguration = MarkRequired<TypeScriptCompilerOptions, 'target' | 'outDir' | 'noEmit' | 'sourceMap' | 'lib' | 'incremental' | 'tsBuildInfoFile'>;
 
 type TypeScriptOptions = {
@@ -168,9 +169,9 @@ type CachedDeclaration = {
 	/** Pre-processed declaration code */
 	code: string;
 	/** Triple-slash type reference directives extracted during pre-processing */
-	typeReferences: Set<string>;
+	typeReferences: ReadonlySet<string>;
 	/** Triple-slash file reference directives extracted during pre-processing */
-	fileReferences: Set<string>;
+	fileReferences: ReadonlySet<string>;
 };
 
 /** Interface for build cache operations */
@@ -187,7 +188,7 @@ interface BuildCache {
 	isBuildInfoFile(filePath: AbsolutePath): boolean;
 };
 
-type TypeScriptConfiguration = Readonly<PrettyModify<TypeScriptOptions, {
+type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	clean: boolean;
 	compilerOptions: TypeScriptCompilerConfiguration;
 	tsbuild: BuildConfiguration;
@@ -236,7 +237,7 @@ type CompilerOptionOverrides = Readonly<{
 
 type SourceMap = {
 	version: number;
-	sources: AbsolutePath[];
+	sources: string[];
 	names: string[];
 	mappings: string;
 	file?: string;
@@ -249,7 +250,7 @@ type FormatSupplier = (text: string) => string;
 type LogEntryType = 'info' | 'success' | 'done' | 'error' | 'warn';
 
 export type {
-	Function,
+	Fn,
 	TypedFunction,
 	InferredFunction,
 	Brand,

@@ -1,4 +1,4 @@
-import type { AbsolutePath, Brand, CachedDeclaration, EntryPoints, Pattern, RelativePath } from '../../@types/index.js';
+import type { AbsolutePath, Brand, CachedDeclaration, EntryPoints, Pattern } from '../../@types/index.js';
 import type { ModuleResolutionKind, Node, SourceFile } from 'typescript';
 
 declare const NameRangeBrand: unique symbol;
@@ -7,7 +7,7 @@ type NameRange = Brand<[start: number, end: number], typeof NameRangeBrand>;
 /** Minimal compiler options needed for DTS bundling - only what's required for module resolution and path remapping */
 type DtsCompilerOptions = {
 	/** Path mapping entries for module resolution */
-	paths?: Record<string, RelativePath[]>;
+	paths?: Record<string, string[]>;
 	/** Root directory of source files (used for path remapping) - optional, defaults to common root */
 	rootDir?: AbsolutePath;
 	/** Output directory (used for path remapping and entry point resolution) - guaranteed from TypeScriptConfiguration */
