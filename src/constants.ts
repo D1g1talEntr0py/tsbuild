@@ -96,9 +96,9 @@ const typeMatcher = /\btype\b/;
 const sourceScriptExtensionExpression = /(?<!\.d)\.[jt]sx?$/;
 const typeScriptExtensionExpression = /(\.tsx?)$/;
 /** Pattern to match and expand process.env references in config values (e.g., "${process.env.npm_package_version}") */
-const processEnvExpansionPattern = /\$\{process\.env\.([^}]+)\}/g;
+const processEnvExpansionPattern = /\$\{process\.env\.([^}]+)\}/;
 /** Pattern to match inline type specifiers in imports (e.g., `import { foo, type Bar }`) */
-const inlineTypePattern = /([{,]\s+)type\s+/g;
+const inlineTypePattern = /([{,]\s+)type\s+/;
 
 export {
 	dataUnits,

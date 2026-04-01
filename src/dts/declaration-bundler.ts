@@ -394,6 +394,7 @@ class DeclarationBundler {
 			if (visiting.has(path)) {
 				const cyclePath = [ ...visitStack.slice(visitStack.indexOf(path)), path ].map((p) => Paths.relative(this.options.currentDirectory, p)).join(' -> ');
 				Logger.warn(`Circular dependency detected: ${cyclePath}`);
+				visited.add(path);
 				return;
 			}
 

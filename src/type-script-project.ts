@@ -182,11 +182,10 @@ export class TypeScriptProject implements Closable {
 		// See: https://esbuild.github.io/api/#define
 		const define: Record<string, string> = {};
 		if (this.buildConfiguration.env !== undefined) {
+			const envExpansion = new RegExp(processEnvExpansionPattern, 'g');
 			for (const [ key, value ] of Object.entries(this.buildConfiguration.env)) {
-				// Reset lastIndex since regex is global and reused across iterations
-				processEnvExpansionPattern.lastIndex = 0;
 				// Expand process.env references (e.g., "${process.env.npm_package_version}") in env values to allow dynamic values in esbuild define, which only supports static strings
-				define[`import.meta.env.${key}`] = Json.serialize(value.replace(processEnvExpansionPattern, (_, envVar: string) => process.env[envVar] ?? ''));
+				define[`import.meta.env.${key}`] = Json.serialize(value.replace(envExpansion, (_, envVar: string) => process.env[envVar] ?? ''));
 			}
 		}
 
@@ -273,7 +272,7 @@ export class TypeScriptProject implements Closable {
 
 		const pathsToIgnore = [ ...this.configuration.exclude ?? [], ...this.buildConfiguration.watch.ignore ?? [] ];
 
-		this.fileWatcher = new Watchr(targets, { ...this.buildConfiguration.watch, ignore: (path: string) => pathsToIgnore.some((p) => path.lastIndexOf(p) > -1) }, rebuild);
+		this.fileWatcher = new Watchr(targets, { ...this.buildConfiguration.watch, ignore: (path: string) => pathsToIgnore.some((p) => path.includes(`/${p}/`) || path.endsWith(`/${p}`)) }, rebuild);
 
 		Logger.info(`Watching for changes in: ${targets.join(', ')}`);
 	}

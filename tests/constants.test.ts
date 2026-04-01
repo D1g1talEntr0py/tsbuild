@@ -92,7 +92,6 @@ describe('constants', () => {
 		});
 
 		it('captures variable name', () => {
-			processEnvExpansionPattern.lastIndex = 0;
 			const result = processEnvExpansionPattern.exec('${process.env.MY_VAR}');
 			expect(result?.[1]).toBe('MY_VAR');
 		});
@@ -109,7 +108,6 @@ describe('constants', () => {
 		});
 
 		it('matches after comma', () => {
-			inlineTypePattern.lastIndex = 0;
 			const input = ', type Baz';
 			expect(inlineTypePattern.test(input)).toBe(true);
 		});

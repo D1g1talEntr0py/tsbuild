@@ -37,12 +37,15 @@ export const swcDecoratorMetadataPlugin: Plugin = {
 			const result = await swcTransformFile(path, swcOptions);
 
 			if (result.map) {
+				const map = Json.parse(result.map as JsonString<SourceMap>);
 				const sources: RelativePath[] = [];
 				// Convert absolute paths to relative paths for portability
-				for (const source of Json.parse(result.map as JsonString<SourceMap>).sources) {
+				for (const source of map.sources) {
 					sources.push(Paths.relative(dirname(path), source));
 				}
-				result.code += `//# sourceMappingURL=data:application/json;base64,${Buffer.from(Json.serialize({ sources })).toString(Encoding.base64)}`;
+
+				map.sources = sources;
+				result.code += `//# sourceMappingURL=data:application/json;base64,${Buffer.from(Json.serialize(map)).toString(Encoding.base64)}`;
 			}
 
 			return { contents: result.code };
