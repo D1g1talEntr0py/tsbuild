@@ -66,7 +66,7 @@
     "@typescript-eslint/parser": "^8.58.0",
     "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
-    "eslint-plugin-jsdoc": "^62.8.1",
+    "eslint-plugin-jsdoc": "^62.9.0",
     "fs-monkey": "^1.1.0",
     "memfs": "^4.57.1",
     "tsx": "^4.21.0",
