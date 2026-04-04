@@ -1,3 +1,21 @@
+## [1.7.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.2...v1.7.3) (2026-04-04)
+
+### Bug Fixes
+
+* update esbuild and remaining dependencies (d9fd8e31d2598cc8efc657eb594cb7c8985767d8)
+- update esbuild from ^0.27.4 to ^0.28.0
+- update @types/node from ^25.5.0 to ^25.5.2
+- update eslint from ^10.1.0 to ^10.2.0
+- update pnpm-lock.yaml to reflect new dependency versions
+- add stableTypeOrdering: true to tsconfig.json
+- change moduleResolution: Bundler to module: preserve in tsconfig.json
+- add clarifying comment about global regex usage in src/type-script-project.ts
+
+
+### Miscellaneous Chores
+
+* **docs:** remove AI generate document unrelated to the project (3f31ad1ce93deff047a859961514e3978633fc6a)
+
 ## [1.7.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.1...v1.7.2) (2026-04-01)
 
 ### Bug Fixes
