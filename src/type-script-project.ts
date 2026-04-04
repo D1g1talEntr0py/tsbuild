@@ -182,6 +182,7 @@ export class TypeScriptProject implements Closable {
 		// See: https://esbuild.github.io/api/#define
 		const define: Record<string, string> = {};
 		if (this.buildConfiguration.env !== undefined) {
+			// We can't use global regexes with String.replace, so we need to create a new RegExp object
 			const envExpansion = new RegExp(processEnvExpansionPattern, 'g');
 			for (const [ key, value ] of Object.entries(this.buildConfiguration.env)) {
 				// Expand process.env references (e.g., "${process.env.npm_package_version}") in env values to allow dynamic values in esbuild define, which only supports static strings
