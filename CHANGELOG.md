@@ -1,3 +1,21 @@
+## [1.7.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.3...v1.7.4) (2026-04-06)
+
+### Bug Fixes
+
+* **typescript:** address regression where 'noEmit' would not catch all type errors (ece0de27a4e3019c3dfc437e40894b61a7ac04a3)
+- collect syntatic, semantic, and declaration diagnostics independently when 'noEmit' is true
+- emit correctly within 'noEmit' mode to guarantee the incrementally updated tsbuildinfo cache is correctly generated
+- adjoin extensive test coverage evaluating diagnostic consistency against varied declaration violations
+
+
+### Code Refactoring
+
+* **types:** add explicit return types to support isolateddeclarations (ca0b2ee7757de487a5bf64d36fd346faf35adba4)
+- add explicit return types to functions across constants, decorators, and internal libraries
+- annotate return types on file manager, cache, logger, process manager, and path utilities
+- ensure process manager exit handler properly invokes close on registered instances
+- update typescript configuration to enable isolateddeclarations for the project
+
 ## [1.7.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.2...v1.7.3) (2026-04-04)
 
 ### Bug Fixes
