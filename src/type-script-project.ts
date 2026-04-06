@@ -128,28 +128,50 @@ export class TypeScriptProject implements Closable {
 	private async typeCheck() {
 		await this.fileManager.initialize();
 
-		// For incremental builds, we need to call emit() to save the .tsbuildinfo file, even in type-check-only mode.
-		performance.mark('emit:start');
-		const { diagnostics: emitDiagnostics } = this.builderProgram.emit(undefined, this.fileManager.fileWriter, undefined, true);
-		addPerformanceStep('Emit', TypeScriptProject.elapsed('emit:start'));
+		let allDiagnostics: ReadonlyArray<Diagnostic>;
+		if (this.configuration.compilerOptions.noEmit) {
+			// For noEmit, collect diagnostics first to populate the builder's incremental state,
+			// then emit() writes .tsbuildinfo with the populated cache for use on the next run.
+			// Calling builderProgram methods directly (not getProgram()) uses cached results
+			// for unchanged files, replicating `tsc --noEmit` including declaration diagnostics.
+			performance.mark('diagnostics:start');
+			allDiagnostics = [
+				...this.builderProgram.getConfigFileParsingDiagnostics(),
+				...this.builderProgram.getOptionsDiagnostics(),
+				...this.builderProgram.getSyntacticDiagnostics(),
+				...this.builderProgram.getGlobalDiagnostics(),
+				...this.builderProgram.getSemanticDiagnostics(),
+				...(this.configuration.compilerOptions.declaration ? this.builderProgram.getDeclarationDiagnostics() : [])
+			];
+			addPerformanceStep('Diagnostics', TypeScriptProject.elapsed('diagnostics:start'));
 
-		// Collect semantic diagnostics explicitly — emit() only returns emit-phase diagnostics
-		// and silently ignores semantic errors such as TS2307 (Cannot find module).
-		performance.mark('diagnostics:start');
-		const allDiagnostics = [ ...this.builderProgram.getSemanticDiagnostics(), ...emitDiagnostics];
-		addPerformanceStep('Diagnostics', TypeScriptProject.elapsed('diagnostics:start'));
+			performance.mark('emit:start');
+			this.builderProgram.emit(undefined, this.fileManager.fileWriter, undefined, true);
+			addPerformanceStep('Emit', TypeScriptProject.elapsed('emit:start'));
+		} else {
+			// For normal emit, emit() processes files incrementally and also returns emit-phase
+			// diagnostics. Semantic diagnostics are collected separately as emit() only returns
+			// emit-phase errors and silently ignores e.g. TS2307 (Cannot find module).
+			performance.mark('emit:start');
+			const { diagnostics } = this.builderProgram.emit(undefined, this.fileManager.fileWriter, undefined, true);
+			addPerformanceStep('Emit', TypeScriptProject.elapsed('emit:start'));
+
+			performance.mark('diagnostics:start');
+			allDiagnostics = [ ...this.builderProgram.getSemanticDiagnostics(), ...diagnostics ];
+			addPerformanceStep('Diagnostics', TypeScriptProject.elapsed('diagnostics:start'));
+		}
 
 		if (allDiagnostics.length > 0) {
 			TypeScriptProject.handleTypeErrors('Type-checking failed', allDiagnostics, this.directory);
 		}
 
 		performance.mark('finalize:start');
-		const result = this.fileManager.finalize();
+		const emitted = this.fileManager.finalize();
 		addPerformanceStep('Finalize', TypeScriptProject.elapsed('finalize:start'));
 
 		// When declaration is disabled, TypeScript never emits .d.ts files, so finalize()
 		// has no change signal — always proceed to allow esbuild to run.
-		return result || !this.configuration.compilerOptions.declaration;
+		return emitted || !this.configuration.compilerOptions.declaration;
 	}
 
 	/**

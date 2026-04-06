@@ -21,21 +21,36 @@ vi.mock('node:fs/promises', async () => {
 const mocks = vi.hoisted(() => ({
 	emitMock: vi.fn((..._args: unknown[]) => ({ diagnostics: [] as import('typescript').Diagnostic[] })),
 	getSemanticDiagnosticsMock: vi.fn((): import('typescript').Diagnostic[] => []),
-	getSourceFilesMock: vi.fn((): Array<{ isDeclarationFile: boolean; fileName: string }> => [])
+	getDeclarationDiagnosticsMock: vi.fn((): import('typescript').DiagnosticWithLocation[] => []),
+	getSourceFilesMock: vi.fn((): Array<{ isDeclarationFile: boolean; fileName: string }> => []),
+	getPreEmitDiagnosticsMock: vi.fn((): ReadonlyArray<import('typescript').Diagnostic> => [])
 }));
 
 vi.mock('typescript', async (importOriginal) => {
 	const mod = await importOriginal<typeof import('typescript')>();
 	return {
 		...mod,
+		getPreEmitDiagnostics: mocks.getPreEmitDiagnosticsMock,
 		createIncrementalProgram: vi.fn(() => ({
 			getCompilerOptions: () => ({}),
 			getRootFileNames: () => [],
+			getConfigFileParsingDiagnostics: () => [],
+			getOptionsDiagnostics: () => [],
+			getSyntacticDiagnostics: () => [],
+			getGlobalDiagnostics: () => [],
 			getSemanticDiagnostics: mocks.getSemanticDiagnosticsMock,
+			getDeclarationDiagnostics: mocks.getDeclarationDiagnosticsMock,
 			emit: mocks.emitMock,
 			getProgram: () => ({
 				getRootFileNames: () => [],
 				getSourceFiles: mocks.getSourceFilesMock,
+				getCompilerOptions: () => ({}),
+				getConfigFileParsingDiagnostics: () => [],
+				getOptionsDiagnostics: () => [],
+				getSyntacticDiagnostics: () => [],
+				getGlobalDiagnostics: () => [],
+				getSemanticDiagnostics: mocks.getSemanticDiagnosticsMock,
+				getDeclarationDiagnostics: () => [],
 				emit: mocks.emitMock,
 				getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
 			})
@@ -97,6 +112,9 @@ describe('TypeScriptProject', () => {
 		mocks.emitMock.mockClear();
 		mocks.getSemanticDiagnosticsMock.mockClear();
 		mocks.getSourceFilesMock.mockClear();
+		mocks.getDeclarationDiagnosticsMock.mockClear();
+		mocks.getPreEmitDiagnosticsMock.mockClear();
+		mocks.getPreEmitDiagnosticsMock.mockReturnValue([]);
 		esbuildMocks.buildMock.mockClear();
 		vi.mocked(bundleDeclarations).mockClear();
 		mocks.emitMock.mockImplementation((_target: unknown, writeFile: unknown) => {
@@ -739,6 +757,122 @@ describe('TypeScriptProject', () => {
 			const buildCall = esbuildMocks.buildMock.mock.calls[0][0];
 			const pluginNames = buildCall.plugins.map((p: { name: string }) => p.name);
 			expect(pluginNames).toContain('esbuild:swc-decorator-metadata');
+		});
+	});
+
+	describe('noEmit diagnostic parity with tsc --noEmit', () => {
+		const makeDeclarationError = (fileName = 'src/index.ts', code = 4055): import('typescript').Diagnostic => ({
+			file: {
+				fileName,
+				text: 'export function foo() {}',
+				getLineAndCharacterOfPosition: () => ({ line: 0, character: 16 })
+			} as unknown as import('typescript').SourceFile,
+			messageText: 'Return type of exported function has or is using private name.',
+			start: 16,
+			length: 3,
+			category: 1,
+			code
+		} as import('typescript').Diagnostic);
+
+		it('uses all builder program diagnostic methods in noEmit mode', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { noEmit: true } }
+			});
+			const project = createProject(projectPath);
+
+			await project.build();
+
+			expect(mocks.getSemanticDiagnosticsMock).toHaveBeenCalled();
+		});
+
+		it('does not use getPreEmitDiagnostics in normal emit mode', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: false } }
+			});
+			const project = createProject(projectPath);
+
+			await project.build();
+
+			expect(mocks.getPreEmitDiagnosticsMock).not.toHaveBeenCalled();
+		});
+
+		it('fails when getDeclarationDiagnostics returns a declaration error in noEmit mode', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { noEmit: true, declaration: true } }
+			});
+			const project = createProject(projectPath);
+
+			// Semantic check is clean; only the declaration phase catches the error
+			mocks.getSemanticDiagnosticsMock.mockReturnValue([]);
+			mocks.getDeclarationDiagnosticsMock.mockReturnValue([ makeDeclarationError() as import('typescript').DiagnosticWithLocation ]);
+
+			await project.build();
+
+			expect(process.exitCode).toBe(1);
+		});
+
+		it('would silently pass if getSemanticDiagnostics were used alone in noEmit mode', async () => {
+			// This test documents why getPreEmitDiagnostics must be used in noEmit mode:
+			// getSemanticDiagnostics alone does not cover declaration-phase errors.
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: false } }
+			});
+			const project = createProject(projectPath);
+
+			// Simulate: semantic clean, but declaration phase has an error.
+			// In normal emit mode the error appears in emit diagnostics (not here),
+			// so no exit code should be set.
+			mocks.getSemanticDiagnosticsMock.mockReturnValue([]);
+
+			await project.build();
+
+			expect(process.exitCode).toBeUndefined();
+		});
+
+		it('catches isolatedDeclarations violations (TS9007) in noEmit mode', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { noEmit: true, declaration: true } }
+			});
+			const project = createProject(projectPath);
+
+			mocks.getSemanticDiagnosticsMock.mockReturnValue([]);
+			mocks.getDeclarationDiagnosticsMock.mockReturnValue([ makeDeclarationError('src/index.ts', 9007) as import('typescript').DiagnosticWithLocation ]);
+
+			await project.build();
+
+			expect(process.exitCode).toBe(1);
+			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('TS9007'));
+		});
+
+		it('passes a clean build in noEmit mode when all diagnostic methods return no errors', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { noEmit: true } }
+			});
+			const project = createProject(projectPath);
+
+			await project.build();
+
+			expect(process.exitCode).toBeUndefined();
+			expect(mocks.getSemanticDiagnosticsMock).toHaveBeenCalled();
+		});
+
+		it('skips all emit steps (transpile, declarations) in noEmit mode even on clean check', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { noEmit: true, declaration: true } }
+			});
+			const project = createProject(projectPath);
+			mocks.emitMock.mockImplementationOnce((_target: unknown, writeFile: unknown) => {
+				if (writeFile) {
+					(writeFile as Function)('test.d.ts', 'export {};', false, undefined, []);
+					(writeFile as Function)('tsconfig.tsbuildinfo', '{}', false, undefined, []);
+				}
+				return { diagnostics: [] };
+			});
+
+			await project.build();
+
+			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
+			expect(bundleDeclarations).not.toHaveBeenCalled();
 		});
 	});
 });
