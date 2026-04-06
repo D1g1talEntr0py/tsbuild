@@ -22,7 +22,7 @@ export class Files {
 	 * @param filePath The path to the file.
 	 * @returns True if the file exists, false otherwise.
 	 */
-	static async exists(filePath: Path | string) {
+	static async exists(filePath: Path | string): Promise<boolean> {
 		try {
 			await access(filePath, constants.F_OK);
 			return true;
@@ -38,7 +38,7 @@ export class Files {
 	 * Clear a directory by removing all files and subdirectories.
 	 * @param directory The path to the directory to clear.
 	 */
-	static async empty(directory: Path | string) {
+	static async empty(directory: Path | string): Promise<void> {
 		// Remove all files
 		if (await Files.exists(directory)) {
 			await Promise.all((await readdir(directory)).map((file) => rm(Paths.join(directory, file), defaultCleanOptions)));
@@ -52,7 +52,7 @@ export class Files {
 	 * @param data The data to write to the file.
 	 * @param options Optional write file options.
 	 */
-	static async write(filePath: Path | string, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }) {
+	static async write(filePath: Path | string, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }): Promise<void> {
 		// Ensure the directory exists before writing
 		await mkdir(dirname(filePath), defaultDirOptions);
 		await writeFile(filePath, data, options);
@@ -64,7 +64,7 @@ export class Files {
 	 * @param encoding The encoding to use when reading the file. Default is UTF-8.
 	 * @returns The file contents as a string.
 	 */
-	static async read<T extends string | Buffer = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8) {
+	static async read<T extends string | Buffer = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
 		return await readFile(this.normalizePath(filePath), { encoding }) as T;
 	}
 
@@ -73,7 +73,7 @@ export class Files {
 	 * @param directoryPath The path to the directory.
 	 * @returns An array of file and directory names within the specified directory.
 	 */
-	static async readDirectory(directoryPath: Path) {
+	static async readDirectory(directoryPath: Path): Promise<string[]> {
 		return await readdir(directoryPath);
 	}
 
@@ -92,7 +92,7 @@ export class Files {
 	 * @param buffer The compressed buffer to decompress.
 	 * @returns The decompressed buffer.
 	 */
-	static decompressBuffer(buffer: Buffer) {
+	static decompressBuffer(buffer: Buffer): Promise<Buffer> {
 		return new Promise<Buffer>((resolve, reject) => brotliDecompress(buffer, (error, result) => error ? reject(error) : resolve(result)));
 	}
 
@@ -102,7 +102,7 @@ export class Files {
 	 * @param buffer The buffer to compress.
 	 * @returns The compressed buffer.
 	 */
-	static compressBuffer(buffer: Buffer) {
+	static compressBuffer(buffer: Buffer): Promise<Buffer> {
 		return new Promise<Buffer>((resolve, reject) => brotliCompress(buffer, (error, result) => error ? reject(error) : resolve(result)));
 	}
 
@@ -112,7 +112,7 @@ export class Files {
 	 * @param path The path to the file.
 	 * @returns The deserialized object.
 	 */
-	static async readCompressed<T = unknown>(path: Path) {
+	static async readCompressed<T = unknown>(path: Path): Promise<T> {
 		return deserialize(await this.decompressBuffer(await readFile(this.normalizePath(path)))) as T;
 	}
 
@@ -122,7 +122,7 @@ export class Files {
 	 * @param path The path to the file.
 	 * @param data The object to serialize and save.
 	 */
-	static async writeCompressed<T>(path: Path, data: T) {
+	static async writeCompressed<T>(path: Path, data: T): Promise<void> {
 		const normalizedPath = this.normalizePath(path);
 		await mkdir(dirname(normalizedPath), defaultDirOptions);
 		await writeFile(normalizedPath, await this.compressBuffer(serialize(data)));

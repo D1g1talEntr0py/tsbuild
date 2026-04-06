@@ -24,7 +24,7 @@ export const isWrittenFiles = (data: unknown[]): data is WrittenFile[] => {
  * @returns The colorized string.
  * @internal
  */
-export const colorize = (type: LogEntryType, data: string, onlyImportant = false) => {
+export const colorize = (type: LogEntryType, data: string, onlyImportant = false): string => {
 	if (onlyImportant && (type === 'info' || type === 'success')) { return data }
 
 	switch (type) {
@@ -62,7 +62,7 @@ export class Logger {
 	} as const;
 
 	/** Clears the console */
-	static clear() {
+	static clear(): void {
 		console.log('\x1Bc');
 	}
 
@@ -72,7 +72,7 @@ export class Logger {
 	 * This ensures the header box is sized correctly even when the message contains color codes or other formatting.
 	 * @param message The message to display in the header.
 	 */
-	static header(message: string) {
+	static header(message: string): void {
 		// Calculate the visible length of the message by removing ANSI escape codes, which do not take up space in the console.
 		const innerWidth = message.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '').length + 2;
 		console.log(TextFormat.cyan(`╭${'─'.repeat(innerWidth)}╮${newLine}│ ${message} │${newLine}╰${'─'.repeat(innerWidth)}╯`));
@@ -82,7 +82,7 @@ export class Logger {
 	 * Logs a separator line.
 	 * @param width Optional width of the separator (default: 40).
 	 */
-	static separator(width: number = 40) {
+	static separator(width: number = 40): void {
 		console.log(TextFormat.dim('─'.repeat(width)));
 	}
 
@@ -91,7 +91,7 @@ export class Logger {
 	 * @param message The message to log.
 	 * @param indent Whether to indent the message (tree structure).
 	 */
-	static step(message: string, indent: boolean = false) {
+	static step(message: string, indent: boolean = false): void {
 		const prefix = indent ? '  └─' : '✓';
 		console.log(TextFormat.green(`${prefix} ${message}`));
 	}
@@ -100,7 +100,7 @@ export class Logger {
 	 * Logs sub-step timing entries in a tree format below a parent step.
 	 * @param steps The sub-steps to log.
 	 */
-	static subSteps(steps: PerformanceSubStep[]) {
+	static subSteps(steps: PerformanceSubStep[]): void {
 		const visible = steps.filter(({ ms }) => ms >= 5);
 		if (visible.length === 0) { return }
 
@@ -120,7 +120,7 @@ export class Logger {
 	 * @param args Additional data to log.
 	 * @returns void
 	 */
-	static success<const Args extends unknown[]>(message: string, ...args: Args) {
+	static success<const Args extends unknown[]>(message: string, ...args: Args): void {
 		return Logger.log(message, 'success', ...args);
 	}
 
@@ -130,7 +130,7 @@ export class Logger {
 	 * @param args Additional data to log.
 	 * @returns void
 	 */
-	static info<const Args extends unknown[]>(message: string, ...args: Args) {
+	static info<const Args extends unknown[]>(message: string, ...args: Args): void {
 		return Logger.log(message, 'info', ...args);
 	}
 
@@ -140,7 +140,7 @@ export class Logger {
 	 * @param args Additional data to log.
 	 * @returns void
 	 */
-	static error<const Args extends unknown[]>(message: string, ...args: Args) {
+	static error<const Args extends unknown[]>(message: string, ...args: Args): void {
 		return Logger.log(message, 'error', ...args);
 	}
 
@@ -150,7 +150,7 @@ export class Logger {
 	 * @param args Additional data to log.
 	 * @returns void
 	 */
-	static warn<const Args extends unknown[]>(message: string, ...args: Args) {
+	static warn<const Args extends unknown[]>(message: string, ...args: Args): void {
 		return Logger.log(message, 'warn', ...args);
 	}
 
@@ -160,7 +160,7 @@ export class Logger {
 	 * @param type The type of the log entry.
 	 * @param data Additional data to log.
 	 */
-	static log(message: string, type: LogEntryType, ...data: unknown[]) {
+	static log(message: string, type: LogEntryType, ...data: unknown[]): void {
 		if (data.length) {
 			if (isWrittenFiles(data)) {
 				// Only log the message if it's not empty
@@ -181,7 +181,7 @@ export class Logger {
 	 * @param files - The array of WrittenFile objects to log.
 	 * @internal
 	 */
-	private static files(files: WrittenFile[]) {
+	private static files(files: WrittenFile[]): void {
 		const maxPathLength = files.reduce((max, { path }): number => Math.max(max, path.length), 0);
 		const formatted = files.map(({ path, size }) => ({ path, ...prettyBytes(size) }));
 		const maxValueLength = formatted.reduce((max, { value }): number => Math.max(max, value.length), 0);

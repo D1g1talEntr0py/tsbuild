@@ -70,9 +70,10 @@ export class TypeScriptProject implements Closable {
 
 	/**
 	 * Builds the project
+	 * @returns A promise that resolves when the build is complete.
 	 */
 	@logPerformance('Build')
-	async build() {
+	async build(): Promise<void> {
 		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
 
 		try {
@@ -279,7 +280,7 @@ export class TypeScriptProject implements Closable {
 	}
 
 	/** Closes the project and cleans up resources. */
-	close() {
+	close(): void {
 		this.fileWatcher?.close();
 		this.fileManager.close();
 		this.buildDependencies.clear();

@@ -78,7 +78,7 @@ class PerformanceLogger implements Closable {
 	/**
 	 * Closes the performance logger.
 	 */
-	close() {
+	close(): void {
 		this.performanceObserver.disconnect();
 	}
 
@@ -106,7 +106,7 @@ const measure: typeof PerformanceLogger.prototype.measure = new PerformanceLogge
  * @param name - The name of the sub-step.
  * @param ms - The elapsed time in milliseconds.
  */
-function addPerformanceStep(name: string, ms: number) {
+function addPerformanceStep(name: string, ms: number): void {
 	pendingSteps.push({ name, duration: `${ms}ms`, ms });
 }
 

@@ -56,14 +56,14 @@ const jsxEmitMap: Partial<Record<JsxEmit, JsxRenderingMode>> = {
  * @param target - The TypeScript ScriptTarget enum value
  * @returns The corresponding EsTarget string (e.g., 'ES2022', 'ESNext')
  */
-const toEsTarget = (target: ScriptTarget) => scriptTargetToEsTarget[target];
+const toEsTarget: (target: ScriptTarget) => EsTarget = (target: ScriptTarget) => scriptTargetToEsTarget[target];
 
 /**
  * Converts TypeScript's JsxEmit enum to an esbuild-compatible jsx string.
  * @param jsxEmit - The TypeScript JsxEmit enum value
  * @returns The corresponding jsx string (e.g., 'react', 'preserve'), or undefined for JsxEmit.None
  */
-const toJsxRenderingMode = (jsxEmit?: JsxEmit) => jsxEmit !== undefined ? jsxEmitMap[jsxEmit] : undefined;
+const toJsxRenderingMode: (jsxEmit?: JsxEmit) => JsxRenderingMode | undefined = (jsxEmit?: JsxEmit) => jsxEmit !== undefined ? jsxEmitMap[jsxEmit] : undefined;
 
 const FileExtension = {
 	JS: '.js',
@@ -92,13 +92,13 @@ const dtsCacheFile = 'dts_cache.v8.br';
 const dtsCacheVersion = 2;
 const format = 'esm';
 const newLine = '\n';
-const typeMatcher = /\btype\b/;
-const sourceScriptExtensionExpression = /(?<!\.d)\.[jt]sx?$/;
-const typeScriptExtensionExpression = /(\.tsx?)$/;
+const typeMatcher: RegExp = /\btype\b/;
+const sourceScriptExtensionExpression: RegExp = /(?<!\.d)\.[jt]sx?$/;
+const typeScriptExtensionExpression: RegExp = /(\.tsx?)$/;
 /** Pattern to match and expand process.env references in config values (e.g., "${process.env.npm_package_version}") */
-const processEnvExpansionPattern = /\$\{process\.env\.([^}]+)\}/;
+const processEnvExpansionPattern: RegExp = /\$\{process\.env\.([^}]+)\}/;
 /** Pattern to match inline type specifiers in imports (e.g., `import { foo, type Bar }`) */
-const inlineTypePattern = /([{,]\s+)type\s+/;
+const inlineTypePattern: RegExp = /([{,]\s+)type\s+/;
 
 export {
 	dataUnits,

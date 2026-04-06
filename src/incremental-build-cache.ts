@@ -55,7 +55,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * which overwrite cached entries. Unchanged files remain valid and skip re-emission.
 	 * @param target - The map to populate with cached declarations
 	 */
-	async restore(target: Map<string, CachedDeclaration>) {
+	async restore(target: Map<string, CachedDeclaration>): Promise<void> {
 		// If the cache was invalidated, skip restoration even if the pre-load completed before invalidation
 		if (this.invalidated) { return }
 
@@ -73,7 +73,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Uses V8 serialization for faster read performance on subsequent builds.
 	 * @param source - The declaration files to cache
 	 */
-	async save(source: ReadonlyMap<string, CachedDeclaration>) {
+	async save(source: ReadonlyMap<string, CachedDeclaration>): Promise<void> {
 		await Files.writeCompressed(this.cacheFilePath, { version, files: Object.fromEntries(source) });
 	}
 
@@ -88,7 +88,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * @param filePath - The file path to check
 	 * @returns True if the path matches the build info file
 	 */
-	isBuildInfoFile(filePath: AbsolutePath) {
+	isBuildInfoFile(filePath: AbsolutePath): boolean {
 		return filePath === this.buildInfoPath;
 	}
 
@@ -96,7 +96,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Checks if the cache is valid (not invalidated).
 	 * @returns True if the cache is valid, false if it has been invalidated
 	 */
-	isValid() {
+	isValid(): boolean {
 		return !this.invalidated;
 	}
 
@@ -104,7 +104,7 @@ export class IncrementalBuildCache implements BuildCache {
 	 * Custom inspection tag for type.
 	 * @returns The string 'IncrementalBuildCache'
 	 */
-	get [Symbol.toStringTag]() {
+	get [Symbol.toStringTag](): string {
 		return 'IncrementalBuildCache';
 	}
 }

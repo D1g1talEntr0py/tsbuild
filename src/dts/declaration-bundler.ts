@@ -812,7 +812,7 @@ class DeclarationBundler {
  * @param options Bundling options
  * @returns The bundled declaration file content
  */
-export async function bundleDeclarations(options: DtsBundleOptions) {
+export async function bundleDeclarations(options: DtsBundleOptions): Promise<WrittenFile[]> {
 	// Ensure output directory exists
 	if (!(await Files.exists(options.compilerOptions.outDir))) {
 		await mkdir(options.compilerOptions.outDir, defaultDirOptions);

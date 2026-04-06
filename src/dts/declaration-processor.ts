@@ -466,7 +466,7 @@ export class DeclarationProcessor {
 	 * @param sourceFile The source file to process
 	 * @returns The processed source code
 	 */
-	static postProcess(sourceFile: SourceFile) {
+	static postProcess(sourceFile: SourceFile): string {
 		const magic = new MagicString(sourceFile.getFullText());
 
 		/**

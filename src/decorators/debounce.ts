@@ -70,7 +70,7 @@ const debounceManager = new DebounceManager();
 export function debounce(wait: number) {
 	if (wait < 0) { throw new Error('🚨 wait must be non-negative.') }
 
-	return function(targetMethod: MethodFunction, context: ClassMethodDecoratorContext) {
+	return function(targetMethod: MethodFunction, context: ClassMethodDecoratorContext): MethodFunction {
 		context.addInitializer(function() {
 			Object.defineProperty(this, context.name, { writable: true, configurable: true, value: debounceManager.debounce(targetMethod.bind(this), wait) });
 		});
