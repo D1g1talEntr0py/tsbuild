@@ -9,7 +9,6 @@
 		"noImplicitOverride": true,
 		"noImplicitReturns": true,
 		"stableTypeOrdering": true,
-		"noUncheckedIndexedAccess": false,
 		"rootDir": "./src",
 		"lib": [ "esnext" ],
 		"types": [ "node" ],
