@@ -1,3 +1,16 @@
+## [1.7.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.4...v1.7.5) (2026-04-07)
+
+### Bug Fixes
+
+* **deps:** update vitest to latest to resolve CVE-2026-39363 (4bd805572667f2b5e778c19ac70e5971e27f0c08)
+Updates vitest to the latest version to mitigate CVE-2026-39363 inherently through the natural dependency updates.
+
+
+### Miscellaneous Chores
+
+* **deps:** enforce latest esbuild and vite versions (2894d8dea77f3c8743854cdf56d839705ab604f8)
+Overrides esbuild and vite transient dependencies. Ensures vitest allows the use of the latest esbuild version, as oxc does not support typescript decorators.
+
 ## [1.7.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.3...v1.7.4) (2026-04-06)
 
 ### Bug Fixes
