@@ -134,6 +134,17 @@ describe('iifePlugin', () => {
 			expect(content).toContain('Object.assign(globalThis, { x })');
 		});
 
+		it('uses public name when minified output aliases export (e as Name)', async () => {
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var e={};export{e as RequestHeader};' }));
+			setupPlugin();
+			await onEndCallback({
+				outputFiles: [makeOutputFile(`${outputDir}/index.js`, 'var e={};')],
+			} as unknown as BuildResult);
+
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content).toContain('Object.assign(globalThis, { RequestHeader: e })');
+		});
+
 		it('does not pass globalName or footer to esbuild', async () => {
 			setupPlugin({ globalName: 'MyLib' });
 			await onEndCallback({

@@ -78,31 +78,41 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']): string[] {
 	return Object.keys(entryPoints);
 }
 
-const exportBlockStart = '\nexport {';
-const exportBlockEnd = '\n};';
+// Matches the export block: handles both formatted (`export {\n  Name\n}`) and
+// minified (`export{e as Name}`) output. [^}]* matches newlines too.
+const exportRe = /export\s*\{([^}]*)\};?/g;
+const asRe = /^(\w+)\s+as\s+(\w+)$/;
 
 /**
  * Wraps bundled ESM text in an IIFE and assigns exported names to globalThis.
  * Strips the trailing `export { ... }` block and replaces it with an Object.assign call.
+ * Handles both formatted (`export { Name }`) and minified (`export{e as Name}`) output.
  * @param text The ESM module text to wrap
  * @param globalName Optional namespace — if set, assigns `globalThis.Name = { exports }`
  * @returns The wrapped IIFE text
  */
 function wrapAsIife(text: string, globalName?: string): string {
-	const start = text.lastIndexOf(exportBlockStart);
-	if (start === -1) { return text }
+	let last: RegExpExecArray | null = null;
+	let match: RegExpExecArray | null;
+	exportRe.lastIndex = 0;
+	while ((match = exportRe.exec(text)) !== null) { last = match }
+	if (!last) { return text }
 
-	const end = text.indexOf(exportBlockEnd, start) + exportBlockEnd.length;
-	const block = text.slice(start + 1, end);
-	const names = [...block.matchAll(/^\s+(\w+)/gm)].map(m => m[1]);
-	if (names.length === 0) { return text }
+	const props: string[] = [];
+	for (const raw of last[1].split(',')) {
+		const trimmed = raw.trim();
+		if (!trimmed) { continue }
+		const m = asRe.exec(trimmed);
+		props.push(m ? `${m[2]}: ${m[1]}` : trimmed);
+	}
+	if (props.length === 0) { return text }
 
 	const assignment = globalName
-		? `globalThis.${globalName} = { ${names.join(', ')} };`
-		: `Object.assign(globalThis, { ${names.join(', ')} });`;
+		? `globalThis.${globalName} = { ${props.join(', ')} };`
+		: `Object.assign(globalThis, { ${props.join(', ')} });`;
 
-	const body = text.slice(0, start);
-	const after = text.slice(end);
+	const body = text.slice(0, last.index);
+	const after = text.slice(last.index + last[0].length);
 	return `(() => {\n${body}\n\t${assignment}\n})();${after}`;
 }
 
