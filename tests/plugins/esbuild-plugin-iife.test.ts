@@ -106,25 +106,36 @@ describe('iifePlugin', () => {
 			expect(mockEsbuild).toHaveBeenCalledOnce();
 			const opts = mockEsbuild.mock.calls[0]![0];
 			expect(opts.bundle).toBe(true);
-			expect(opts.format).toBe('iife');
+			expect(opts.format).toBe('esm');
 			expect(opts.splitting).toBe(false);
 			expect(opts.write).toBe(false);
 			expect(opts.outdir).toBe(join(outputDir, 'iife'));
 		});
 
-		it('passes globalName to options and footer', async () => {
+		it('assigns to named namespace when globalName option is provided', async () => {
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var x = 1;\nexport {\n  x\n};' }));
 			setupPlugin({ globalName: 'MyLib' });
 			await onEndCallback({
 				outputFiles: [makeOutputFile(`${outputDir}/index.js`, 'var x = 1;')],
 			} as unknown as BuildResult);
 
-			const opts = mockEsbuild.mock.calls[0]![0];
-			expect(opts.globalName).toBe('MyLib');
-			expect(opts.footer).toEqual({ js: 'globalThis.MyLib = MyLib;' });
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content).toContain('globalThis.MyLib = { x }');
 		});
 
-		it('does not set footer when globalName is not set', async () => {
+		it('uses flat Object.assign when no globalName option is provided', async () => {
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var x = 1;\nexport {\n  x\n};' }));
 			setupPlugin();
+			await onEndCallback({
+				outputFiles: [makeOutputFile(`${outputDir}/index.js`, 'var x = 1;')],
+			} as unknown as BuildResult);
+
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content).toContain('Object.assign(globalThis, { x })');
+		});
+
+		it('does not pass globalName or footer to esbuild', async () => {
+			setupPlugin({ globalName: 'MyLib' });
 			await onEndCallback({
 				outputFiles: [makeOutputFile(`${outputDir}/index.js`, 'var x = 1;')],
 			} as unknown as BuildResult);
@@ -156,6 +167,8 @@ describe('iifePlugin', () => {
 	describe('entry point identification', () => {
 		it('uses configured entry point names from object form', async () => {
 			setupPlugin(undefined, undefined, { index: './src/index.ts', utils: './src/utils.ts' });
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: '(() => {})();' }))
+			           .mockResolvedValueOnce(makeBuildResult({ utils: '(() => {})();' }));
 			await onEndCallback({
 				outputFiles: [
 					makeOutputFile(`${outputDir}/index.js`, 'var a = 1;'),
@@ -164,15 +177,16 @@ describe('iifePlugin', () => {
 				],
 			} as unknown as BuildResult);
 
-			const opts = mockEsbuild.mock.calls[0]![0];
-			expect(opts.entryPoints).toEqual({
-				'index': `${outputDir}/index.js`,
-				'utils': `${outputDir}/utils.js`
-			});
+			expect(mockEsbuild).toHaveBeenCalledTimes(2);
+			const [call0, call1] = [mockEsbuild.mock.calls[0]![0], mockEsbuild.mock.calls[1]![0]];
+			expect(call0.entryPoints).toEqual({ index: `${outputDir}/index.js` });
+			expect(call1.entryPoints).toEqual({ utils: `${outputDir}/utils.js` });
 		});
 
 		it('handles array entry points', async () => {
 			setupPlugin(undefined, undefined, ['./src/index.ts', './src/utils.ts']);
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: '(() => {})();' }))
+			           .mockResolvedValueOnce(makeBuildResult({ utils: '(() => {})();' }));
 			await onEndCallback({
 				outputFiles: [
 					makeOutputFile(`${outputDir}/index.js`, 'var a = 1;'),
@@ -180,11 +194,10 @@ describe('iifePlugin', () => {
 				],
 			} as unknown as BuildResult);
 
-			const opts = mockEsbuild.mock.calls[0]![0];
-			expect(opts.entryPoints).toEqual({
-				'index': `${outputDir}/index.js`,
-				'utils': `${outputDir}/utils.js`
-			});
+			expect(mockEsbuild).toHaveBeenCalledTimes(2);
+			const [call0, call1] = [mockEsbuild.mock.calls[0]![0], mockEsbuild.mock.calls[1]![0]];
+			expect(call0.entryPoints).toEqual({ index: `${outputDir}/index.js` });
+			expect(call1.entryPoints).toEqual({ utils: `${outputDir}/utils.js` });
 		});
 
 		it('does nothing when outputFiles is empty', async () => {
@@ -276,9 +289,8 @@ describe('iifePlugin', () => {
 
 	describe('output file writing', () => {
 		it('writes only entry point files to the iife directory', async () => {
-			mockEsbuild.mockResolvedValueOnce(makeBuildResult(
-				{ index: '(() => { /* entry */ })();', utils: '(() => { /* utils */ })();' }
-			));
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: '(() => { /* entry */ })();' }))
+			           .mockResolvedValueOnce(makeBuildResult({ utils: '(() => { /* utils */ })();' }));
 			setupPlugin(undefined, undefined, { index: './src/index.ts', utils: './src/utils.ts' });
 			await onEndCallback({
 				outputFiles: [
@@ -292,10 +304,10 @@ describe('iifePlugin', () => {
 			expect(await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8')).toBe('(() => { /* entry */ })();');
 		});
 
-		it('excludes chunk files from output', async () => {
-			const result = makeBuildResult({ transportr: '(() => { /* inlined */ })();' });
-			result.outputFiles.push(makeOutputFile(join(iifeOutdir, 'TOSJXEKD.js'), '(() => { /* chunk */ })();'));
-			mockEsbuild.mockResolvedValueOnce(result);
+		it('inlines chunks — per-entry builds produce no separate chunk files', async () => {
+			// Per-entry builds with splitting:false inline all dynamic imports;
+			// the secondary build result should only contain the entry file.
+			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ transportr: '(() => { /* inlined */ })();' }));
 			setupPlugin(undefined, undefined, { transportr: './src/transportr.ts' });
 			await onEndCallback({
 				outputFiles: [

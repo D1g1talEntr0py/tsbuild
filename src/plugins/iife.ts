@@ -78,6 +78,34 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']): string[] {
 	return Object.keys(entryPoints);
 }
 
+const exportBlockStart = '\nexport {';
+const exportBlockEnd = '\n};';
+
+/**
+ * Wraps bundled ESM text in an IIFE and assigns exported names to globalThis.
+ * Strips the trailing `export { ... }` block and replaces it with an Object.assign call.
+ * @param text The ESM module text to wrap
+ * @param globalName Optional namespace — if set, assigns `globalThis.Name = { exports }`
+ * @returns The wrapped IIFE text
+ */
+function wrapAsIife(text: string, globalName?: string): string {
+	const start = text.lastIndexOf(exportBlockStart);
+	if (start === -1) { return text }
+
+	const end = text.indexOf(exportBlockEnd, start) + exportBlockEnd.length;
+	const block = text.slice(start + 1, end);
+	const names = [...block.matchAll(/^\s+(\w+)/gm)].map(m => m[1]);
+	if (names.length === 0) { return text }
+
+	const assignment = globalName
+		? `globalThis.${globalName} = { ${names.join(', ')} };`
+		: `Object.assign(globalThis, { ${names.join(', ')} });`;
+
+	const body = text.slice(0, start);
+	const after = text.slice(end);
+	return `(() => {\n${body}\n\t${assignment}\n})();${after}`;
+}
+
 /**
  * Runs a secondary esbuild build to produce IIFE output from the primary ESM output.
  * Uses a virtual loader to serve pre-built ESM content from memory, avoiding TypeScript
@@ -86,7 +114,7 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']): string[] {
  * @param outputFiles The primary build's output files
  * @param entryPointNames The configured entry point output names
  * @param outdir The primary build's output directory
- * @param globalName Optional global variable name for the IIFE bundle
+ * @param globalName Optional global variable name override; otherwise derived from each entry name
  * @param sourcemap The primary build's source map setting
  * @returns An array of written IIFE output files
  */
@@ -98,48 +126,48 @@ async function buildIife(outputFiles: OutputFile[], entryPointNames: string[], o
 		}
 	}
 
-	const entryPoints: Record<string, string> = {};
+	const validEntries: Array<{ name: string; absPath: string }> = [];
 	for (const name of entryPointNames) {
 		const absPath = join(outdir, name + jsExtension);
 		if (fileContents.has(absPath)) {
-			entryPoints[name] = absPath;
+			validEntries.push({ name, absPath });
 		}
 	}
 
-	if (Object.keys(entryPoints).length === 0) { return [] }
+	if (validEntries.length === 0) { return [] }
 
 	const hasSourceMap = sourcemap !== undefined && sourcemap !== false;
 	const iifeOutdir = join(outdir, 'iife');
-
-	const { outputFiles: iifeFiles } = await esbuild({
-		entryPoints,
-		bundle: true,
-		format: 'iife',
-		globalName,
-		splitting: false,
-		outdir: iifeOutdir,
-		sourcemap: hasSourceMap ? 'external' : false,
-		write: false,
-		logLevel: 'warning',
-		footer: globalName ? { js: `globalThis.${globalName} = ${globalName};` } : undefined,
-		plugins: [virtualLoaderPlugin(fileContents)],
-	});
-
-	// Only write entry point outputs + their source maps, skip inlined chunks
-	const entryOutputs = new Set<string>();
-	for (const name of entryPointNames) {
-		entryOutputs.add(join(iifeOutdir, name + jsExtension));
-	}
+	const loaderPlugin = virtualLoaderPlugin(fileContents);
 
 	await mkdir(iifeOutdir, { recursive: true });
 
+	const results = await Promise.all(validEntries.map(({ name, absPath }) =>
+		esbuild({
+			entryPoints: { [name]: absPath },
+			bundle: true,
+			format: 'esm',
+			splitting: false,
+			outdir: iifeOutdir,
+			sourcemap: hasSourceMap ? 'external' : false,
+			write: false,
+			logLevel: 'warning',
+			plugins: [loaderPlugin],
+		})
+	));
+
 	const written: WrittenFile[] = [];
 	const writes: Promise<void>[] = [];
-	for (const file of iifeFiles) {
-		const basePath = file.path.endsWith('.map') ? file.path.slice(0, -4) : file.path;
-		if (entryOutputs.has(basePath)) {
-			writes.push(writeFile(file.path, file.contents));
-			written.push({ path: relative(process.cwd(), file.path) as RelativePath, size: file.contents.byteLength });
+	for (const { outputFiles: iifeFiles } of results) {
+		for (const file of iifeFiles) {
+			if (file.path.endsWith(jsExtension)) {
+				const text = wrapAsIife(textDecoder.decode(file.contents), globalName);
+				writes.push(writeFile(file.path, text));
+				written.push({ path: relative(process.cwd(), file.path) as RelativePath, size: Buffer.byteLength(text) });
+			} else {
+				writes.push(writeFile(file.path, file.contents));
+				written.push({ path: relative(process.cwd(), file.path) as RelativePath, size: file.contents.byteLength });
+			}
 		}
 	}
 	await Promise.all(writes);
