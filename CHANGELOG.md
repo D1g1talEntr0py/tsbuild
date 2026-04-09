@@ -1,3 +1,9 @@
+## [1.8.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.1...v1.8.2) (2026-04-09)
+
+### Bug Fixes
+
+* **build:** add handling for modules where the export uses 'as' (d96f626e7329188e702cd32bd8ba028810647d06)
+
 ## [1.8.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.0...v1.8.1) (2026-04-09)
 
 ### Bug Fixes
