@@ -1,3 +1,35 @@
+## [1.8.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.5...v1.8.0) (2026-04-09)
+
+### Features
+
+* **build:** add support for esbuild plugins and iife output (b4ffefbf01e0b3c1bb017f9ce0f87608235c9a6b)
+- add iife plugin to generate iife bundle
+- add resolve-plugin to resolve string/tuple plugin options to plugin instances
+- update type definitions for BuildOptions and create PluginReference type
+- update json schema to support new plugin format and iife options
+- register plugins during build
+
+
+### Miscellaneous Chores
+
+* **deps:** remove overrides from package.json and update watchr package (7d87c0b207a76a17c37fb10df2d1686d5f23713b)
+* **deps:** update dependencies (142c13fff1425e477239ac7f8bdb0a8fcffd3c07)
+- update @types/node to ^25.5.2
+- update @typescript-eslint/eslint-plugin to ^8.58.1
+- update @typescript-eslint/parser to ^8.58.1
+- update @vitest/coverage-v8 to ^4.1.4
+- update typescript-eslint to ^8.58.1
+- update vitest to ^4.1.4
+- update various transitive dependencies in pnpm-lock.yaml
+
+
+### Tests
+
+* **plugins:** add tests for iife and resolve plugins (63371ebd3652831ae168a1fbc18f32d2d436707b)
+- add unit tests for iife plugin covering build options, entry point identification, virtual loader, and file output
+- add unit tests for resolve-plugin utility covering pass-through, string, tuple references, and error handling
+- add a test fixture for the iife plugin
+
 ## [1.7.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.4...v1.7.5) (2026-04-07)
 
 ### Bug Fixes
