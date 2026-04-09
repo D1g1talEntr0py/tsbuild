@@ -1,3 +1,13 @@
+## [1.8.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.0...v1.8.1) (2026-04-09)
+
+### Bug Fixes
+
+* **iife:** ensure module exports are added to 'globalThis' (23933af3534c86b20ee364aae67e955d3cf374a6)
+- change esbuild format from iife to esm to capture exports
+- add wrapAsIife function to manually wrap esm content and assign exports
+- execute esbuild per entry point to inline all dynamic chunks
+- update tests to verify global export assignments and correct build options
+
 ## [1.8.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.7.5...v1.8.0) (2026-04-09)
 
 ### Features
