@@ -193,6 +193,54 @@
             }
           },
           "additionalProperties": false
+        },
+        "plugins": {
+          "type": "array",
+          "markdownDescription": "Custom esbuild plugins to include in the build. Each entry is either:\n- A **string** — npm package name or relative path to a plugin module (default export must be a factory function or Plugin object)\n- A **tuple** `[string, object]` — module specifier with options passed to the factory function\n\nExample:\n```json\n\"plugins\": [\n  \"esbuild-plugin-copy\",\n  [\"esbuild-plugin-alias\", { \"aliases\": { \"@\": \"./src\" } }]\n]\n```",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Plugin module specifier (npm package or relative path)"
+              },
+              {
+                "type": "array",
+                "description": "Plugin module specifier with options: [specifier, options]",
+                "items": false,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "description": "Plugin module specifier (npm package or relative path)"
+                  },
+                  {
+                    "type": "object",
+                    "description": "Options passed to the plugin factory function",
+                    "additionalProperties": true
+                  }
+                ],
+                "minItems": 2,
+                "maxItems": 2
+              }
+            ]
+          }
+        },
+        "iife": {
+          "markdownDescription": "Produce additional IIFE (Immediately Invoked Function Expression) output alongside the primary ESM build.\n\nWhen enabled, each `.js` entry point is wrapped in an IIFE and written to an `iife/` subdirectory under the output directory.\n\nSet to `true` for default behavior, or provide an object with a `globalName` to assign exports to `globalThis`.\n\nExample:\n```json\n\"iife\": { \"globalName\": \"MyLib\" }\n```",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "globalName": {
+                  "type": "string",
+                  "description": "Global variable name for the IIFE bundle (e.g., 'MyLib' becomes globalThis.MyLib)"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       }
     }

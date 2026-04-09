@@ -95,6 +95,11 @@ type DtsOptions = {
 };
 type DtsConfiguration = MarkRequired<DtsOptions, 'resolve'>;
 
+type IifeOptions = {
+	/** Global variable name for the IIFE bundle (e.g., 'MyLib' becomes `globalThis.MyLib`) */
+	globalName?: string;
+};
+
 type WatchOptions = PrettyModify<WatchrOptions, { enabled: boolean, recursive?: boolean, persistent?: boolean, ignoreInitial?: boolean, ignore?: string[] }>;
 type WatchConfiguration = MarkRequired<WatchOptions, 'recursive' | 'persistent' | 'ignoreInitial'>;
 type PendingFileChange = { event: FileSystemEvent; path: AbsolutePath; nextPath?: AbsolutePath; };
@@ -138,9 +143,18 @@ type BuildOptions = {
 	watch?: WatchOptions;
 	/** Emit decorator metadata (requires `@swc/core` as optional dependency) */
 	decoratorMetadata?: boolean;
-	/** Custom esbuild plugins */
-	plugins?: Plugin[];
+	/** Produce additional IIFE output alongside ESM. Set to `true` for default IIFE or provide options. */
+	iife?: boolean | IifeOptions;
+	/** Custom esbuild plugins (Plugin objects via programmatic API, or string/tuple references via config) */
+	plugins?: (Plugin | PluginReference)[];
 };
+
+/**
+ * A reference to an esbuild plugin resolved at build time.
+ * - `string` — bare npm specifier or relative path to a plugin module
+ * - `[string, Record<string, unknown>]` — module specifier with options passed to the factory function
+ */
+type PluginReference = string | [string, Record<string, unknown>];
 
 type BuildConfiguration = PrettyModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'minify' | 'bundle' | 'noExternal' | 'sourceMap'>, { watch: WatchConfiguration, dts: DtsConfiguration }>;
 
@@ -284,5 +298,7 @@ export type {
 	ConditionalPath,
 	LogEntryType,
 	EsTarget,
-	CachedDeclaration
+	CachedDeclaration,
+	PluginReference,
+	IifeOptions
 };

@@ -7,6 +7,9 @@ import { TextFormat } from './text-formatter';
 import { bundleDeclarations } from './dts/declaration-bundler';
 import { outputPlugin } from './plugins/output';
 import { externalModulesPlugin } from './plugins/external-modules';
+import { resolvePlugins } from './plugins/resolve-plugin';
+import { iifePlugin } from './plugins/iife';
+import type { IifePluginInstance } from './plugins/iife';
 import { closeOnExit } from './decorators/close-on-exit';
 import { logPerformance, addPerformanceStep } from './decorators/performance-logger';
 import { debounce } from './decorators/debounce';
@@ -199,7 +202,14 @@ export class TypeScriptProject implements Closable {
 			}
 		}
 
-		if (this.buildConfiguration.plugins?.length) { plugins.push(...this.buildConfiguration.plugins) }
+		if (this.buildConfiguration.plugins?.length) { plugins.push(...await resolvePlugins(this.buildConfiguration.plugins, this.directory)) }
+
+		// Add IIFE output plugin when iife option is enabled
+		let iife: IifePluginInstance | undefined;
+		if (this.buildConfiguration.iife) {
+			iife = iifePlugin(this.buildConfiguration.iife === true ? undefined : this.buildConfiguration.iife);
+			plugins.push(iife.plugin);
+		}
 
 		// Prepare environment variable definitions as import.meta.env.* definitions
 		// See: https://esbuild.github.io/api/#define
@@ -265,6 +275,8 @@ export class TypeScriptProject implements Closable {
 			for (const [ outputPath, { bytes } ] of Object.entries(outputs)) {
 				writtenFiles.push({ path: outputPath as RelativePath, size: bytes });
 			}
+
+			if (iife) { writtenFiles.push(...iife.files) }
 
 			return writtenFiles;
 		} catch (error) {
