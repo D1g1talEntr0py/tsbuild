@@ -1,3 +1,20 @@
+## [1.8.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.2...v1.8.3) (2026-04-11)
+
+### Performance Improvements
+
+* **core:** optimize build performance and decrease startup time (5cc35a8e0c6acc45dff38f6186e9f5b8f59ee8bf)
+- use sets instead of arrays for faster lookups
+- replace string concatenation with array joins
+- replace object.keys with for-in loops
+- cache regex patterns and avoid repeated compilations
+- dynamically import esbuild and watchr to reduce startup time
+- replace map/reduce chains with single loops for better performance
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency @types/node to ^25.6.0 (a99b720acf5c2d3ed4116605e66fbd0f0174259f)
+
 ## [1.8.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.1...v1.8.2) (2026-04-09)
 
 ### Bug Fixes
