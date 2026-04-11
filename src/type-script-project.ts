@@ -1,15 +1,13 @@
 import { Files } from './files';
 import { Paths } from './paths.js';
 import { Json } from './json.js';
-import { Watchr, type WatchrStats, type FileSystemEvent } from '@d1g1tal/watchr';
 import { Logger } from './logger';
 import { TextFormat } from './text-formatter';
 import { bundleDeclarations } from './dts/declaration-bundler';
 import { outputPlugin } from './plugins/output';
 import { externalModulesPlugin } from './plugins/external-modules';
 import { resolvePlugins } from './plugins/resolve-plugin';
-import { iifePlugin } from './plugins/iife';
-import type { IifePluginInstance } from './plugins/iife';
+import { iifePlugin, type IifePluginInstance } from './plugins/iife';
 import { closeOnExit } from './decorators/close-on-exit';
 import { logPerformance, addPerformanceStep } from './decorators/performance-logger';
 import { debounce } from './decorators/debounce';
@@ -17,10 +15,10 @@ import { BuildError, ConfigurationError, TypeCheckError } from './errors';
 import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
 import { inferEntryPoints, type PackageJson } from './entry-points';
-import { build as esbuild, formatMessages } from 'esbuild';
 import { performance } from 'node:perf_hooks';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
+import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { BuilderProgram, Diagnostic, FormatDiagnosticsHost } from 'typescript';
 import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString } from './@types';
 
@@ -112,7 +110,7 @@ export class TypeScriptProject implements Closable {
 				}
 
 				// Ensure that `watch()` is called after the build by calling `setImmediate()`
-				if (this.fileWatcher === undefined || this.fileWatcher.isClosed()) { setImmediate(() => this.watch()) }
+				if (this.fileWatcher === undefined || this.fileWatcher.isClosed()) { setImmediate(() => void this.watch()) }
 			}
 		}
 	}
@@ -183,6 +181,7 @@ export class TypeScriptProject implements Closable {
 	 */
 	@logPerformance('Transpile', true)
 	private async transpile(): Promise<WrittenFile[]> {
+		const { build: esbuild, formatMessages } = await import('esbuild');
 		const plugins = [ outputPlugin() ];
 
 		// Only use the external modules plugin when we have noExternal patterns to apply
@@ -288,7 +287,9 @@ export class TypeScriptProject implements Closable {
 	/**
 	 * Watches for changes in the project files and rebuilds the project when changes are detected.
 	 */
-	private watch() {
+	private async watch() {
+		const { Watchr } = await import('@d1g1tal/watchr');
+
 		const targets: AbsolutePath[] = [];
 
 		for (const path of this.configuration.include ?? [ defaultSourceDirectory ]) {
@@ -364,7 +365,7 @@ export class TypeScriptProject implements Closable {
 		// Apply all pending changes
 		for (const { event, path, nextPath } of this.pendingChanges) {
 			// If a file or directory is renamed, update the path in the dependencies set
-			if (nextPath !== undefined && (event === Watchr.FileEvent.rename || event === Watchr.DirectoryEvent.rename)) {
+			if (nextPath !== undefined && (event === 'rename' || event === 'renameDir')) {
 				this.buildDependencies.delete(Paths.relative(this.directory, path));
 				this.buildDependencies.add(Paths.relative(this.directory, nextPath));
 
@@ -374,9 +375,9 @@ export class TypeScriptProject implements Closable {
 			} else {
 				// Only remove from rootNames if it's an unlink event; push new files on add
 				const index = rootNames.indexOf(path);
-				if (event === Watchr.FileEvent.unlink && index !== -1) {
+				if (event === 'unlink' && index !== -1) {
 					rootNames.splice(index, 1);
-				} else if (event === Watchr.FileEvent.add && index === -1) {
+				} else if (event === 'add' && index === -1) {
 					rootNames.push(path);
 				}
 			}

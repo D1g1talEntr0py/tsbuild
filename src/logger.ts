@@ -2,6 +2,10 @@ import { TextFormat } from './text-formatter';
 import { dataUnits, newLine } from 'src/constants';
 import type { LogEntryType, WrittenFile, PerformanceSubStep } from './@types';
 
+const LOG_1024 = Math.log(1024);
+// eslint-disable-next-line no-control-regex
+const ansiEscapePattern = /\x1b\[[0-9;]*m/g;
+
 /**
  * Checks if the given data is an array of WrittenFile objects.
  * @param data - The data to check.
@@ -44,7 +48,7 @@ export const colorize = (type: LogEntryType, data: string, onlyImportant = false
 export const prettyBytes = (bytes: number): { value: string; unit: string } => {
 	if (bytes === 0) { return { value: '0', unit: 'B' } }
 
-	const exp = ~~(Math.log(bytes) / Math.log(1024));
+	const exp = ~~(Math.log(bytes) / LOG_1024);
 
 	return { value: (bytes / Math.pow(1024, exp)).toFixed(2), unit: dataUnits[exp] };
 };
@@ -74,7 +78,7 @@ export class Logger {
 	 */
 	static header(message: string): void {
 		// Calculate the visible length of the message by removing ANSI escape codes, which do not take up space in the console.
-		const innerWidth = message.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '').length + 2;
+		const innerWidth = message.replace(ansiEscapePattern, '').length + 2;
 		console.log(TextFormat.cyan(`╭${'─'.repeat(innerWidth)}╮${newLine}│ ${message} │${newLine}╰${'─'.repeat(innerWidth)}╯`));
 	}
 
@@ -104,8 +108,13 @@ export class Logger {
 		const visible = steps.filter(({ ms }) => ms >= 5);
 		if (visible.length === 0) { return }
 
-		const maxNameLength = visible.reduce((max, { name }) => Math.max(max, name.length), 0);
-		const maxDurationLength = visible.reduce((max, { duration }) => Math.max(max, duration.length), 0);
+		let maxNameLength = 0;
+		let maxDurationLength = 0;
+		for (let i = 0, length = visible.length; i < length; i++) {
+			const { name, duration } = visible[i];
+			if (name.length > maxNameLength) { maxNameLength = name.length }
+			if (duration.length > maxDurationLength) { maxDurationLength = duration.length }
+		}
 
 		for (let i = 0, length = visible.length; i < length; i++) {
 			const { name, duration } = visible[i];
@@ -182,10 +191,19 @@ export class Logger {
 	 * @internal
 	 */
 	private static files(files: WrittenFile[]): void {
-		const maxPathLength = files.reduce((max, { path }): number => Math.max(max, path.length), 0);
-		const formatted = files.map(({ path, size }) => ({ path, ...prettyBytes(size) }));
-		const maxValueLength = formatted.reduce((max, { value }): number => Math.max(max, value.length), 0);
-		const maxUnitLength = formatted.reduce((max, { unit }): number => Math.max(max, unit.length), 0);
+		let maxPathLength = 0;
+		let maxValueLength = 0;
+		let maxUnitLength = 0;
+		const formatted: Array<{ path: string; value: string; unit: string }> = [];
+
+		for (let i = 0, length = files.length; i < length; i++) {
+			const { path, size } = files[i];
+			const { value, unit } = prettyBytes(size);
+			if (path.length > maxPathLength) { maxPathLength = path.length }
+			if (value.length > maxValueLength) { maxValueLength = value.length }
+			if (unit.length > maxUnitLength) { maxUnitLength = unit.length }
+			formatted.push({ path, value, unit });
+		}
 
 		for (let i = 0, length = formatted.length; i < length; i++) {
 			const { path, value, unit } = formatted[i];

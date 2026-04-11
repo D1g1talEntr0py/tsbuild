@@ -170,18 +170,14 @@ export class DeclarationProcessor {
 
 			if (importName === undefined) {
 				// Replace non-identifier characters with underscores (faster than regex)
-				let sanitized = '';
+				const chars: string[] = [];
 				for (let i = 0; i < fileId.length; i++) {
 					const char = fileId[i];
 					const code = char.charCodeAt(0);
 					// a-z: 97-122, A-Z: 65-90, 0-9: 48-57, _: 95, $: 36
-					if ((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36) {
-						sanitized += char;
-					} else {
-						sanitized += '_';
-					}
+					chars.push((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36 ? char : '_');
 				}
-				importName = generateUniqueName(sanitized);
+				importName = generateUniqueName(chars.join(''));
 				inlineImports.set(fileId, importName);
 			}
 

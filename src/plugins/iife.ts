@@ -1,8 +1,8 @@
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { Paths } from 'src/paths.js';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { build as esbuild } from 'esbuild';
+import { basename, dirname, join, resolve } from 'node:path';
+import type { IifeOptions, WrittenFile } from '../@types/index.js';
 import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
-import type { IifeOptions, RelativePath, WrittenFile } from '../@types/index.js';
 
 type WriteDisabledBuild = BuildOptions & { write: false };
 
@@ -78,10 +78,10 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']): string[] {
 	return Object.keys(entryPoints);
 }
 
-// Matches the export block: handles both formatted (`export {\n  Name\n}`) and
-// minified (`export{e as Name}`) output. [^}]* matches newlines too.
-const exportRe = /export\s*\{([^}]*)\};?/g;
-const asRe = /^(\w+)\s+as\s+(\w+)$/;
+// Matches the export block: handles both formatted (`export {lName\n}`) and
+// (`export {e as Name}`) output. [^}]* matches newlines too.
+const exportRegex = /export\s*\{([^}]*)\};?/g;
+const exportAliasRegex = /^(\w+)\s+as\s+(\w+)$/;
 
 /**
  * Wraps bundled ESM text in an IIFE and assigns exported names to globalThis.
@@ -92,27 +92,28 @@ const asRe = /^(\w+)\s+as\s+(\w+)$/;
  * @returns The wrapped IIFE text
  */
 function wrapAsIife(text: string, globalName?: string): string {
-	let last: RegExpExecArray | null = null;
-	let match: RegExpExecArray | null;
-	exportRe.lastIndex = 0;
-	while ((match = exportRe.exec(text)) !== null) { last = match }
+	const exportIndex = text.lastIndexOf('export');
+	if (exportIndex === -1) { return text }
+
+	exportRegex.lastIndex = exportIndex;
+	const last = exportRegex.exec(text);
+
 	if (!last) { return text }
 
 	const props: string[] = [];
 	for (const raw of last[1].split(',')) {
 		const trimmed = raw.trim();
 		if (!trimmed) { continue }
-		const m = asRe.exec(trimmed);
+		const m = exportAliasRegex.exec(trimmed);
 		props.push(m ? `${m[2]}: ${m[1]}` : trimmed);
 	}
+
 	if (props.length === 0) { return text }
 
-	const assignment = globalName
-		? `globalThis.${globalName} = { ${props.join(', ')} };`
-		: `Object.assign(globalThis, { ${props.join(', ')} });`;
-
+	const assignment = globalName	? `globalThis.${globalName} = { ${props.join(', ')} };` : `Object.assign(globalThis, { ${props.join(', ')} });`;
 	const body = text.slice(0, last.index);
 	const after = text.slice(last.index + last[0].length);
+
 	return `(() => {\n${body}\n\t${assignment}\n})();${after}`;
 }
 
@@ -129,10 +130,11 @@ function wrapAsIife(text: string, globalName?: string): string {
  * @returns An array of written IIFE output files
  */
 async function buildIife(outputFiles: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap']): Promise<WrittenFile[]> {
+	const { build: esbuild } = await import('esbuild');
 	const fileContents = new Map<string, string>();
-	for (const file of outputFiles) {
-		if (file.path.endsWith(jsExtension)) {
-			fileContents.set(file.path, textDecoder.decode(file.contents));
+	for (const { path, contents } of outputFiles) {
+		if (path.endsWith(jsExtension)) {
+			fileContents.set(path, textDecoder.decode(contents));
 		}
 	}
 
@@ -168,15 +170,16 @@ async function buildIife(outputFiles: OutputFile[], entryPointNames: string[], o
 
 	const written: WrittenFile[] = [];
 	const writes: Promise<void>[] = [];
+	const cwd = process.cwd();
 	for (const { outputFiles: iifeFiles } of results) {
-		for (const file of iifeFiles) {
-			if (file.path.endsWith(jsExtension)) {
-				const text = wrapAsIife(textDecoder.decode(file.contents), globalName);
-				writes.push(writeFile(file.path, text));
-				written.push({ path: relative(process.cwd(), file.path) as RelativePath, size: Buffer.byteLength(text) });
+		for (const { path, contents } of iifeFiles) {
+			if (path.endsWith(jsExtension)) {
+				const text = wrapAsIife(textDecoder.decode(contents), globalName);
+				writes.push(writeFile(path, text));
+				written.push({ path: Paths.relative(cwd, path), size: Buffer.byteLength(text) });
 			} else {
-				writes.push(writeFile(file.path, file.contents));
-				written.push({ path: relative(process.cwd(), file.path) as RelativePath, size: file.contents.byteLength });
+				writes.push(writeFile(path, contents));
+				written.push({ path: Paths.relative(cwd, path), size: contents.byteLength });
 			}
 		}
 	}

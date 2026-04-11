@@ -607,8 +607,9 @@ class DeclarationBundler {
 		}
 
 		// Value exports take precedence - remove any types that are also values
-		const finalValueExports = [...new Set(valueExports.map(exportsMapper))];
-		const finalTypeExports = [...new Set(typeExports.map(exportsMapper).filter(t => !(new Set(finalValueExports).has(t))))];
+		const finalValueExportsSet = new Set(valueExports.map(exportsMapper));
+		const finalValueExports = [...finalValueExportsSet];
+		const finalTypeExports = [...new Set(typeExports.map(exportsMapper).filter(t => !finalValueExportsSet.has(t)))];
 
 		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: finalValueExports };
 	}
@@ -709,8 +710,8 @@ class DeclarationBundler {
 
 		// Value exports take precedence - remove any types that are also values
 		// Use Set for O(1) lookup instead of Array.includes() O(n) to avoid O(n²) complexity
-		const finalValueExports = [...new Set(allValueExports)];
-		const finalValueExportsSet = new Set(finalValueExports);
+		const finalValueExportsSet = new Set(allValueExports);
+		const finalValueExports = [...finalValueExportsSet];
 		const finalTypeExports = [...new Set(allTypeExports.filter((typeExport) => !finalValueExportsSet.has(typeExport)))];
 
 		// Build output using array for better performance than string concatenation

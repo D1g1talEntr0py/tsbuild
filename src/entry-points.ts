@@ -144,7 +144,10 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 		}
 	}
 
-	if (Object.keys(entryPoints).length === 0) {
+	let hasEntries = false;
+	for (const _ in entryPoints) { hasEntries = true; break }
+
+	if (!hasEntries) {
 		const legacyPath = packageJson.module ?? packageJson.main;
 		if (legacyPath !== undefined) {
 			const sourcePath = outputToSourcePath(legacyPath, outDir, sourceDir);
@@ -152,7 +155,8 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 		}
 	}
 
-	return Object.keys(entryPoints).length > 0 ? entryPoints : undefined;
+	for (const _ in entryPoints) { return entryPoints }
+	return undefined;
 }
 
 export { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName };

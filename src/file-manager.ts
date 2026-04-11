@@ -174,8 +174,9 @@ export class FileManager implements Closable {
 
 		// Filter to only the specified entry points
 		const result: Record<string, AbsolutePath> = {};
+		const allowedEntryPoints = new Set(dtsEntryPoints);
 		for (const [ name, path ] of Object.entries(projectEntryPoints)) {
-			if (dtsEntryPoints.includes(name)) { result[name] = path }
+			if (allowedEntryPoints.has(name)) { result[name] = path }
 		}
 
 		return result;
