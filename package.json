@@ -47,6 +47,7 @@
   "scripts": {
     "build": "tsx ./src/tsbuild.ts",
     "build:watch": "tsx ./src/tsbuild.ts --watch",
+    "bench": "tsx ./scripts/benchmark.ts",
     "type-check": "tsx ./src/tsbuild.ts --noEmit",
     "lint": "eslint ./src",
     "test": "vitest run",
