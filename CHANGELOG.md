@@ -1,3 +1,30 @@
+## [1.8.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.3...v1.8.4) (2026-04-12)
+
+### Performance Improvements
+
+* **build:** delegate file writing to esbuild (84a64e212a9dc7f309bb2dcbe74ffa990c06065b)
+- Enables esbuild write option for direct-to-disk transpilation output
+- Moves relative module specifier rewriting logic to FileManager
+- Simplifies output plugin to only manage shebang executable permissions via chmod
+- Adapts IIFE plugin to process metafile outputs instead of in-memory files
+- Updates tests and mock helpers to align with file writing capabilities
+
+* **dts:** optimize declaration bundler module resolution and graph traversal (59606c0ccfe54ac74068fe6ab8f6d26d7edd97b6)
+- Optimizes module pattern matching by using Sets and RegEx arrays instead of iteration
+- Refactors bundled specifiers state to use ReadonlySet for O(1) lookups
+- Simplifies deduplication of non-mergeable imports using Sets
+- Yields the event loop before cpu-intensive declaration bundling to prevent I/O blocking
+
+
+### Miscellaneous Chores
+
+* **perf:** add performance baseline documentation and benchmark script (3e897aaa7a35022b8d9ec1d4222448973eb57a2b)
+- Adds documentation detailing performance baselines and architectures
+- Introduces performance measurements log
+- Adds quick reference for performance monitoring
+- Introduces new benchmark script for running automated metrics collection
+- Registers bench script in package.json
+
 ## [1.8.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.2...v1.8.3) (2026-04-11)
 
 ### Performance Improvements
