@@ -1,62 +1,52 @@
+import { chmod, open } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { Files } from 'src/files';
 import { FileExtension } from 'src/constants';
-import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
-
-type PluginOptions = BuildOptions & { write: false };
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-const localFileIdentifier = /\.[a-z]+$/i;
-const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
-const FileMode = { READ_WRITE: 0o666, READ_WRITE_EXECUTE: 0o755 } as const;
+import type { BuildResult, Plugin } from 'esbuild';
 
 /**
- * Rewrites extension-less relative specifiers in emitted JS/DTS output to include `.js`.
- * TypeScript source files with `moduleResolution: "Bundler"` use extension-less imports,
- * but emitted ESM output requires explicit extensions for Node resolution.
- * @param code The emitted file content to rewrite.
- * @returns The content with `.js` appended to bare relative specifiers.
+ * Sets executable permissions on a file if it starts with a shebang (#!).
+ * Reads only the first 2 bytes to minimize I/O.
+ * @param filePath Path to the output file
  */
-export function rewriteRelativeSpecifiers(code: string): string {
-	return code.replace(relativeSpecifierPattern, (_, before: string, path: string, after: string) =>
-		localFileIdentifier.test(path) ? before + path + after : `${before}${path}.js${after}`);
-}
+async function setShebangPermissions(filePath: string): Promise<void> {
+	const handle = await open(filePath, 'r');
 
+	try {
+		const buf = Buffer.alloc(2);
 
-/**
- * Maps esbuild output files to disk, preserving shebangs for JavaScript files.
- * @param outputFile The output file from esbuild
- * @returns A promise that resolves when the file is written
- */
-async function fileMapper({ path, contents }: OutputFile): Promise<void> {
-	if (extname(path) !== FileExtension.JS) { return Files.write(path, contents, { mode: FileMode.READ_WRITE }) }
+		await handle.read(buf, 0, 2, 0);
 
-	let rewritten = false;
-	const result = textDecoder.decode(contents).replace(relativeSpecifierPattern, (_, before: string, specPath: string, after: string) => {
-		if (localFileIdentifier.test(specPath)) { return before + specPath + after }
-
-		rewritten = true;
-		return `${before}${specPath}.js${after}`;
-	});
-
-	// Check for shebang in first two bytes: #! (0x23 0x21) and set execute permissions if present
-	return Files.write(path, rewritten ? textEncoder.encode(result) : contents, { mode: contents[0] === 0x23 && contents[1] === 0x21 ? FileMode.READ_WRITE_EXECUTE : FileMode.READ_WRITE });
+		if (buf[0] === 0x23 && buf[1] === 0x21) { await chmod(filePath, 0o755) }
+	} finally {
+		await handle.close();
+	}
 }
 
 /**
- * Processes the output from esbuild and writes the files to the output directory
- * @returns The esbuild plugin for handling output files
+ * Post-processes esbuild output to set executable permissions on JS entry points with shebangs.
+ * Designed for use with esbuild's `write: true` mode where files are already written to disk.
+ * @returns The esbuild plugin for handling output file permissions
  */
 export const outputPlugin = (): Plugin => {
 	return {
 		name: 'esbuild:output-plugin',
 		/**
-		 * Configures the esbuild build instance to write output files to disk
+		 * Checks JS entry points for shebangs and sets executable permissions
 		 * @param build The esbuild build instance
 		 */
 		setup(build): void {
-			build.onEnd(async ({ outputFiles }: BuildResult<PluginOptions>): Promise<void> => void await Promise.all(outputFiles.map(fileMapper)));
+			build.onEnd(async ({ metafile }: BuildResult): Promise<void> => {
+				if (!metafile) { return }
+
+				const tasks: Promise<void>[] = [];
+				for (const [ outputPath, { entryPoint } ] of Object.entries(metafile.outputs)) {
+					if (entryPoint && extname(outputPath) === FileExtension.JS) {
+						tasks.push(setShebangPermissions(outputPath));
+					}
+				}
+
+				if (tasks.length > 0) { await Promise.all(tasks) }
+			});
 		}
 	};
 };

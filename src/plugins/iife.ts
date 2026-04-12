@@ -1,10 +1,8 @@
 import { Paths } from 'src/paths.js';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { IifeOptions, WrittenFile } from '../@types/index.js';
-import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
-
-type WriteDisabledBuild = BuildOptions & { write: false };
+import type { BuildOptions, BuildResult, Plugin } from 'esbuild';
 
 /** Result of creating an IIFE plugin, providing both the esbuild plugin and collected output file info */
 export interface IifePluginInstance {
@@ -42,10 +40,10 @@ export function iifePlugin(options?: IifeOptions): IifePluginInstance {
 				const sourcemap = build.initialOptions.sourcemap;
 				const entryPointNames = extractEntryNames(build.initialOptions.entryPoints);
 
-				build.onEnd(async ({ outputFiles }: BuildResult<WriteDisabledBuild>): Promise<void> => {
-					if (!outputFiles?.length || entryPointNames.length === 0) { return }
+				build.onEnd(async ({ metafile }: BuildResult): Promise<void> => {
+					if (!metafile || entryPointNames.length === 0) { return }
 
-					const written = await buildIife(outputFiles, entryPointNames, outdir, globalName, sourcemap);
+					const written = await buildIife(metafile.outputs, entryPointNames, outdir, globalName, sourcemap);
 					files.push(...written);
 				});
 			}
@@ -122,19 +120,19 @@ function wrapAsIife(text: string, globalName?: string): string {
  * Uses a virtual loader to serve pre-built ESM content from memory, avoiding TypeScript
  * re-transpilation. With splitting disabled, all dynamic imports are inlined into each
  * entry point for self-contained browser/CDN usage.
- * @param outputFiles The primary build's output files
+ * @param outputs The metafile outputs from the primary build
  * @param entryPointNames The configured entry point output names
  * @param outdir The primary build's output directory
  * @param globalName Optional global variable name override; otherwise derived from each entry name
  * @param sourcemap The primary build's source map setting
  * @returns An array of written IIFE output files
  */
-async function buildIife(outputFiles: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap']): Promise<WrittenFile[]> {
+async function buildIife(outputs: Record<string, { entryPoint?: string }>, entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap']): Promise<WrittenFile[]> {
 	const { build: esbuild } = await import('esbuild');
 	const fileContents = new Map<string, string>();
-	for (const { path, contents } of outputFiles) {
-		if (path.endsWith(jsExtension)) {
-			fileContents.set(path, textDecoder.decode(contents));
+	for (const outputPath of Object.keys(outputs)) {
+		if (outputPath.endsWith(jsExtension)) {
+			fileContents.set(outputPath, await readFile(outputPath, 'utf8'));
 		}
 	}
 

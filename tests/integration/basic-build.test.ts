@@ -32,6 +32,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 		const memfsMod = await import('memfs');
 		vol = memfsMod.vol;
 
+		await TestHelper.mockEsbuild();
 		await TestHelper.mockFs();
 		await TestHelper.setup();
 
@@ -47,6 +48,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 		vi.doUnmock('node:fs/promises');
 		vi.doUnmock('fs');
 		vi.doUnmock('fs/promises');
+		vi.doUnmock('esbuild');
 		process.exitCode = undefined;
 	});
 

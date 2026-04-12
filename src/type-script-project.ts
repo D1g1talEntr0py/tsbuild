@@ -227,7 +227,7 @@ export class TypeScriptProject implements Closable {
 				format,
 				plugins,
 				define,
-				write: false,
+				write: true,
 				metafile: true,
 				treeShaking: true,
 				logLevel: 'warning',

@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { defaultDirOptions } from '../src/constants';
 import { FileManager } from '../src/file-manager';
 import { IncrementalBuildCache } from '../src/incremental-build-cache';
-import { mkdir, writeFile as fsWriteFile } from 'node:fs/promises';
+import { mkdir, readFile as fsReadFile, writeFile as fsWriteFile } from 'node:fs/promises';
 import { TestHelper } from './scripts/test-helper';
 import type { AbsolutePath, CachedDeclaration } from '../src/@types';
 
@@ -249,6 +249,20 @@ describe('FileManager', () => {
 			const manager = new FileManager();
 			const result = await manager.writeFiles(tempDir);
 			expect(result).toEqual([]);
+		});
+
+		it('rewrites extension-less relative specifiers when writing declarations', async () => {
+			const manager = new FileManager();
+			await manager.initialize();
+			manager.fileWriter('types.d.ts', 'export { Foo } from "./foo";\nexport { Bar } from "./bar.js";\nexport { baz } from "pkg";');
+			manager.finalize();
+
+			await manager.writeFiles(tempDir);
+
+			const written = await fsReadFile('types.d.ts', 'utf8');
+			expect(written).toContain('from "./foo.js"');
+			expect(written).toContain('from "./bar.js"');
+			expect(written).toContain('from "pkg"');
 		});
 	});
 

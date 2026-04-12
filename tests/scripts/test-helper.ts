@@ -432,6 +432,14 @@ export class TestHelper {
 							if (!shouldFallback(path.toString())) return (memfs.promises.access as Function)(path, ...args);
 							return (realFs.access as Function)(path, ...args);
 						},
+						open: async (path: any, ...args: any[]) => {
+							if (!shouldFallback(path.toString())) return (memfs.promises.open as Function)(path, ...args);
+							return (realFs.open as Function)(path, ...args);
+						},
+						chmod: async (path: any, ...args: any[]) => {
+							if (!shouldFallback(path.toString())) return (memfs.promises.chmod as Function)(path, ...args);
+							return (realFs.chmod as Function)(path, ...args);
+						},
 					};
 				}
 
@@ -514,6 +522,14 @@ export class TestHelper {
 							if (!shouldFallback(path.toString())) return (memfs.promises.access as Function)(path, ...args);
 							return (realFs.promises.access as Function)(path, ...args);
 						},
+						open: async (path: any, ...args: any[]) => {
+							if (!shouldFallback(path.toString())) return (memfs.promises.open as Function)(path, ...args);
+							return (realFs.promises.open as Function)(path, ...args);
+						},
+						chmod: async (path: any, ...args: any[]) => {
+							if (!shouldFallback(path.toString())) return (memfs.promises.chmod as Function)(path, ...args);
+							return (realFs.promises.chmod as Function)(path, ...args);
+						},
 					}
 				};
 			});
@@ -523,5 +539,46 @@ export class TestHelper {
 		await setupFsMock('fs');
 		await setupFsMock('node:fs/promises');
 		await setupFsMock('fs/promises');
+	}
+
+	/**
+	 * Mocks esbuild to redirect writes to memfs.
+	 * For builds with `write: true`, injects a plugin that captures outputFiles
+	 * into memfs before other onEnd callbacks run, then forces `write: false`.
+	 * Builds already using `write: false` pass through unchanged.
+	 */
+	static async mockEsbuild() {
+		vi.doMock('esbuild', async (importOriginal) => {
+			const real = await importOriginal<typeof import('esbuild')>();
+			const { fs: memfs } = await import('memfs');
+			const { dirname: pathDirname } = await import('node:path');
+
+			const writeToMemfsPlugin: Plugin = {
+				name: 'test:write-to-memfs',
+				setup(build) {
+					build.onEnd(({ outputFiles }) => {
+						if (!outputFiles) { return }
+						for (const file of outputFiles) {
+							memfs.mkdirSync(pathDirname(file.path), { recursive: true });
+							memfs.writeFileSync(file.path, Buffer.from(file.contents));
+						}
+					});
+				}
+			};
+
+			return {
+				...real,
+				build: async (options: import('esbuild').BuildOptions) => {
+					if (options.write === false) {
+						return real.build(options);
+					}
+					return real.build({
+						...options,
+						write: false,
+						plugins: [writeToMemfsPlugin, ...(options.plugins ?? [])]
+					});
+				}
+			};
+		});
 	}
 }

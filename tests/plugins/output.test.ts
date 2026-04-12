@@ -11,12 +11,19 @@ vi.mock('node:fs/promises', async () => {
 });
 
 import { vol, fs as memfs } from 'memfs';
-import { outputPlugin, rewriteRelativeSpecifiers } from 'src/plugins/output';
-import type { BuildResult, PluginBuild } from 'esbuild';
+import { outputPlugin } from 'src/plugins/output';
+import type { BuildResult, Metafile, PluginBuild } from 'esbuild';
 import { join } from 'node:path';
 
 const outputDir = '/test-output';
-const encoder = new TextEncoder();
+
+function metafileWith(outputs: Record<string, Partial<Metafile['outputs'][string]>>): { metafile: Metafile } {
+	const full: Metafile['outputs'] = {};
+	for (const [path, meta] of Object.entries(outputs)) {
+		full[path] = { bytes: 0, inputs: {}, imports: [], exports: [], ...meta };
+	}
+	return { metafile: { inputs: {}, outputs: full } };
+}
 
 describe('outputPlugin', () => {
 	let onEndCallback: (result: BuildResult) => Promise<void>;
@@ -43,104 +50,78 @@ describe('outputPlugin', () => {
 		expect(build.onEnd).toHaveBeenCalledWith(expect.any(Function));
 	});
 
-	describe('file writing', () => {
-		it('sets executable permissions for JS files with shebang', async () => {
-			const contents = encoder.encode('#!/usr/bin/env node\nconsole.log("hi");');
+	describe('shebang permissions', () => {
+		it('sets executable permissions for JS entry points with shebang', async () => {
 			const filePath = join(outputDir, 'cli.js');
-			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
+			await memfs.promises.writeFile(filePath, '#!/usr/bin/env node\nconsole.log("hi");');
+			await onEndCallback(metafileWith({ [filePath]: { entryPoint: 'src/cli.ts' } }) as BuildResult);
 
 			const stats = await memfs.promises.stat(filePath);
 			expect(Number(stats.mode) & 0o777).toBe(0o755);
 		});
 
-		it('sets regular permissions for JS files without shebang', async () => {
-			const contents = encoder.encode('console.log("hello");');
+		it('does not change permissions for JS entry points without shebang', async () => {
 			const filePath = join(outputDir, 'lib.js');
-			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
+			await memfs.promises.writeFile(filePath, 'console.log("hello");');
+			const beforeMode = Number((await memfs.promises.stat(filePath)).mode) & 0o777;
+			await onEndCallback(metafileWith({ [filePath]: { entryPoint: 'src/lib.ts' } }) as BuildResult);
 
 			const stats = await memfs.promises.stat(filePath);
-			expect(Number(stats.mode) & 0o777).toBe(0o666);
+			expect(Number(stats.mode) & 0o777).toBe(beforeMode);
 		});
 
-		it('writes non-JS files with regular permissions', async () => {
-			const contents = encoder.encode('body { color: red }');
-			const filePath = join(outputDir, 'styles.css');
-			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
+		it('skips chunk files (no entryPoint)', async () => {
+			const filePath = join(outputDir, 'ABC123.js');
+			await memfs.promises.writeFile(filePath, '#!/usr/bin/env node\nchunk code');
+			const beforeMode = Number((await memfs.promises.stat(filePath)).mode) & 0o777;
+			await onEndCallback(metafileWith({ [filePath]: {} }) as BuildResult);
 
-			const content = await memfs.promises.readFile(filePath);
-			expect(content).toEqual(Buffer.from(contents));
-			const stats = await memfs.promises.stat(filePath);
-			expect(Number(stats.mode) & 0o777).toBe(0o666);
+			expect(Number((await memfs.promises.stat(filePath)).mode) & 0o777).toBe(beforeMode);
+		});
+
+		it('skips non-JS files', async () => {
+			const filePath = join(outputDir, 'styles.css');
+			await memfs.promises.writeFile(filePath, '#!/usr/bin/env node');
+			const beforeMode = Number((await memfs.promises.stat(filePath)).mode) & 0o777;
+			await onEndCallback(metafileWith({ [filePath]: { entryPoint: 'src/styles.css' } }) as BuildResult);
+
+			expect(Number((await memfs.promises.stat(filePath)).mode) & 0o777).toBe(beforeMode);
 		});
 
 		it('handles multiple output files', async () => {
-			const files = [
-				{ path: join(outputDir, 'cli.js'), contents: encoder.encode('#!/usr/bin/env node\n') },
-				{ path: join(outputDir, 'lib.js'), contents: encoder.encode('const a = 1;') },
-				{ path: join(outputDir, 'app.css'), contents: encoder.encode('p { color: blue }') },
-			];
-			await onEndCallback({ outputFiles: files } as BuildResult);
+			const cli = join(outputDir, 'cli.js');
+			const lib = join(outputDir, 'lib.js');
+			const chunk = join(outputDir, 'ABC123.js');
+			const css = join(outputDir, 'app.css');
 
-			expect(Number((await memfs.promises.stat(files[0].path)).mode) & 0o777).toBe(0o755);
-			expect(Number((await memfs.promises.stat(files[1].path)).mode) & 0o777).toBe(0o666);
-			expect(Number((await memfs.promises.stat(files[2].path)).mode) & 0o777).toBe(0o666);
-		});
-	});
+			await memfs.promises.writeFile(cli, '#!/usr/bin/env node\n');
+			await memfs.promises.writeFile(lib, 'const a = 1;');
+			await memfs.promises.writeFile(chunk, 'chunk code');
+			await memfs.promises.writeFile(css, 'p { color: blue }');
 
-	describe('relative specifier rewriting in JS output', () => {
-		it('appends .js to extension-less relative imports in JS files', async () => {
-			const code = 'import { foo } from \'./utils\';\n';
-			const contents = encoder.encode(code);
-			const filePath = join(outputDir, 'index.js');
-			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
+			const libMode = Number((await memfs.promises.stat(lib)).mode) & 0o777;
+			const chunkMode = Number((await memfs.promises.stat(chunk)).mode) & 0o777;
+			const cssMode = Number((await memfs.promises.stat(css)).mode) & 0o777;
 
-			const written = await memfs.promises.readFile(filePath, 'utf8');
-			expect(written).toContain("from './utils.js'");
-		});
+			await onEndCallback(metafileWith({
+				[cli]: { entryPoint: 'src/cli.ts' },
+				[lib]: { entryPoint: 'src/lib.ts' },
+				[chunk]: {},
+				[css]: {},
+			}) as BuildResult);
 
-		it('does not rewrite relative imports that already have extensions', async () => {
-			const code = 'import { foo } from \'./utils.js\';\n';
-			const contents = encoder.encode(code);
-			const filePath = join(outputDir, 'index.js');
-			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
-
-			const written = await memfs.promises.readFile(filePath, 'utf8');
-			expect(written).toContain("from './utils.js'");
+			expect(Number((await memfs.promises.stat(cli)).mode) & 0o777).toBe(0o755);
+			expect(Number((await memfs.promises.stat(lib)).mode) & 0o777).toBe(libMode);
+			expect(Number((await memfs.promises.stat(chunk)).mode) & 0o777).toBe(chunkMode);
+			expect(Number((await memfs.promises.stat(css)).mode) & 0o777).toBe(cssMode);
 		});
 
-		it('does not rewrite bare specifiers', async () => {
-			const code = 'import { something } from \'lodash\';\n';
-			const contents = encoder.encode(code);
-			const filePath = join(outputDir, 'index.js');
-			await onEndCallback({ outputFiles: [{ path: filePath, contents }] } as BuildResult);
-
-			const written = await memfs.promises.readFile(filePath, 'utf8');
-			expect(written).toContain("from 'lodash'");
+		it('handles empty metafile', async () => {
+			await onEndCallback(metafileWith({}) as BuildResult);
 		});
-	});
-});
 
-describe('rewriteRelativeSpecifiers', () => {
-	const matrix: [string, string, string][] = [
-		['extension-less relative', "from './utils'", "from './utils.js'"],
-		['extension-less parent', "from '../shared'", "from '../shared.js'"],
-		['deep extension-less', "from './deep/nested/mod'", "from './deep/nested/mod.js'"],
-		['already has .js', "from './utils.js'", "from './utils.js'"],
-		['already has .ts', "from './utils.ts'", "from './utils.ts'"],
-		['already has .mjs', "from './utils.mjs'", "from './utils.mjs'"],
-		['bare specifier', "from 'lodash'", "from 'lodash'"],
-		['scoped bare specifier', "from '@scope/pkg'", "from '@scope/pkg'"],
-		['double quotes', 'from "./utils"', 'from "./utils.js"'],
-	];
-
-	it.each(matrix)('%s: %s → %s', (_desc, input, expected) => {
-		expect(rewriteRelativeSpecifiers(input)).toBe(expected);
-	});
-
-	it('rewrites multiple occurrences in same string', () => {
-		const code = "import { a } from './a';\nimport { b } from './b';";
-		const result = rewriteRelativeSpecifiers(code);
-		expect(result).toContain("from './a.js'");
-		expect(result).toContain("from './b.js'");
+		it('handles missing metafile', async () => {
+			await onEndCallback({} as BuildResult);
+		});
 	});
 });

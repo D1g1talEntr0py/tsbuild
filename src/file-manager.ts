@@ -1,10 +1,22 @@
 import { Files } from 'src/files';
 import { Paths } from 'src/paths';
 import { defaultEntryPoint } from 'src/constants';
-import { rewriteRelativeSpecifiers } from './plugins/output';
 import { DeclarationProcessor } from './dts/declaration-processor';
 import { createSourceFile, ScriptTarget } from 'typescript';
 import type { AbsolutePath, BuildCache, CachedDeclaration, Closable, WrittenFile } from 'src/@types';
+
+const localFileIdentifier = /\.[a-z]+$/i;
+const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
+
+/**
+ * Rewrites extension-less relative specifiers in declaration output to include `.js`.
+ * @param code The declaration file content to rewrite.
+ * @returns The content with `.js` appended to bare relative specifiers.
+ */
+function rewriteRelativeSpecifiers(code: string): string {
+	return code.replace(relativeSpecifierPattern, (_, before: string, path: string, after: string) =>
+		localFileIdentifier.test(path) ? before + path + after : `${before}${path}.js${after}`);
+}
 
 /**
  * Manages in-memory storage and caching of TypeScript emit output files.
@@ -108,19 +120,18 @@ export class FileManager implements Closable {
 		this.processEmittedFiles();
 
 		// Write .tsbuildinfo asynchronously (was sync sys.writeFile during emit)
-		const buildInfoWrite = this.pendingBuildInfo ? Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text) : undefined;
+		const tasks: Promise<void>[] = [];
+		if (this.pendingBuildInfo) { tasks.push(Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text)) }
+
 		this.pendingBuildInfo = undefined;
+
+		if (this.cache && this.hasEmittedFiles) { tasks.push(this.cache.save(this.declarationFiles)) }
 
 		// Fire-and-forget cache save — the cache is only needed on the *next* build,
 		// so we don't block the current build's parallel phases (transpile + dts bundling).
 		// The promise is awaited in initialize() (watch mode) and close() (process exit).
 		// Suppress unhandled rejection warnings — errors are handled when awaited.
-		if (this.cache && this.hasEmittedFiles) {
-			this.pendingSave = Promise.all([ buildInfoWrite, this.cache.save(this.declarationFiles) ]).then(() => {});
-		} else if (buildInfoWrite) {
-			this.pendingSave = buildInfoWrite;
-		}
-
+		this.pendingSave = Promise.all(tasks).then(() => {}, () => {});
 		this.pendingSave?.catch(() => {});
 
 		// For non-incremental builds (no cache), always assume files were emitted
@@ -149,13 +160,13 @@ export class FileManager implements Closable {
 	async writeFiles(projectDirectory: AbsolutePath): Promise<WrittenFile[]> {
 		if (this.declarationFiles.size === 0) { return [] }
 
-		const writeTasks: Promise<WrittenFile | undefined>[] = [];
+		const writeTasks: Promise<WrittenFile>[] = [];
 		for (const [ filePath, { code } ] of this.declarationFiles) {
 			// Skip writing empty declaration files
 			if (code.length > 0) { writeTasks.push(this.writeFile(projectDirectory, filePath, code)) }
 		}
 
-		return (await Promise.all(writeTasks)).filter((result): result is WrittenFile => result !== undefined);
+		return Promise.all(writeTasks);
 	}
 
 	/**
@@ -203,7 +214,10 @@ export class FileManager implements Closable {
 	 * e.g., before reading the cache file from a different instance.
 	 */
 	async flush(): Promise<void> {
-		if (this.pendingSave) { await this.pendingSave; this.pendingSave = undefined }
+		if (this.pendingSave) {
+			await this.pendingSave;
+			this.pendingSave = undefined;
+		}
 	}
 
 	/**
@@ -216,6 +230,7 @@ export class FileManager implements Closable {
 	private async writeFile(projectDirectory: AbsolutePath, filePath: AbsolutePath, content: string): Promise<WrittenFile> {
 		const rewritten = rewriteRelativeSpecifiers(content);
 		await Files.write(filePath, rewritten);
+
 		return { path: Paths.relative(projectDirectory, filePath), size: rewritten.length };
 	}
 

@@ -78,9 +78,9 @@ vi.mock('../src/dts/declaration-bundler', () => ({
 
 const esbuildMocks = vi.hoisted(() => ({
 	buildMock: vi.fn(async (options: { outdir: string; plugins?: Array<{ setup: (build: unknown) => void }>; entryPoints: Record<string, string>; define?: Record<string, string> }) => {
-		const onEndCallbacks: Array<(result: { outputFiles: Array<{ path: string; contents: Uint8Array }> }) => unknown> = [];
+		const onEndCallbacks: Array<(result: unknown) => unknown> = [];
 		const build = {
-			onEnd: (callback: (result: { outputFiles: Array<{ path: string; contents: Uint8Array }> }) => unknown): void => { onEndCallbacks.push(callback); },
+			onEnd: (callback: (result: unknown) => unknown): void => { onEndCallbacks.push(callback); },
 			onResolve: (): void => {},
 			onLoad: (): void => {},
 			initialOptions: options
@@ -88,16 +88,23 @@ const esbuildMocks = vi.hoisted(() => ({
 
 		for (const plugin of options.plugins ?? []) { plugin.setup(build); }
 
-		const encoder = new TextEncoder();
-		const outputFiles = Object.keys(options.entryPoints).map((name) => {
+		// Simulate write: true — write files to memfs and build metafile
+		const { mkdirSync, writeFileSync } = await import('node:fs');
+		mkdirSync(options.outdir, { recursive: true });
+
+		const outputs: Record<string, { bytes: number; entryPoint: string; inputs: Record<string, never>; imports: never[]; exports: string[] }> = {};
+		for (const [name, entryPoint] of Object.entries(options.entryPoints)) {
 			const defineValue = options.define?.['import.meta.env.API_URL'] ?? 'undefined';
-			const contents = encoder.encode(`export const __API_URL = ${defineValue};\nexport {};\n`);
-			return { path: `${options.outdir}/${name}.js`, contents };
-		});
+			const content = `export const __API_URL = ${defineValue};\nexport {};\n`;
+			const outPath = `${options.outdir}/${name}.js`;
+			writeFileSync(outPath, content);
+			outputs[outPath] = { bytes: Buffer.byteLength(content), entryPoint, inputs: {}, imports: [], exports: [] };
+		}
 
-		for (const callback of onEndCallbacks) { await callback({ outputFiles }); }
+		const metafile = { inputs: {}, outputs };
+		for (const callback of onEndCallbacks) { await callback({ metafile }); }
 
-		return { warnings: [], errors: [], metafile: { outputs: Object.fromEntries(outputFiles.map((file) => [file.path, { bytes: file.contents.length }])) }, outputFiles };
+		return { warnings: [], errors: [], metafile };
 	}),
 	formatMessagesMock: vi.fn(async () => [])
 }));
