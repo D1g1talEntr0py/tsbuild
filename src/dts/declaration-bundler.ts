@@ -33,6 +33,7 @@ import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, D
 import { Files } from 'src/files';
 
 const nodeModules = '/node_modules/';
+const emptySet: ReadonlySet<string> = new Set();
 const importPattern = /^import\s*(?:type\s*)?\{\s*([^}]+)\s*\}\s*from\s*['"]([^'"]+)['"]\s*;?\s*$/;
 const typePrefixPattern = /^type:/;
 
@@ -50,7 +51,7 @@ const typePrefixPattern = /^type:/;
 function mergeImports(imports: string[]) {
 	// Map from module specifier to Set of imported names
 	const moduleImports = new Map<string, { names: Set<string>; isType: boolean }>();
-	const nonMergeableImports: string[] = [];
+	const nonMergeableImports = new Set<string>();
 
 	for (const importStatement of imports) {
 		const match = importPattern.exec(importStatement);
@@ -59,18 +60,19 @@ function mergeImports(imports: string[]) {
 			const isType = importStatement.includes('import type');
 			const key = `${isType ? 'type:' : ''}${moduleSpecifier}`;
 
-			if (!moduleImports.has(key)) {
-				moduleImports.set(key, { names: new Set(), isType });
+			let entry = moduleImports.get(key);
+			if (entry === undefined) {
+				entry = { names: new Set(), isType };
+				moduleImports.set(key, entry);
 			}
 
-			const entry = moduleImports.get(key)!;
 			// Split names and add each one, trimming whitespace
 			for (const name of namesString.split(',')) {
 				entry.names.add(name.trim());
 			}
 		} else {
 			// Non-standard import, keep as-is but dedupe
-			nonMergeableImports.push(importStatement);
+			nonMergeableImports.add(importStatement);
 		}
 	}
 
@@ -80,8 +82,8 @@ function mergeImports(imports: string[]) {
 		result.push(`${isType ? 'import type' : 'import'} { ${[...names].sort().join(', ')} } from "${key.replace(typePrefixPattern, '')}";`);
 	}
 
-	// Add non-mergeable imports, deduped
-	result.push(...[ ...new Set(nonMergeableImports) ]);
+	// Add non-mergeable imports (already deduped via Set)
+	for (const imp of nonMergeableImports) { result.push(imp) }
 
 	return result;
 }
@@ -114,6 +116,10 @@ class DeclarationBundler {
 	private readonly moduleResolutionCache = new Map<string, AbsolutePath>();
 	/** Pre-computed set of directory prefixes from declaration file paths for O(1) directoryExists lookups */
 	private readonly declarationDirs: Set<string> = new Set();
+	/** Pre-built matcher for external patterns — O(1) string lookups + cached regex tests */
+	private readonly matchExternal: (id: string) => boolean;
+	/** Pre-built matcher for noExternal patterns — O(1) string lookups + cached regex tests */
+	private readonly matchNoExternal: (id: string) => boolean;
 	// Create a proper module resolution host that supports both in-memory files and disk files
 	private readonly moduleResolutionHost: ModuleResolutionHost = {
 		fileExists: (fileName: AbsolutePath) => {
@@ -173,6 +179,8 @@ class DeclarationBundler {
 		}
 
 		this.options = dtsBundleOptions;
+		this.matchExternal = DeclarationBundler.buildMatcher(dtsBundleOptions.external);
+		this.matchNoExternal = DeclarationBundler.buildMatcher(dtsBundleOptions.noExternal);
 	}
 
 	/**
@@ -252,24 +260,25 @@ class DeclarationBundler {
 	}
 
 	/**
-	 * Check if a module specifier matches a pattern list
-	 * @param moduleSpecifier - The module specifier to check
-	 * @param patterns - Array of patterns to match against
-	 * @returns True if the module matches any pattern
+	 * Builds an O(1) matcher from a mixed Pattern array by splitting into a Set<string> for
+	 * exact/sub-path checks and a RegExp[] for regex tests. Called once per bundler instance.
+	 * @param patterns - The array of string and RegExp patterns to match against module specifiers
+	 * @returns A function that takes a module specifier and returns true if it matches any of the patterns
 	 */
-	private matchesPattern(moduleSpecifier: string, patterns: readonly Pattern[]) {
-		return patterns.some((pattern) => {
-			return typeof pattern === 'string' ? moduleSpecifier === pattern || moduleSpecifier.startsWith(`${pattern}/`) : pattern.test(moduleSpecifier);
-		});
-	}
-
-	/**
-	 * Check if a module specifier matches explicit external patterns
-	 * @param moduleSpecifier - The module specifier to check
-	 * @returns True if the module should be treated as external
-	 */
-	private isExternal(moduleSpecifier: string): boolean {
-		return this.matchesPattern(moduleSpecifier, this.options.external);
+	private static buildMatcher(patterns: readonly Pattern[]): (id: string) => boolean {
+		const exact = new Set<string>();
+		const prefixes: string[] = [];
+		const regexps: RegExp[] = [];
+		for (const p of patterns) {
+			if (typeof p === 'string') { exact.add(p); prefixes.push(p + '/') } else { regexps.push(p) }
+		}
+		if (exact.size === 0 && regexps.length === 0) { return () => false }
+		return (id: string): boolean => {
+			if (exact.has(id)) { return true }
+			for (let i = 0; i < prefixes.length; i++) { if (id.startsWith(prefixes[i])) { return true } }
+			for (let i = 0; i < regexps.length; i++) { if (regexps[i].test(id)) { return true } }
+			return false;
+		};
 	}
 
 	/**
@@ -312,7 +321,7 @@ class DeclarationBundler {
 	private buildModuleGraph(entryPoint: AbsolutePath): ModuleDependencyGraph {
 		const modules = new Map<string, ModuleInfo>();
 		const visited: Set<string> = new Set();
-		const bundledSpecifiers = new Map<string, string[]>(); // Maps module path to bundled import specifiers
+		const bundledSpecifiers = new Map<string, Set<string>>(); // Maps module path to bundled import specifiers
 
 		/**
 		 * Recursively visit and process a module and its dependencies
@@ -342,22 +351,22 @@ class DeclarationBundler {
 
 			// Create module info - note: code is already pre-processed, typeReferences/fileReferences come from cache
 			const module: ModuleInfo = { path, code, imports: new Set(), typeReferences: new Set(typeReferences), fileReferences: new Set(fileReferences), sourceFile, identifiers };
-			const bundledSpecs: string[] = [];
+			const bundledSpecs = new Set<string>();
 
 			// Extract and resolve imports using AST
 			for (const specifier of this.extractImports(sourceFile)) {
 				// Skip explicit external modules
-				if (this.isExternal(specifier)) { continue }
+				if (this.matchExternal(specifier)) { continue }
 
 				const resolvedPath = this.resolveModule(specifier, path);
 
 				// Skip node_modules packages unless they're in noExternal list
-				if (resolvedPath?.includes(nodeModules) && !this.matchesPattern(specifier, this.options.noExternal)) { continue }
+				if (resolvedPath?.includes(nodeModules) && !this.matchNoExternal(specifier)) { continue }
 
 				if (resolvedPath && (this.declarationFiles.has(resolvedPath) || this.externalDeclarationFiles.has(resolvedPath))) {
 					module.imports.add(resolvedPath);
 					// Track the original specifier
-					bundledSpecs.push(specifier);
+					bundledSpecs.add(specifier);
 					// Recursively process dependencies
 					visit(resolvedPath);
 				}
@@ -483,12 +492,12 @@ class DeclarationBundler {
 	 * @param code - Declaration file content
 	 * @param sourceFile - Parsed source file AST (required to avoid re-parsing)
 	 * @param identifiers - Pre-computed type and value identifiers (to avoid re-computation)
-	 * @param bundledImportPaths - Array of resolved file paths that were bundled (to exclude from external imports)
+	 * @param bundledImportPaths - Set of resolved file paths that were bundled (to exclude from external imports)
 	 * @param renameMap - Map of renamed identifiers (name:path -> newName)
 	 * @param modulePath - Path of current module for looking up renames
 	 * @returns Object with processed code, collected external imports, and exported names (separated by type/value)
 	 */
-	private stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: readonly string[], renameMap: Map<string, string>, modulePath: string): DeclarationCode {
+	private stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string): DeclarationCode {
 		const externalImports: string[] = [];
 		const typeExports: string[] = [];
 		const valueExports: string[] = [];
@@ -520,7 +529,7 @@ class DeclarationBundler {
 				// 2. It's NOT in the bundled specifiers (meaning it didn't get bundled in module graph)
 				// Bundled specifiers are those that were successfully resolved and added to the module graph
 				// Keep as external import if it's explicitly external OR wasn't bundled
-				if (this.isExternal(moduleSpecifier) || !bundledImportPaths.includes(moduleSpecifier)) {
+				if (this.matchExternal(moduleSpecifier) || !bundledImportPaths.has(moduleSpecifier)) {
 					// Keep external imports - extract the text
 					externalImports.push(code.substring(statement.pos, statement.end).trim());
 				} else if (statement.importClause?.namedBindings && isNamespaceImport(statement.importClause.namedBindings)) {
@@ -620,7 +629,7 @@ class DeclarationBundler {
 	 * @param bundledSpecifiers - Map of module paths to their bundled import specifiers
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
-	private combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, readonly string[]>): BundledDeclaration {
+	private combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): BundledDeclaration {
 		const allTypeReferences: string[] = [];
 		const allFileReferences: string[] = [];
 		const allExternalImports: string[] = [];
@@ -651,7 +660,9 @@ class DeclarationBundler {
 				// First module keeps original name, subsequent modules get $1, $2, etc.
 				// Each candidate is verified against all known declarations to avoid collisions
 				let suffix = 1;
-				for (const modulePath of Array.from(sourcesSet).slice(1)) {
+				const modulePaths = sourcesSet.values();
+				modulePaths.next();
+				for (const modulePath of modulePaths) {
 					let candidate = `${name}$${suffix}`;
 					while (declarationSources.has(candidate)) { candidate = `${name}$${++suffix}` }
 					renameMap.set(`${name}:${modulePath}`, candidate);
@@ -670,7 +681,7 @@ class DeclarationBundler {
 			// Use cached identifiers and sourceFile (both always present after buildModuleGraph)
 
 			// Get the bundled specifiers for this module from the map built during module graph construction
-			const bundledForThisModule = bundledSpecifiers.get(path) || [];
+			const bundledForThisModule = bundledSpecifiers.get(path) ?? emptySet;
 
 			// Calculate used declarations for this module
 			// We pass the global set of used declarations to stripImportsExports
@@ -812,6 +823,10 @@ class DeclarationBundler {
  * Bundle TypeScript declaration files into a single output
  * @param options Bundling options
  * @returns The bundled declaration file content
+ * @remarks
+ * Yields the event loop once before CPU-intensive bundling starts so pending I/O
+ * (for example, esbuild IPC responses from the parallel transpile phase) can be
+ * processed promptly instead of being delayed by declaration bundling work.
  */
 export async function bundleDeclarations(options: DtsBundleOptions): Promise<WrittenFile[]> {
 	// Ensure output directory exists
@@ -821,12 +836,16 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 
 	const dtsBundler = new DeclarationBundler(options);
 
+	// Yield the event loop before CPU-intensive bundling to allow pending I/O
+	// (e.g., esbuild IPC responses running in parallel) to be processed
+	await new Promise<void>((resolve) => void setImmediate(resolve));
+
 	// Bundle each entry point in parallel for better performance
 	const bundleTasks: Promise<WrittenFile>[] = [];
 	for (const [ entryName, entryPoint ] of Object.entries(options.entryPoints)) {
 		const content = dtsBundler.bundle(entryPoint);
 		if (content.length > 0) {
-			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}.d.ts`);
+			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}${FileExtension.DTS}`);
 			bundleTasks.push(writeFile(outPath, content, Encoding.utf8).then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length })));
 		}
 	}

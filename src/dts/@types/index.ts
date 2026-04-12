@@ -94,7 +94,7 @@ type ModuleDependencyGraph = {
 	/** Map of file paths to module information */
 	readonly modules: ReadonlyMap<string, ModuleInfo>;
 	/** Map of module paths to their bundled import specifiers */
-	readonly bundledSpecifiers: ReadonlyMap<string, readonly string[]>;
+	readonly bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 /** Bundled declaration with exports and all declarations */
