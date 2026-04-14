@@ -1,3 +1,9 @@
+## [1.8.6](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.5...v1.8.6) (2026-04-14)
+
+### Bug Fixes
+
+* ensure the source map is referenced in the iife output when source maps are enabled (f6bc57d11cfd7f8289f85c37aea5b6ff983fc302)
+
 ## [1.8.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.4...v1.8.5) (2026-04-14)
 
 ### Bug Fixes
