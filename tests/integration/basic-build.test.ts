@@ -233,6 +233,23 @@ describe('TypeScriptProject - Basic Builds', () => {
 		expect(output).toContain('//# sourceMappingURL=index.js.map');
 	});
 
+	it('generates iife output when enabled', async () => {
+		const projectPath = await TestHelper.createTestProject({
+			tsconfig: {
+				compilerOptions: { incremental: false },
+				tsbuild: { clean: false, iife: true, entryPoints: { index: './src/index.ts' } }
+			},
+			files: { 'src/index.ts': 'export const test: number = 123;' }
+		});
+
+		const project = createProject(projectPath);
+		await project.build();
+
+		expect(vol.existsSync(join(projectPath, 'dist/iife/index.js'))).toBe(true);
+		const output = vol.readFileSync(join(projectPath, 'dist/iife/index.js'), 'utf8') as string;
+		expect(output).toContain('Object.assign(globalThis, { test })');
+	});
+
 	it('handles CLI entry points with shebang', async () => {
 		const projectPath = await TestHelper.createTestProject({
 			tsconfig: {

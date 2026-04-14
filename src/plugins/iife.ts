@@ -1,7 +1,7 @@
 import { Paths } from 'src/paths.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { IifeOptions, WrittenFile } from '../@types/index.js';
+import type { AbsolutePath, IifeOptions, WrittenFile } from '../@types/index.js';
 import type { BuildOptions, BuildResult, Plugin } from 'esbuild';
 
 /** Result of creating an IIFE plugin, providing both the esbuild plugin and collected output file info */
@@ -80,6 +80,7 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']): string[] {
 // (`export {e as Name}`) output. [^}]* matches newlines too.
 const exportRegex = /export\s*\{([^}]*)\};?/g;
 const exportAliasRegex = /^(\w+)\s+as\s+(\w+)$/;
+const namespace = 'iife';
 
 /**
  * Wraps bundled ESM text in an IIFE and assigns exported names to globalThis.
@@ -132,29 +133,28 @@ async function buildIife(outputs: Record<string, { entryPoint?: string }>, entry
 	const fileContents = new Map<string, string>();
 	for (const outputPath of Object.keys(outputs)) {
 		if (outputPath.endsWith(jsExtension)) {
-			fileContents.set(outputPath, await readFile(outputPath, 'utf8'));
+			fileContents.set(resolve(outputPath), await readFile(outputPath, 'utf8'));
 		}
 	}
 
-	const validEntries: Array<{ name: string; absPath: string }> = [];
+	const validEntries: Array<{ name: string; path: AbsolutePath }> = [];
 	for (const name of entryPointNames) {
-		const absPath = join(outdir, name + jsExtension);
-		if (fileContents.has(absPath)) {
-			validEntries.push({ name, absPath });
+		const path = Paths.absolute(outdir, name + jsExtension);
+		if (fileContents.has(path)) {
+			validEntries.push({ name, path });
 		}
 	}
 
 	if (validEntries.length === 0) { return [] }
 
 	const hasSourceMap = sourcemap !== undefined && sourcemap !== false;
-	const iifeOutdir = join(outdir, 'iife');
-	const loaderPlugin = virtualLoaderPlugin(fileContents);
+	const plugins = [ virtualLoaderPlugin(fileContents) ];
 
-	await mkdir(iifeOutdir, { recursive: true });
+	const iifeOutdir = await mkdir(join(outdir, namespace), { recursive: true });
 
-	const results = await Promise.all(validEntries.map(({ name, absPath }) =>
-		esbuild({
-			entryPoints: { [name]: absPath },
+	const results = await Promise.all(validEntries.map(({ name, path }) => {
+		return esbuild({
+			entryPoints: { [name]: path },
 			bundle: true,
 			format: 'esm',
 			splitting: false,
@@ -162,9 +162,9 @@ async function buildIife(outputs: Record<string, { entryPoint?: string }>, entry
 			sourcemap: hasSourceMap ? 'external' : false,
 			write: false,
 			logLevel: 'warning',
-			plugins: [loaderPlugin],
-		})
-	));
+			plugins
+		});
+	}));
 
 	const written: WrittenFile[] = [];
 	const writes: Promise<void>[] = [];
@@ -199,27 +199,28 @@ function virtualLoaderPlugin(fileContents: Map<string, string>): Plugin {
 		 * Registers onResolve and onLoad hooks for virtual file loading
 		 * @param build The esbuild build instance
 		 */
-		setup(build): void {
+		setup(build) {
 			build.onResolve({ filter: /.*/ }, (args) => {
 				if (args.kind === 'entry-point') {
-					return { path: args.path, namespace: 'iife' };
+					return { path: args.path, namespace };
 				}
+
 				if (!args.path.startsWith('.') && !args.path.startsWith('/')) {
 					return { external: true };
 				}
+
 				const resolved = resolve(args.resolveDir, args.path);
 				if (fileContents.has(resolved)) {
-					return { path: resolved, namespace: 'iife' };
+					return { path: resolved, namespace };
 				}
+
 				return { external: true };
 			});
 
-			build.onLoad({ filter: /.*/, namespace: 'iife' }, (args) => {
+			build.onLoad({ filter: /.*/, namespace }, (args) => {
 				const contents = fileContents.get(args.path);
-				if (contents !== undefined) {
-					return { contents, loader: 'js', resolveDir: dirname(args.path) };
-				}
-				return null;
+
+				return contents === undefined ? null : { contents, loader: 'js', resolveDir: dirname(args.path) };
 			});
 		}
 	};
