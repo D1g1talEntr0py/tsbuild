@@ -76,44 +76,51 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']): string[] {
 	return Object.keys(entryPoints);
 }
 
-// Matches the export block: handles both formatted (`export {lName\n}`) and
-// (`export {e as Name}`) output. [^}]* matches newlines too.
-const exportRegex = /export\s*\{([^}]*)\};?/g;
-const exportAliasRegex = /^(\w+)\s+as\s+(\w+)$/;
 const namespace = 'iife';
 
 /**
  * Wraps bundled ESM text in an IIFE and assigns exported names to globalThis.
  * Strips the trailing `export { ... }` block and replaces it with an Object.assign call.
- * Handles both formatted (`export { Name }`) and minified (`export{e as Name}`) output.
+ * Handles both formatted (`export { Name }`) and (`export{ Foo as Bar }`) syntax.
  * @param text The ESM module text to wrap
  * @param globalName Optional namespace — if set, assigns `globalThis.Name = { exports }`
  * @returns The wrapped IIFE text
  */
 function wrapAsIife(text: string, globalName?: string): string {
-	const exportIndex = text.lastIndexOf('export');
-	if (exportIndex === -1) { return text }
+	const exportStart = text.lastIndexOf('export');
+	if (exportStart === -1) { return text }
 
-	exportRegex.lastIndex = exportIndex;
-	const last = exportRegex.exec(text);
+	const openBrace = text.indexOf('{', exportStart + 6);
+	const closeBrace = text.indexOf('}', openBrace + 1);
 
-	if (!last) { return text }
+	if (openBrace === -1 || closeBrace === -1 || text.slice(exportStart + 6, openBrace).trim() !== '') { return text }
 
-	const props: string[] = [];
-	for (const raw of last[1].split(',')) {
-		const trimmed = raw.trim();
-		if (!trimmed) { continue }
-		const m = exportAliasRegex.exec(trimmed);
-		props.push(m ? `${m[2]}: ${m[1]}` : trimmed);
+	let exportEnd = closeBrace + 1;
+	while (exportEnd < text.length && /[ \t]/.test(text[exportEnd] ?? '')) { exportEnd += 1 }
+	if (text[exportEnd] === ';') { exportEnd += 1 }
+
+	const properties: string[] = [];
+	for (const rawMember of text.slice(openBrace + 1, closeBrace).split(',')) {
+		const member = rawMember.trim();
+		if (!member) { continue }
+
+		const asIndex = member.indexOf(' as ');
+		if (asIndex <= 0) {
+			properties.push(member);
+			continue;
+		}
+
+		const localName = member.slice(0, asIndex).trim();
+		const exportName = member.slice(asIndex + 4).trim();
+		properties.push(localName && exportName ? `${exportName}: ${localName}` : member);
 	}
 
-	if (props.length === 0) { return text }
+	if (properties.length === 0) { return text }
 
-	const assignment = globalName	? `globalThis.${globalName} = { ${props.join(', ')} };` : `Object.assign(globalThis, { ${props.join(', ')} });`;
-	const body = text.slice(0, last.index);
-	const after = text.slice(last.index + last[0].length);
+	const exportedObject = properties.join(', ');
+	const assignment = globalName ? `globalThis.${globalName} = { ${exportedObject} };` : `Object.assign(globalThis, { ${exportedObject} });`;
 
-	return `(() => {\n${body}\n\t${assignment}\n})();${after}`;
+	return `(() => {\n${text.slice(0, exportStart)}\n\t${assignment}\n})();${text.slice(exportEnd)}`;
 }
 
 /**
@@ -150,7 +157,8 @@ async function buildIife(outputs: Record<string, { entryPoint?: string }>, entry
 	const hasSourceMap = sourcemap !== undefined && sourcemap !== false;
 	const plugins = [ virtualLoaderPlugin(fileContents) ];
 
-	const iifeOutdir = await mkdir(join(outdir, namespace), { recursive: true });
+	const iifeOutdir = join(outdir, namespace);
+	await mkdir(iifeOutdir, { recursive: true });
 
 	const results = await Promise.all(validEntries.map(({ name, path }) => {
 		return esbuild({
@@ -170,9 +178,15 @@ async function buildIife(outputs: Record<string, { entryPoint?: string }>, entry
 	const writes: Promise<void>[] = [];
 	const cwd = process.cwd();
 	for (const { outputFiles: iifeFiles } of results) {
+		const outputFilePaths = new Set(iifeFiles.map(({ path }) => path));
 		for (const { path, contents } of iifeFiles) {
 			if (path.endsWith(jsExtension)) {
-				const text = wrapAsIife(textDecoder.decode(contents), globalName);
+				let text = wrapAsIife(textDecoder.decode(contents), globalName);
+				// esbuild does not add //# sourceMappingURL= to outputFiles when write:false;
+				// append it manually when the map file is present in the result.
+				if (outputFilePaths.has(`${path}.map`)) {
+					text += `\n//# sourceMappingURL=${basename(path)}.map`;
+				}
 				writes.push(writeFile(path, text));
 				written.push({ path: Paths.relative(cwd, path), size: Buffer.byteLength(text) });
 			} else {

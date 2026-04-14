@@ -121,6 +121,19 @@ describe('iifePlugin', () => {
 			expect(opts.outdir).toBe(join(outputDir, 'iife'));
 		});
 
+		it('passes correct outdir to esbuild when iife directory already exists (rebuild scenario)', async () => {
+			// Pre-create the iife directory to simulate a non-clean rebuild.
+			// This is the scenario that broke when mkdir's return value was used as outdir
+			// because mkdir returns undefined for an already-existing directory.
+			vol.mkdirSync(iifeOutdir, { recursive: true });
+
+			setupPlugin();
+			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+
+			expect(mockEsbuild).toHaveBeenCalledOnce();
+			expect(mockEsbuild.mock.calls[0]![0].outdir).toBe(iifeOutdir);
+		});
+
 		it('assigns to named namespace when globalName option is provided', async () => {
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var x = 1;\nexport {\n  x\n};' }));
 			setupPlugin({ globalName: 'MyLib' });
@@ -316,7 +329,7 @@ describe('iifePlugin', () => {
 			expect(files).toEqual(['transportr.js']);
 		});
 
-		it('writes source map files alongside entry points', async () => {
+		it('writes source map files alongside entry points and adds sourceMappingURL to JS', async () => {
 			const result = makeBuildResult({ index: '(() => {})();' });
 			const mapPath = join(iifeOutdir, 'index.js.map');
 			result.outputFiles.push(makeOutputFile(mapPath, '{"version":3}'));
@@ -326,6 +339,43 @@ describe('iifePlugin', () => {
 
 			const files = (await memfs.promises.readdir(iifeOutdir)).sort();
 			expect(files).toEqual(['index.js', 'index.js.map']);
+
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content.endsWith('//# sourceMappingURL=index.js.map')).toBe(true);
+		});
+
+		it('appends sourceMappingURL when map file is present in output', async () => {
+			const result = makeBuildResult({ index: 'var x=1;\nexport { x };' });
+			result.outputFiles.push(makeOutputFile(join(iifeOutdir, 'index.js.map'), '{"version":3}'));
+			mockEsbuild.mockResolvedValueOnce(result);
+			setupPlugin(undefined, true);
+			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content.endsWith('//# sourceMappingURL=index.js.map')).toBe(true);
+		});
+
+		it('does not append sourceMappingURL when no map file is present', async () => {
+			setupPlugin();
+			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;\nexport { x };' }));
+
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content).not.toContain('sourceMappingURL');
+		});
+
+		it('preserves sourceMappingURL and bundled license block after wrapping', async () => {
+			// esbuild does not include //# sourceMappingURL= in outputFiles with write:false,
+			// so the plugin appends it. The license block follows naturally as trailing text.
+			const result = makeBuildResult({ index: 'var x=1;\nexport { x };\n/*! Bundled license information:\n*/' });
+			result.outputFiles.push(makeOutputFile(join(iifeOutdir, 'index.js.map'), '{"version":3}'));
+			mockEsbuild.mockResolvedValueOnce(result);
+			setupPlugin(undefined, true);
+			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+
+			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			expect(content).toContain('Object.assign(globalThis, { x })');
+			expect(content).toContain('/*! Bundled license information:');
+			expect(content.endsWith('//# sourceMappingURL=index.js.map')).toBe(true);
 		});
 	});
 });
