@@ -1,3 +1,20 @@
+## [1.8.5](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.4...v1.8.5) (2026-04-14)
+
+### Bug Fixes
+
+* **iife:** resolve paths absolutely and output to nested directory (7514592a039f02e070b71f4c30c6cd88a99bd17d)
+- Changes IIFE output to resolve paths absolutely instead of relatively
+- Creates a dedicated `iife` output directory under the main `outdir`
+- Fixes virtual loader plugin to handle the new directory structure properly
+- Adds an integration test for IIFE builds
+
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint dependencies (e4abe9fe4083b89953f94f4cd17622387844b844)
+- Updates `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser`, and `typescript-eslint` from 8.58.1 to 8.58.2
+- Updates `pnpm-lock.yaml` with the new versions and their sub-dependencies
+
 ## [1.8.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.3...v1.8.4) (2026-04-12)
 
 ### Performance Improvements
