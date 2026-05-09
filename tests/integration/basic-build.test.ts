@@ -119,6 +119,42 @@ describe('TypeScriptProject - Basic Builds', () => {
 		expect(vol.existsSync(join(distDir, 'index.js'))).toBe(true);
 	});
 
+	it('removes stale outputs from prior builds via the manifest on incremental rebuild', async () => {
+		const projectPath = await TestHelper.createTestProject({
+			tsconfig: {
+				compilerOptions: { declaration: false },
+				tsbuild: { entryPoints: { keep: './src/keep.ts', remove: './src/remove.ts' }, clean: true }
+			},
+			files: {
+				'src/keep.ts': 'export const k = 1;',
+				'src/remove.ts': 'export const r = 2;'
+			}
+		});
+
+		const distDir = join(projectPath, 'dist');
+
+		// First build writes both entry points and persists the manifest
+		const first = createProject(projectPath);
+		await first.build();
+		const { processManager: pm1 } = await import('../../src/process-manager');
+		pm1.close();
+
+		expect(vol.existsSync(join(distDir, 'keep.js'))).toBe(true);
+		expect(vol.existsSync(join(distDir, 'remove.js'))).toBe(true);
+		expect(vol.existsSync(join(projectPath, '.tsbuild', 'outputs.manifest.json'))).toBe(true);
+
+		// Reconfigure with only one entry point. The dropped output should be removed
+		// by the manifest-based stale-file diff (no upfront clean).
+		const second = createProject(projectPath, {
+			tsbuild: { entryPoints: { keep: './src/keep.ts' }, clean: true }
+		});
+		await second.build();
+		await second.flushBackgroundCleanup();
+
+		expect(vol.existsSync(join(distDir, 'keep.js'))).toBe(true);
+		expect(vol.existsSync(join(distDir, 'remove.js'))).toBe(false);
+	});
+
 	it('handles cross-file imports', async () => {
 		const projectPath = await TestHelper.createTestProject({
 			tsconfig: {

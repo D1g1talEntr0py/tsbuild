@@ -42,15 +42,13 @@ function makeBuildResult(entries: Record<string, string>): BuildResult<{ write: 
 	return { errors: [], warnings: [], outputFiles, metafile: { inputs: {}, outputs: {} }, mangleCache: {} };
 }
 
-/** Writes files to memfs and returns a BuildResult with metafile for onEnd */
-function makeMetafileResult(files: Record<string, string>): BuildResult {
-	vol.mkdirSync(outputDir, { recursive: true });
-	const outputs: Record<string, { bytes: number; inputs: Record<string, never>; imports: never[]; exports: string[] }> = {};
-	for (const [path, content] of Object.entries(files)) {
-		vol.writeFileSync(path, content);
-		outputs[path] = { bytes: Buffer.byteLength(content), inputs: {}, imports: [], exports: [] };
+/** Creates a primary BuildResult with in-memory outputFiles for the iife plugin to consume */
+function makePrimaryResult(files: Record<string, string>): BuildResult {
+	const outputFiles: OutputFile[] = [];
+	for (const [ path, content ] of Object.entries(files)) {
+		outputFiles.push(makeOutputFile(path, content));
 	}
-	return { errors: [], warnings: [], metafile: { inputs: {}, outputs } } as unknown as BuildResult;
+	return { errors: [], warnings: [], outputFiles } as unknown as BuildResult;
 }
 
 describe('iifePlugin', () => {
@@ -110,7 +108,7 @@ describe('iifePlugin', () => {
 	describe('IIFE build options', () => {
 		it('calls esbuild.build with correct base options', async () => {
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			expect(mockEsbuild).toHaveBeenCalledOnce();
 			const opts = mockEsbuild.mock.calls[0]![0];
@@ -128,7 +126,7 @@ describe('iifePlugin', () => {
 			vol.mkdirSync(iifeOutdir, { recursive: true });
 
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			expect(mockEsbuild).toHaveBeenCalledOnce();
 			expect(mockEsbuild.mock.calls[0]![0].outdir).toBe(iifeOutdir);
@@ -137,7 +135,7 @@ describe('iifePlugin', () => {
 		it('assigns to named namespace when globalName option is provided', async () => {
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var x = 1;\nexport {\n  x\n};' }));
 			setupPlugin({ globalName: 'MyLib' });
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
 			expect(content).toContain('globalThis.MyLib = { x }');
@@ -146,7 +144,7 @@ describe('iifePlugin', () => {
 		it('uses flat Object.assign when no globalName option is provided', async () => {
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var x = 1;\nexport {\n  x\n};' }));
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
 			expect(content).toContain('Object.assign(globalThis, { x })');
@@ -155,7 +153,7 @@ describe('iifePlugin', () => {
 		it('uses public name when minified output aliases export (e as Name)', async () => {
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: 'var e={};export{e as RequestHeader};' }));
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var e={};' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var e={};' }));
 
 			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
 			expect(content).toContain('Object.assign(globalThis, { RequestHeader: e })');
@@ -163,7 +161,7 @@ describe('iifePlugin', () => {
 
 		it('does not pass globalName or footer to esbuild', async () => {
 			setupPlugin({ globalName: 'MyLib' });
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			const opts = mockEsbuild.mock.calls[0]![0];
 			expect(opts.globalName).toBeUndefined();
@@ -172,14 +170,14 @@ describe('iifePlugin', () => {
 
 		it('enables external source maps when primary build has sourcemaps', async () => {
 			setupPlugin(undefined, true);
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			expect(mockEsbuild.mock.calls[0]![0].sourcemap).toBe('external');
 		});
 
 		it('disables source maps when primary build has no sourcemaps', async () => {
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			expect(mockEsbuild.mock.calls[0]![0].sourcemap).toBe(false);
 		});
@@ -190,7 +188,7 @@ describe('iifePlugin', () => {
 			setupPlugin(undefined, undefined, { index: './src/index.ts', utils: './src/utils.ts' });
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: '(() => {})();' }))
 			           .mockResolvedValueOnce(makeBuildResult({ utils: '(() => {})();' }));
-			await onEndCallback(makeMetafileResult({
+			await onEndCallback(makePrimaryResult({
 				[`${outputDir}/index.js`]: 'var a = 1;',
 				[`${outputDir}/utils.js`]: 'var b = 2;',
 				[`${outputDir}/ABCDEF.js`]: 'var c = 3;',
@@ -206,7 +204,7 @@ describe('iifePlugin', () => {
 			setupPlugin(undefined, undefined, ['./src/index.ts', './src/utils.ts']);
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: '(() => {})();' }))
 			           .mockResolvedValueOnce(makeBuildResult({ utils: '(() => {})();' }));
-			await onEndCallback(makeMetafileResult({
+			await onEndCallback(makePrimaryResult({
 				[`${outputDir}/index.js`]: 'var a = 1;',
 				[`${outputDir}/utils.js`]: 'var b = 2;',
 			}));
@@ -217,16 +215,16 @@ describe('iifePlugin', () => {
 			expect(call1.entryPoints).toEqual({ utils: `${outputDir}/utils.js` });
 		});
 
-		it('does nothing when metafile has no JS outputs', async () => {
+		it('does nothing when no output files are present', async () => {
 			setupPlugin();
-			await onEndCallback({ metafile: { inputs: {}, outputs: {} } } as unknown as BuildResult);
+			await onEndCallback({ outputFiles: [] } as unknown as BuildResult);
 
 			expect(mockEsbuild).not.toHaveBeenCalled();
 		});
 
 		it('does nothing when no configured entry has a matching output file', async () => {
 			setupPlugin(undefined, undefined, { missing: './src/missing.ts' });
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/other.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/other.js`]: 'var x = 1;' }));
 
 			expect(mockEsbuild).not.toHaveBeenCalled();
 		});
@@ -239,7 +237,7 @@ describe('iifePlugin', () => {
 
 		async function setupWithVirtualLoader(): Promise<void> {
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({
+			await onEndCallback(makePrimaryResult({
 				[`${outputDir}/index.js`]: 'import("./chunk.js")',
 				[`${outputDir}/chunk.js`]: 'var y = 2;',
 			}));
@@ -305,7 +303,7 @@ describe('iifePlugin', () => {
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ index: '(() => { /* entry */ })();' }))
 			           .mockResolvedValueOnce(makeBuildResult({ utils: '(() => { /* utils */ })();' }));
 			setupPlugin(undefined, undefined, { index: './src/index.ts', utils: './src/utils.ts' });
-			await onEndCallback(makeMetafileResult({
+			await onEndCallback(makePrimaryResult({
 				[`${outputDir}/index.js`]: 'var a = 1;',
 				[`${outputDir}/utils.js`]: 'var b = 2;',
 			}));
@@ -320,7 +318,7 @@ describe('iifePlugin', () => {
 			// the secondary build result should only contain the entry file.
 			mockEsbuild.mockResolvedValueOnce(makeBuildResult({ transportr: '(() => { /* inlined */ })();' }));
 			setupPlugin(undefined, undefined, { transportr: './src/transportr.ts' });
-			await onEndCallback(makeMetafileResult({
+			await onEndCallback(makePrimaryResult({
 				[`${outputDir}/transportr.js`]: 'var a = 1;',
 				[`${outputDir}/TOSJXEKD.js`]: 'var chunk = 1;',
 			}));
@@ -335,12 +333,12 @@ describe('iifePlugin', () => {
 			result.outputFiles.push(makeOutputFile(mapPath, '{"version":3}'));
 			mockEsbuild.mockResolvedValueOnce(result);
 			setupPlugin(undefined, true);
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			const files = (await memfs.promises.readdir(iifeOutdir)).sort();
 			expect(files).toEqual(['index.js', 'index.js.map']);
 
-			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			const content = String(await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8'));
 			expect(content.endsWith('//# sourceMappingURL=index.js.map')).toBe(true);
 		});
 
@@ -349,15 +347,15 @@ describe('iifePlugin', () => {
 			result.outputFiles.push(makeOutputFile(join(iifeOutdir, 'index.js.map'), '{"version":3}'));
 			mockEsbuild.mockResolvedValueOnce(result);
 			setupPlugin(undefined, true);
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
-			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			const content = String(await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8'));
 			expect(content.endsWith('//# sourceMappingURL=index.js.map')).toBe(true);
 		});
 
 		it('does not append sourceMappingURL when no map file is present', async () => {
 			setupPlugin();
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;\nexport { x };' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;\nexport { x };' }));
 
 			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
 			expect(content).not.toContain('sourceMappingURL');
@@ -370,9 +368,9 @@ describe('iifePlugin', () => {
 			result.outputFiles.push(makeOutputFile(join(iifeOutdir, 'index.js.map'), '{"version":3}'));
 			mockEsbuild.mockResolvedValueOnce(result);
 			setupPlugin(undefined, true);
-			await onEndCallback(makeMetafileResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
-			const content = await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8');
+			const content = String(await memfs.promises.readFile(join(iifeOutdir, 'index.js'), 'utf8'));
 			expect(content).toContain('Object.assign(globalThis, { x })');
 			expect(content).toContain('/*! Bundled license information:');
 			expect(content.endsWith('//# sourceMappingURL=index.js.map')).toBe(true);

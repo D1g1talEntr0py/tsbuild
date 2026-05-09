@@ -729,6 +729,823 @@
         "total_ms": 27,
         "percent": 5.8
       }
+    },
+    {
+      "date": "2026-04-18",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 527,
+      "phases": {
+        "type_checking_ms": 424,
+        "transpile_ms": 97,
+        "bundle_declarations_ms": 19
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 415,
+          "finalize_ms": 7
+        }
+      }
+    },
+    {
+      "date": "2026-04-18",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 9,
+      "phases": {
+        "type_checking_ms": 9,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 518,
+        "percent": 98.3
+      }
+    },
+    {
+      "date": "2026-04-18",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 459,
+      "phases": {
+        "type_checking_ms": 425,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 419
+        }
+      },
+      "speedup_vs_cold": {
+        "total_ms": 68,
+        "percent": 12.9
+      }
+    },
+    {
+      "date": "2026-04-18",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 464,
+      "phases": {
+        "type_checking_ms": 432,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 13
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 422,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-18",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "phases": {
+        "type_checking_ms": 4,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 459,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-18",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 461,
+      "phases": {
+        "type_checking_ms": 427,
+        "transpile_ms": 27,
+        "bundle_declarations_ms": 15
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 420
+        }
+      },
+      "speedup_vs_cold": {
+        "total_ms": 3,
+        "percent": 0.6
+      }
+    },
+    {
+      "date": "2026-04-29",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 446,
+      "stddev_ms": 8,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 419,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 410,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-29",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 4,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 441,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-29",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 5,
+      "stddev_ms": 3,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 5,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 0
+        }
+      },
+      "speedup_vs_cold": {
+        "total_ms": 441,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-29",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 447,
+      "stddev_ms": 9,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 417,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 408,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-29",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 4,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 442,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-29",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 438,
+      "stddev_ms": 14,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 396,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 9,
+        "percent": 2
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 431,
+      "stddev_ms": 7,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 402,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 13
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 393,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "stddev_ms": 2,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 4,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 426,
+        "percent": 98.8
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 437,
+      "stddev_ms": 13,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 396,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": -6,
+        "percent": -1.4
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 464,
+      "stddev_ms": 13,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 432,
+        "transpile_ms": 27,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 422,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "stddev_ms": 3,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 5,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 459,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 436,
+      "stddev_ms": 15,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 395,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 28,
+        "percent": 6
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 440,
+      "stddev_ms": 10,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 412,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 403,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "stddev_ms": 3,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 4,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 435,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 446,
+      "stddev_ms": 26,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 398,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 15
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": -6,
+        "percent": -1.4
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 461,
+      "stddev_ms": 13,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 433,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 423,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 10,
+      "stddev_ms": 3,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 7,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 451,
+        "percent": 97.8
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 441,
+      "stddev_ms": 20,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 402,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 15
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 20,
+        "percent": 4.3
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 451,
+      "stddev_ms": 14,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 420,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 410,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 5,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 4,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 446,
+        "percent": 98.9
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 454,
+      "stddev_ms": 12,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 417,
+        "transpile_ms": 27,
+        "bundle_declarations_ms": 15
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": -3,
+        "percent": -0.7
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 473,
+      "stddev_ms": 18,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 434,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 12
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 425,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 4,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 3,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 469,
+        "percent": 99.2
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 462,
+      "stddev_ms": 20,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 416,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 13
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 11,
+        "percent": 2.3
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 454,
+      "stddev_ms": 12,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 427,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 12
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 418,
+          "finalize_ms": 8
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 4,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 3,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 450,
+        "percent": 99.1
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 449,
+      "stddev_ms": 22,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 403,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 12
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 5,
+        "percent": 1.1
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 447,
+      "stddev_ms": 5,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 419,
+        "transpile_ms": 22,
+        "bundle_declarations_ms": 12
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 411,
+          "finalize_ms": 7
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 4,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 3,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 443,
+        "percent": 99.1
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 427,
+      "stddev_ms": 3,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 391,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 13
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 20,
+        "percent": 4.5
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 442,
+      "stddev_ms": 7,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 417,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 11
+      },
+      "phase_breakdown": {
+        "type_checking": {
+          "emit_ms": 409,
+          "finalize_ms": 7
+        }
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 4,
+      "stddev_ms": 0,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 3,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 438,
+        "percent": 99.1
+      }
+    },
+    {
+      "date": "2026-04-30",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 448,
+      "stddev_ms": 24,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 400,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 12
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": -6,
+        "percent": -1.4
+      }
+    },
+    {
+      "date": "2026-05-09",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 441,
+      "stddev_ms": 4,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 22,
+        "bundle_declarations_ms": 12
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      }
+    },
+    {
+      "date": "2026-05-09",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 6,
+      "stddev_ms": 1,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 435,
+        "percent": 98.6
+      }
+    },
+    {
+      "date": "2026-05-09",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 420,
+      "stddev_ms": 10,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 19,
+        "bundle_declarations_ms": 13
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 21,
+        "percent": 4.8
+      }
     }
   ],
   "regression_thresholds": {

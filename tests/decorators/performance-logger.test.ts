@@ -13,14 +13,13 @@ vi.mock('src/logger', () => ({
 describe('logPerformance', () => {
 	let exitSpy: ReturnType<typeof vi.spyOn<typeof process, 'exit'>>;
 	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
-	let addPerformanceStep: typeof import('src/decorators/performance-logger').addPerformanceStep;
 
 	beforeEach(async () => {
 		vi.resetModules();
 		exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 		performance.clearMarks();
 		performance.clearMeasures();
-		({ logPerformance, addPerformanceStep } = await import('src/decorators/performance-logger'));
+		({ logPerformance } = await import('src/decorators/performance-logger'));
 	});
 
 	afterEach(async () => {
@@ -159,27 +158,6 @@ describe('logPerformance', () => {
 			}
 
 			expect(new Test()[key]()).toBe('symbol result');
-		});
-	});
-
-	describe('addPerformanceStep', () => {
-		it('accumulates sub-steps for the next measurement', async () => {
-			const { Logger } = await import('src/logger');
-
-			class Test {
-				@logPerformance('op with steps')
-				method(): void {
-					addPerformanceStep('sub-step-1', 50);
-					addPerformanceStep('sub-step-2', 100);
-				}
-			}
-
-			new Test().method();
-
-			// Wait for PerformanceObserver to fire
-			await new Promise(resolve => setTimeout(resolve, 50));
-
-			expect(Logger.subSteps).toHaveBeenCalled();
 		});
 	});
 

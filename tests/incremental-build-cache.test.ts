@@ -163,4 +163,62 @@ describe('IncrementalBuildCache', () => {
 			expect(cache.isValid()).toBe(false);
 		});
 	});
+
+	describe('output manifest', () => {
+		it('returns undefined when no manifest exists', () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(cache.hasPersistedManifest()).toBe(false);
+			expect(cache.getPreviousOutputs()).toBeUndefined();
+		});
+
+		it('round-trips outputs through saveOutputs/getPreviousOutputs', async () => {
+			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			await cache1.saveOutputs([ 'dist/a.js', 'dist/b.js' ]);
+
+			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(cache2.hasPersistedManifest()).toBe(true);
+			expect(cache2.getPreviousOutputs()).toEqual([ 'dist/a.js', 'dist/b.js' ]);
+		});
+
+		it('saveOutputs creates the cache directory if missing', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			await cache.saveOutputs([ 'dist/x.js' ]);
+			expect(vol.existsSync(join(projectRoot, '.tsbuild', 'outputs.manifest.json'))).toBe(true);
+		});
+
+		it('updates in-memory snapshot immediately so subsequent reads do not race the disk write', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			const writePromise = cache.saveOutputs([ 'dist/fresh.js' ]);
+			expect(cache.getPreviousOutputs()).toEqual([ 'dist/fresh.js' ]);
+			await writePromise;
+		});
+
+		it('preserves the snapshot across invalidate so manifest-driven cleanup survives --clearCache', async () => {
+			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			await cache1.saveOutputs([ 'dist/a.js' ]);
+
+			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			cache2.invalidate();
+			expect(cache2.hasPersistedManifest()).toBe(true);
+			expect(cache2.getPreviousOutputs()).toEqual([ 'dist/a.js' ]);
+		});
+
+		it('handles malformed manifest gracefully', () => {
+			const cacheDir = join(projectRoot, '.tsbuild');
+			vol.mkdirSync(cacheDir, { recursive: true });
+			vol.writeFileSync(join(cacheDir, 'outputs.manifest.json'), 'not valid json');
+
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(cache.getPreviousOutputs()).toBeUndefined();
+		});
+
+		it('ignores non-array manifest payloads', () => {
+			const cacheDir = join(projectRoot, '.tsbuild');
+			vol.mkdirSync(cacheDir, { recursive: true });
+			vol.writeFileSync(join(cacheDir, 'outputs.manifest.json'), JSON.stringify({ outputs: [] }));
+
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(cache.getPreviousOutputs()).toBeUndefined();
+		});
+	});
 });

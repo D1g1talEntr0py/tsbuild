@@ -82,6 +82,7 @@ describe('FileManager', () => {
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
 			manager1.finalize();
+			manager1.persistCache();
 			await manager1.flush();
 
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -165,6 +166,7 @@ describe('FileManager', () => {
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
 			manager1.finalize();
+			manager1.persistCache();
 			await manager1.flush();
 
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -183,6 +185,7 @@ describe('FileManager', () => {
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
 			manager1.finalize();
+			manager1.persistCache();
 			await manager1.flush();
 
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -190,6 +193,7 @@ describe('FileManager', () => {
 			await manager2.initialize();
 			manager2.fileWriter('test.d.ts', 'export const hello: number;');
 			manager2.finalize();
+			manager2.persistCache();
 			await manager2.flush();
 
 			const cache3 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
