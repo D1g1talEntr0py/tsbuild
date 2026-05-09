@@ -1,3 +1,33 @@
+## [1.8.7](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.6...v1.8.7) (2026-05-09)
+
+### Performance Improvements
+
+* **core:** speed up build and cleanup paths (9d44486ac97b3d7ea5a647246cf814649fffe27a)
+- defer cache persistence until after parallel build phases complete
+- add manifest-based stale output cleanup and incremental state probes
+- optimize file clearing, path normalization, and dependency collection
+- reduce declaration bundling and preprocessing overhead
+- refactor the iife plugin to reuse in-memory primary outputs
+
+
+### Tests
+
+* **perf:** update coverage for build optimizations (284857a6dac88fe0fb6940060f10ea92fc898962)
+- refresh benchmark measurements for the new tinybench-based runner
+- remove tests for the exported performance step helper
+- add coverage for the new cache manifest and stale output cleanup paths
+- adapt iife plugin tests to the outputFiles-based primary build flow
+
+
+### Build System
+
+* **tooling:** migrate scripts to strip-types loader (7f236e0e92ec4a790a00b3fdbcbdcdc62756bdf4)
+- replace tsx-based build and tooling entrypoints with node --experimental-strip-types
+- add the custom loader used to resolve and transpile local TypeScript scripts
+- move the benchmark runner to the test scripts directory and switch it to tinybench
+- update lint config for JavaScript script files and package manager metadata
+- refresh workspace and lockfile dependencies for the toolchain migration
+
 ## [1.8.6](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.5...v1.8.6) (2026-04-14)
 
 ### Bug Fixes
