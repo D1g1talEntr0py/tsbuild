@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.0.8",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -45,15 +45,15 @@
     "tsbuild": "./dist/tsbuild.js"
   },
   "scripts": {
-    "build": "tsx ./src/tsbuild.ts",
-    "build:watch": "tsx ./src/tsbuild.ts --watch",
-    "bench": "tsx ./scripts/benchmark.ts",
-    "type-check": "tsx ./src/tsbuild.ts --noEmit",
+    "build": "node --experimental-strip-types ./scripts/loader.ts ./src/tsbuild.ts",
+    "build:watch": "node --experimental-strip-types ./scripts/loader.ts ./src/tsbuild.ts --watch",
+    "bench": "node --experimental-strip-types ./scripts/loader.ts ./tests/scripts/benchmark.ts",
+    "type-check": "node --experimental-strip-types ./scripts/loader.ts ./src/tsbuild.ts --noEmit",
     "lint": "eslint ./src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:compat": "tsx tests/scripts/test-ts-compat.ts --versions 5"
+    "test:compat": "node --experimental-strip-types ./scripts/loader.ts tests/scripts/test-ts-compat.ts --versions 5"
   },
   "dependencies": {
     "@d1g1tal/watchr": "^1.0.6",
@@ -63,17 +63,17 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.6.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.2",
-    "@typescript-eslint/parser": "^8.58.2",
-    "@vitest/coverage-v8": "^4.1.4",
-    "eslint": "^10.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "@vitest/coverage-v8": "^4.1.5",
+    "eslint": "^10.3.0",
     "eslint-plugin-jsdoc": "^62.9.0",
     "fs-monkey": "^1.1.0",
-    "memfs": "^4.57.1",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
-    "typescript-eslint": "^8.58.2",
-    "vitest": "^4.1.4"
+    "memfs": "^4.57.2",
+    "tinybench": "^6.0.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2",
+    "vitest": "^4.1.5"
   },
   "peerDependencies": {
     "typescript": ">=5.6.3"

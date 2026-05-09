@@ -69,4 +69,9 @@ export default defineConfig({ ignores: [ 'node_modules/**', 'tests/**', 'dist/**
 			ignoreRestSiblings: true
 		}]
 	}
+}, {
+	files: [ 'scripts/**/*.js' ],
+	rules: {
+		'jsdoc/no-types': 'off'
+	}
 });

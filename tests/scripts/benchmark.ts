@@ -11,24 +11,32 @@
  *   pnpm bench
  */
 import { Bench, type Task } from 'tinybench';
-import { execSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
+import { execSync, spawnSync, execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync, appendFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ITERATIONS = 5;
 
-const root = fileURLToPath(new URL('..', import.meta.url));
+const root = fileURLToPath(new URL('../..', import.meta.url));
 const measurementsPath = join(root, 'docs/performance-measurements.json');
 const tsbuildCache = join(root, '.tsbuild');
 const benchmarkFile = join(root, 'src/logger.ts');
 const buildInfoPath = join(root, '.tsbuild', 'tsconfig.tsbuildinfo');
+const tsbuildBin = join(root, 'dist/tsbuild.js');
 const ansiPattern = /\x1b\[[0-9;]*m/g;
 
 // ─── Build runner ──────────────────────────────────────────────────────────────
 
+function ensureBuilt(): void {
+	if (existsSync(tsbuildBin)) { return }
+
+	console.log('Compiled tsbuild not found at dist/tsbuild.js — building first …');
+	execFileSync('tsx', [ './src/tsbuild.ts' ], { cwd: root, stdio: 'inherit' });
+}
+
 function runBuild(): string {
-	const result = spawnSync('tsx', [ './src/tsbuild.ts' ], {
+	const result = spawnSync(process.execPath, [ tsbuildBin ], {
 		cwd: root,
 		encoding: 'utf8',
 		env: { ...process.env, FORCE_COLOR: '0' },
@@ -139,7 +147,9 @@ function addProgressListener(bench: Bench, label: string): void {
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string; name: string };
 const date = new Date().toISOString().slice(0, 10);
 
-console.log(`\ntsbuild v${pkg.version} — benchmark (${ITERATIONS} iterations)\n`);
+ensureBuilt();
+
+console.log(`\ntsbuild v${pkg.version} — benchmark (${ITERATIONS} iterations, dist build)\n`);
 
 // 1. Cold build — clear cache before every iteration
 console.log('1/3 Cold build');
