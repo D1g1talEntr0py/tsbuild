@@ -1,4 +1,4 @@
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
 import { defaultCleanOptions, defaultDirOptions, Encoding } from 'src/constants';
 import { brotliDecompress, brotliCompress } from 'node:zlib';
@@ -6,9 +6,10 @@ import { access, constants, mkdir, readdir, readFile, rm, writeFile } from 'node
 import type { Stream } from 'node:stream';
 import type { WriteFileOptions } from 'node:fs';
 import type { AbsolutePath, Path } from 'src/@types';
-import { Paths } from 'src/paths';
 
 type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView> | Stream;
+
+const windowsDrivePathRegex = /^[A-Za-z]:[\\/]/;
 
 /**
  * A class for handling file operations such as reading, writing, compressing, and decompressing files.
@@ -35,14 +36,33 @@ export class Files {
 	}
 
 	/**
-	 * Clear a directory by removing all files and subdirectories.
+	 * Clear a directory by removing all of its entries in parallel.
+	 * Uses readdir + parallel rm so libuv's threadpool can unlink subtrees concurrently,
+	 * which is significantly faster than a single recursive `rm` for large output trees.
+	 * The directory itself is preserved (no mkdir needed afterward).
 	 * @param directory The path to the directory to clear.
 	 */
 	static async empty(directory: Path | string): Promise<void> {
-		// Remove all files
-		if (await Files.exists(directory)) {
-			await Promise.all((await readdir(directory)).map((file) => rm(Paths.join(directory, file), defaultCleanOptions)));
+		let entries: string[];
+		try {
+			entries = await readdir(directory);
+		} catch (error) {
+			// Directory doesn't exist - create it so callers can write into it
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+				await mkdir(directory, defaultDirOptions);
+				return;
+			}
+			throw error;
 		}
+
+		if (entries.length === 0) { return }
+
+		const removals = new Array<Promise<void>>(entries.length);
+		for (let i = 0, length = entries.length; i < length; i++) {
+			removals[i] = rm(join(directory, entries[i]), defaultCleanOptions);
+		}
+
+		await Promise.all(removals);
 	}
 
 	/**
@@ -81,9 +101,14 @@ export class Files {
 	 * Normalize a file path to an absolute path.
 	 * @param path The file path to normalize.
 	 * @returns The normalized absolute path.
+	 * @throws {TypeError} if path is relative and not a valid URL
 	 */
 	static normalizePath(path: Path): AbsolutePath {
-		return (path.startsWith('/') || path.startsWith('file://') ? path : new URL(path, import.meta.url).pathname) as AbsolutePath;
+		if (path.startsWith('/') || path.startsWith('file://') || windowsDrivePathRegex.test(path)) { return path as AbsolutePath }
+		// Paths that don't start with /, file://, or a Windows drive letter must be valid URLs
+		// or else they're invalid relative paths
+		if (!path.includes('://')) { throw new TypeError(`Files.normalizePath requires an absolute path, got: ${path}`) }
+		return new URL(path, import.meta.url).pathname as AbsolutePath;
 	}
 
 	/**

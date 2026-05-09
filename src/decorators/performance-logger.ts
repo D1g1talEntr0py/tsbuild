@@ -101,13 +101,4 @@ class PerformanceLogger implements Closable {
 
 const measure: typeof PerformanceLogger.prototype.measure = new PerformanceLogger().measure;
 
-/**
- * Registers a sub-step timing entry for the currently running performance measurement.
- * @param name - The name of the sub-step.
- * @param ms - The elapsed time in milliseconds.
- */
-function addPerformanceStep(name: string, ms: number): void {
-	pendingSteps.push({ name, duration: `${ms}ms`, ms });
-}
-
-export { measure as logPerformance, addPerformanceStep };
+export { measure as logPerformance };

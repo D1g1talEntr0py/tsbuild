@@ -3,7 +3,7 @@ import { sys } from 'typescript';
 import { parseArgs } from 'node:util';
 import { TypeScriptProject } from './type-script-project';
 import { BuildError } from './errors';
-import type { AbsolutePath, TypeScriptOptions } from './@types';
+import type { TypeScriptOptions } from './@types';
 
 const options = {
 	help: { type: 'boolean', default: undefined, short: 'h', description: 'Show this help message' },
@@ -45,7 +45,7 @@ const typeScriptOptions = {
 } satisfies TypeScriptOptions;
 
 try {
-	await new TypeScriptProject(args.project as AbsolutePath, typeScriptOptions).build();
+	await new TypeScriptProject(args.project, typeScriptOptions).build();
 } catch (error) {
 	process.exitCode = error instanceof BuildError ? error.code : 1;
 }

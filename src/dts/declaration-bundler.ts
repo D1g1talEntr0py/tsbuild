@@ -19,7 +19,9 @@ import {
 	isClassDeclaration,
 	isVariableStatement,
 	isModuleDeclaration,
+	isModuleBlock,
 	isNamedExports,
+	isNamedImports,
 	isIdentifier,
 	isNamespaceImport,
 	isQualifiedName,
@@ -29,61 +31,47 @@ import {
 } from 'typescript';
 import type { SourceFile, Node, StringLiteral, ModuleResolutionHost } from 'typescript';
 import type { AbsolutePath, CachedDeclaration, Pattern, WrittenFile } from 'src/@types';
-import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, BundledDeclaration } from './@types';
+import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, BundledDeclaration, ExternalImport } from './@types';
 import { Files } from 'src/files';
 
 const nodeModules = '/node_modules/';
 const emptySet: ReadonlySet<string> = new Set();
-const importPattern = /^import\s*(?:type\s*)?\{\s*([^}]+)\s*\}\s*from\s*['"]([^'"]+)['"]\s*;?\s*$/;
-const typePrefixPattern = /^type:/;
 
 /**
- * Merges import statements from the same module into a single import.
- * For example, merges:
- *   import { A, B } from 'foo';
- *   import { B, C } from 'foo';
- * Into:
- *   import { A, B, C } from 'foo';
+ * Merges structured external imports from the same module into single import statements.
+ * Pure Map aggregation — no regex, no text parsing.
  *
- * @param imports - Array of import statements
- * @returns Array of merged, deduplicated import statements
+ * @param imports - Structured external imports collected from all modules
+ * @returns Array of merged, deduplicated import statement strings
  */
-function mergeImports(imports: string[]) {
-	// Map from module specifier to Set of imported names
-	const moduleImports = new Map<string, { names: Set<string>; isType: boolean }>();
-	const nonMergeableImports = new Set<string>();
+function mergeImports(imports: ExternalImport[]): string[] {
+	// Map key: `${isType ? 'type:' : ''}${specifier}` so type-only and value imports stay separate
+	const merged = new Map<string, { specifier: string; isType: boolean; names: Set<string> }>();
+	const raw = new Set<string>();
 
-	for (const importStatement of imports) {
-		const match = importPattern.exec(importStatement);
-		if (match) {
-			const [ , namesString, moduleSpecifier ] = match;
-			const isType = importStatement.includes('import type');
-			const key = `${isType ? 'type:' : ''}${moduleSpecifier}`;
-
-			let entry = moduleImports.get(key);
-			if (entry === undefined) {
-				entry = { names: new Set(), isType };
-				moduleImports.set(key, entry);
-			}
-
-			// Split names and add each one, trimming whitespace
-			for (const name of namesString.split(',')) {
-				entry.names.add(name.trim());
-			}
-		} else {
-			// Non-standard import, keep as-is but dedupe
-			nonMergeableImports.add(importStatement);
+	for (const imp of imports) {
+		if (imp.kind === 'raw') {
+			raw.add(imp.text);
+			continue;
 		}
+
+		const key = `${imp.isType ? 'type:' : ''}${imp.specifier}`;
+		let entry = merged.get(key);
+		if (entry === undefined) {
+			entry = { specifier: imp.specifier, isType: imp.isType, names: new Set() };
+			merged.set(key, entry);
+		}
+
+		for (const name of imp.names) { entry.names.add(name) }
 	}
 
-	// Build merged import statements
 	const result: string[] = [];
-	for (const [ key, { names, isType } ] of moduleImports) {
-		result.push(`${isType ? 'import type' : 'import'} { ${[...names].sort().join(', ')} } from "${key.replace(typePrefixPattern, '')}";`);
+	for (const { specifier, isType, names } of merged.values()) {
+		const sorted = Array.from(names).sort();
+		result.push(`${isType ? 'import type' : 'import'} { ${sorted.join(', ')} } from "${specifier}";`);
 	}
 
-	// Add non-mergeable imports (already deduped via Set)
-	for (const imp of nonMergeableImports) { result.push(imp) }
+	for (const text of raw) { result.push(text) }
 
 	return result;
 }
@@ -112,6 +100,8 @@ class DeclarationBundler {
 	private readonly options: DtsBundleOptions;
 	/** WeakMap cache for identifier collection to avoid re-parsing same source files */
 	private readonly identifierCache = new WeakMap<SourceFile, IdentifierMap>();
+	/** SourceFile cache keyed by path — survives across multiple bundle() calls (entry points) */
+	private readonly sourceFileCache = new Map<AbsolutePath, SourceFile>();
 	/** Module resolution cache for this bundler instance */
 	private readonly moduleResolutionCache = new Map<string, AbsolutePath>();
 	/** Pre-computed set of directory prefixes from declaration file paths for O(1) directoryExists lookups */
@@ -190,6 +180,7 @@ class DeclarationBundler {
 	clearExternalFiles() {
 		this.externalDeclarationFiles.clear();
 		this.moduleResolutionCache.clear();
+		this.sourceFileCache.clear();
 	}
 
 	/**
@@ -237,26 +228,6 @@ class DeclarationBundler {
 		}
 
 		return bestMatch ?? sourcePath;
-	}
-
-	/**
-	 * Extract import statements from declaration file content using AST
-	 * Handles: import { X } from 'module', import * as X from 'module', export { X } from 'module'
-	 * @param sourceFile - The parsed source file AST
-	 * @returns Array of module specifiers that are imported
-	 */
-	private extractImports({ statements }: SourceFile) {
-		const imports: string[] = [];
-
-		for (const statement of statements) {
-			if ((isImportDeclaration(statement) || isExportDeclaration(statement)) && statement.moduleSpecifier) {
-				// Handle import declarations: import { X } from 'module'
-				// Handle export declarations with module specifier: export { X } from 'module'
-				imports.push((statement.moduleSpecifier as StringLiteral).text);
-			}
-		}
-
-		return imports;
 	}
 
 	/**
@@ -343,8 +314,12 @@ class DeclarationBundler {
 			// Declarations are already pre-processed - just use the cached code and references
 			const { code, typeReferences, fileReferences } = cached;
 
-			// Create SourceFile from pre-processed code
-			const sourceFile = createSourceFile(path, code, ScriptTarget.Latest, true);
+			// Reuse parsed SourceFile across entry points to avoid redundant parsing of shared modules
+			let sourceFile = this.sourceFileCache.get(path);
+			if (sourceFile === undefined) {
+				sourceFile = createSourceFile(path, code, ScriptTarget.Latest, true);
+				this.sourceFileCache.set(path, sourceFile);
+			}
 
 			// Cache identifiers from source (since that's what we'll use)
 			const identifiers = this.collectIdentifiers(sourceFile.statements, sourceFile);
@@ -353,22 +328,26 @@ class DeclarationBundler {
 			const module: ModuleInfo = { path, code, imports: new Set(), typeReferences: new Set(typeReferences), fileReferences: new Set(fileReferences), sourceFile, identifiers };
 			const bundledSpecs = new Set<string>();
 
-			// Extract and resolve imports using AST
-			for (const specifier of this.extractImports(sourceFile)) {
-				// Skip explicit external modules
-				if (this.matchExternal(specifier)) { continue }
+			// Extract and resolve imports in a single pass through statements
+			for (const statement of sourceFile.statements) {
+				if ((isImportDeclaration(statement) || isExportDeclaration(statement)) && statement.moduleSpecifier) {
+					const specifier = (statement.moduleSpecifier as StringLiteral).text;
 
-				const resolvedPath = this.resolveModule(specifier, path);
+					// Skip explicit external modules
+					if (this.matchExternal(specifier)) { continue }
 
-				// Skip node_modules packages unless they're in noExternal list
-				if (resolvedPath?.includes(nodeModules) && !this.matchNoExternal(specifier)) { continue }
+					const resolvedPath = this.resolveModule(specifier, path);
 
-				if (resolvedPath && (this.declarationFiles.has(resolvedPath) || this.externalDeclarationFiles.has(resolvedPath))) {
-					module.imports.add(resolvedPath);
-					// Track the original specifier
-					bundledSpecs.add(specifier);
-					// Recursively process dependencies
-					visit(resolvedPath);
+					// Skip node_modules packages unless they're in noExternal list
+					if (resolvedPath?.includes(nodeModules) && !this.matchNoExternal(specifier)) { continue }
+
+					if (resolvedPath && (this.declarationFiles.has(resolvedPath) || this.externalDeclarationFiles.has(resolvedPath))) {
+						module.imports.add(resolvedPath);
+						// Track the original specifier
+						bundledSpecs.add(specifier);
+						// Recursively process dependencies
+						visit(resolvedPath);
+					}
 				}
 			}
 
@@ -474,7 +453,14 @@ class DeclarationBundler {
 			} else if (isModuleDeclaration(statement)) {
 				// Module/namespace declarations are values
 				if (statement.name && isIdentifier(statement.name)) { values.add(statement.name.text) }
-				collectNestedIdentifiers(statement.getChildren());
+				// Walk into the module body's statements directly via AST (avoids slow getChildren()).
+				// Nested namespace bodies are walked recursively by re-entering this branch.
+				const body = statement.body;
+				if (body && isModuleBlock(body)) {
+					collectNestedIdentifiers(body.statements);
+				} else if (body && isModuleDeclaration(body)) {
+					collectNestedIdentifiers([body]);
+				}
 			}
 		}
 
@@ -498,7 +484,7 @@ class DeclarationBundler {
 	 * @returns Object with processed code, collected external imports, and exported names (separated by type/value)
 	 */
 	private stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string): DeclarationCode {
-		const externalImports: string[] = [];
+		const externalImports: ExternalImport[] = [];
 		const typeExports: string[] = [];
 		const valueExports: string[] = [];
 		// Use pre-computed identifiers directly - they're already Sets
@@ -509,7 +495,11 @@ class DeclarationBundler {
 		const exportsMapper = (name: string) => moduleRenames.get(name) ?? name;
 
 		// Apply renaming for identifiers from this module
-		for (const name of [ ...typeIdentifiers, ...valueIdentifiers ]) {
+		for (const name of typeIdentifiers) {
+			const renamed = renameMap.get(`${name}:${modulePath}`);
+			if (renamed) { moduleRenames.set(name, renamed) }
+		}
+		for (const name of valueIdentifiers) {
 			const renamed = renameMap.get(`${name}:${modulePath}`);
 			if (renamed) { moduleRenames.set(name, renamed) }
 		}
@@ -530,8 +520,26 @@ class DeclarationBundler {
 				// Bundled specifiers are those that were successfully resolved and added to the module graph
 				// Keep as external import if it's explicitly external OR wasn't bundled
 				if (this.matchExternal(moduleSpecifier) || !bundledImportPaths.has(moduleSpecifier)) {
-					// Keep external imports - extract the text
-					externalImports.push(code.substring(statement.pos, statement.end).trim());
+					// Extract structured metadata from the AST instead of round-tripping through text+regex
+					const importClause = statement.importClause;
+					const isTypeOnly = importClause?.isTypeOnly === true;
+					const namedBindings = importClause?.namedBindings;
+
+					if (importClause && !importClause.name && namedBindings && isNamedImports(namedBindings)) {
+						// Standard `import { A, B } from 'x'` or `import type { A } from 'x'`
+						const names: string[] = [];
+						for (const element of namedBindings.elements) {
+							const local = element.name.text;
+							const original = element.propertyName?.text;
+							// Inline `type` markers (e.g. `import { type Foo }`) are preserved per-element
+							const prefix = element.isTypeOnly ? 'type ' : '';
+							names.push(original ? `${prefix}${original} as ${local}` : `${prefix}${local}`);
+						}
+						externalImports.push({ kind: 'named', specifier: moduleSpecifier, isType: isTypeOnly, names });
+					} else {
+						// Default imports, namespace imports, side-effect imports — keep verbatim
+						externalImports.push({ kind: 'raw', text: code.substring(statement.pos, statement.end).trim() });
+					}
 				} else if (statement.importClause?.namedBindings && isNamespaceImport(statement.importClause.namedBindings)) {
 					// Bundled namespace import: `import * as Alias from './bundled'`
 					// Record alias so qualified references (Alias.X) can be flattened to X
@@ -578,16 +586,20 @@ class DeclarationBundler {
 			}
 		}
 
-		// Apply renaming to all identifier occurrences in the code.
+		// Apply renaming to all identifier occurrences and flatten qualified names from bundled namespaces.
+		// Combined into a single AST walk to avoid traversing the tree multiple times.
 		// IMPORTANT: Only visit declaration statements, NOT import/export declarations.
 		// Import and export declarations are removed via magic.remove() above.
-		// Calling magic.overwrite() on an already-removed range reinserts the text,
-		// which produces corrupted output like `};Json$1JsonPrimitive$1`.
-		if (moduleRenames.size > 0) {
+		// Calling magic.overwrite() on an already-removed range reinserts the text.
+		const hasRenames = moduleRenames.size > 0;
+		const hasBundledAliases = bundledNamespaceAliases.size > 0;
+		if (hasRenames || hasBundledAliases) {
 			const visit = (node: Node): void => {
-				if (isIdentifier(node)) {
+				if (hasBundledAliases && isQualifiedName(node) && isIdentifier(node.left) && bundledNamespaceAliases.has(node.left.text)) {
+					// Flatten `Alias.Name` → `Name` when the alias was bundled away.
+					magic.remove(node.left.getStart(), node.right.getStart());
+				} else if (hasRenames && isIdentifier(node)) {
 					const renamed = moduleRenames.get(node.text);
-					// Rename the identifier
 					if (renamed) { magic.overwrite(node.getStart(), node.end, renamed) }
 				}
 				forEachChild(node, visit);
@@ -598,21 +610,6 @@ class DeclarationBundler {
 					visit(statement);
 				}
 			}
-		}
-
-		// Flatten qualified names that came from bundled namespace imports.
-		// e.g. `import * as ___http_error from './http-error'` is bundled and removed,
-		// so every `___http_error.HttpError` reference must become plain `HttpError`.
-		if (bundledNamespaceAliases.size > 0) {
-			const visitQualified = (node: Node): void => {
-				if (isQualifiedName(node) && isIdentifier(node.left) && bundledNamespaceAliases.has(node.left.text)) {
-					// Remove "Alias." — from the start of the left identifier up to (not including) the right identifier
-					magic.remove(node.left.getStart(), node.right.getStart());
-				}
-				forEachChild(node, visitQualified);
-			};
-
-			forEachChild(sourceFile, visitQualified);
 		}
 
 		// Value exports take precedence - remove any types that are also values
@@ -630,11 +627,13 @@ class DeclarationBundler {
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
 	private combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): BundledDeclaration {
-		const allTypeReferences: string[] = [];
-		const allFileReferences: string[] = [];
-		const allExternalImports: string[] = [];
-		const allTypeExports: string[] = [];
-		const allValueExports: string[] = [];
+		// Use Sets directly to deduplicate as we collect — avoids intermediate arrays + later `new Set(array)` round-trips
+		const typeReferencesSet = new Set<string>();
+		const fileReferencesSet = new Set<string>();
+		const allExternalImports: ExternalImport[] = [];
+		const valueExportsSet = new Set<string>();
+		const typeExportsSeen = new Set<string>();
+		const orderedTypeExports: string[] = []; // preserve first-seen order for stable output
 		const codeBlocks: string[] = [];
 		const allDeclarations = new Set<string>();
 
@@ -645,12 +644,14 @@ class DeclarationBundler {
 		// First pass: collect all declarations and detect conflicts
 		for (const { path, identifiers } of sortedModules) {
 			for (const name of identifiers.types) {
-				if (!declarationSources.has(name)) { declarationSources.set(name, new Set()) }
-				declarationSources.get(name)!.add(path);
+				let set = declarationSources.get(name);
+				if (set === undefined) { declarationSources.set(name, set = new Set()) }
+				set.add(path);
 			}
 			for (const name of identifiers.values) {
-				if (!declarationSources.has(name)) { declarationSources.set(name, new Set()) }
-				declarationSources.get(name)!.add(path);
+				let set = declarationSources.get(name);
+				if (set === undefined) { declarationSources.set(name, set = new Set()) }
+				set.add(path);
 			}
 		}
 
@@ -673,32 +674,29 @@ class DeclarationBundler {
 
 		// Collect all references and code
 		for (const { path, typeReferences, fileReferences, sourceFile, code, identifiers } of sortedModules) {
-			// Collect references
-			allTypeReferences.push(...typeReferences);
-			allFileReferences.push(...fileReferences);
+			// Collect references — Sets dedupe as we go
+			for (const r of typeReferences) { typeReferencesSet.add(r) }
+			for (const r of fileReferences) { fileReferencesSet.add(r) }
 
-			// Strip import/export statements, preserving external imports
-			// Use cached identifiers and sourceFile (both always present after buildModuleGraph)
-
-			// Get the bundled specifiers for this module from the map built during module graph construction
+			// Strip import/export statements, preserving external imports.
+			// Use cached identifiers and sourceFile (both always present after buildModuleGraph).
 			const bundledForThisModule = bundledSpecifiers.get(path) ?? emptySet;
-
-			// Calculate used declarations for this module
-			// We pass the global set of used declarations to stripImportsExports
 			const { code: strippedCode, externalImports, typeExports, valueExports } = this.stripImportsExports(code, sourceFile, identifiers, bundledForThisModule, renameMap, path);
 
-			// Collect external imports from all modules
-			allExternalImports.push(...externalImports);
+			// Collect external imports from all modules (merged later by mergeImports)
+			for (const imp of externalImports) { allExternalImports.push(imp) }
 
-			// Collect exports from project modules, but not from bundled npm packages
+			// Collect exports from project modules, but not from bundled npm packages.
 			// This prevents unused types from dependencies being re-exported
-			// while still allowing re-exports from the project's own modules
+			// while still allowing re-exports from the project's own modules.
 			if (!path.includes(nodeModules)) {
-				allValueExports.push(...valueExports);
-				allTypeExports.push(...typeExports);
+				for (const exp of valueExports) { valueExportsSet.add(exp) }
+				for (const exp of typeExports) {
+					if (!typeExportsSeen.has(exp)) { typeExportsSeen.add(exp); orderedTypeExports.push(exp) }
+				}
 
-				// Collect ALL declarations from project modules (exported or not)
-				// These should be preserved during tree-shaking since TypeScript emitted them
+				// Collect ALL declarations from project modules (exported or not).
+				// These should be preserved during tree-shaking since TypeScript emitted them.
 				for (const name of identifiers.types) { allDeclarations.add(name) }
 				for (const name of identifiers.values) { allDeclarations.add(name) }
 			}
@@ -707,9 +705,6 @@ class DeclarationBundler {
 			if (strippedCode.trim().length > 0) { codeBlocks.push(strippedCode.trim()) }
 		}
 
-		// Deduplicate using Sets for these collections since we're combining from many modules
-		const typeReferencesSet = new Set(allTypeReferences);
-		const uniqueFileReferences = [...new Set(allFileReferences)];
 		// Merge imports from the same module instead of simple deduplication
 		const mergedExternalImports = mergeImports(allExternalImports);
 
@@ -717,29 +712,38 @@ class DeclarationBundler {
 		for (const imp of mergedExternalImports) {
 			if (imp.includes('"node:') || imp.includes('\'node:')) { typeReferencesSet.add('node') }
 		}
-		const uniqueTypeReferences = [ ...typeReferencesSet ];
 
-		// Value exports take precedence - remove any types that are also values
-		// Use Set for O(1) lookup instead of Array.includes() O(n) to avoid O(n²) complexity
-		const finalValueExportsSet = new Set(allValueExports);
-		const finalValueExports = [...finalValueExportsSet];
-		const finalTypeExports = [...new Set(allTypeExports.filter((typeExport) => !finalValueExportsSet.has(typeExport)))];
+		// Value exports take precedence — strip any types that are also values
+		const finalValueExports: string[] = [...valueExportsSet];
+		const finalTypeExports: string[] = [];
+		for (const typeExport of orderedTypeExports) {
+			if (!valueExportsSet.has(typeExport)) { finalTypeExports.push(typeExport) }
+		}
 
 		// Build output using array for better performance than string concatenation
 		const outputParts: string[] = [];
 
 		// Add file references
-		if (uniqueFileReferences.length > 0) {
-			outputParts.push(...uniqueFileReferences.map((ref) => `/// <reference path="${ref}" />`), '');
+		if (fileReferencesSet.size > 0) {
+			for (const ref of fileReferencesSet) {
+				outputParts.push(`/// <reference path="${ref}" />`);
+			}
+			outputParts.push('');
 		}
 
 		// Add type references
-		if (uniqueTypeReferences.length > 0) {
-			outputParts.push(...uniqueTypeReferences.map((ref) => `/// <reference types="${ref}" />`), '');
+		if (typeReferencesSet.size > 0) {
+			for (const ref of typeReferencesSet) {
+				outputParts.push(`/// <reference types="${ref}" />`);
+			}
+			outputParts.push('');
 		}
 
 		// Add external imports. Add a blank line after imports
-		if (mergedExternalImports.length > 0) { outputParts.push(...mergedExternalImports, '') }
+		if (mergedExternalImports.length > 0) {
+			for (const imp of mergedExternalImports) { outputParts.push(imp) }
+			outputParts.push('');
+		}
 
 		// Add all code
 		outputParts.push(codeBlocks.join(newLine + newLine));
@@ -824,8 +828,8 @@ class DeclarationBundler {
  * @param options Bundling options
  * @returns The bundled declaration file content
  * @remarks
- * Yields the event loop once before CPU-intensive bundling starts so pending I/O
- * (for example, esbuild IPC responses from the parallel transpile phase) can be
+ * Yields the event loop before each entry point's bundle (when parallelTranspile is true)
+ * so pending I/O (for example, esbuild IPC responses from the parallel transpile phase) can be
  * processed promptly instead of being delayed by declaration bundling work.
  */
 export async function bundleDeclarations(options: DtsBundleOptions): Promise<WrittenFile[]> {
@@ -836,17 +840,28 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 
 	const dtsBundler = new DeclarationBundler(options);
 
-	// Yield the event loop before CPU-intensive bundling to allow pending I/O
-	// (e.g., esbuild IPC responses running in parallel) to be processed
-	await new Promise<void>((resolve) => void setImmediate(resolve));
-
-	// Bundle each entry point in parallel for better performance
+	// When transpile runs in parallel, dtsBundler.bundle() is synchronous CPU-bound work
+	// that blocks the event loop. While blocked, esbuild's IPC response cannot be delivered,
+	// inflating the measured transpile duration. Yield before each entry point so pending
+	// I/O (esbuild IPC responses) can be processed promptly.
+	// When transpile isn't running (emitDeclarationOnly), skip yields to reduce latency.
 	const bundleTasks: Promise<WrittenFile>[] = [];
-	for (const [ entryName, entryPoint ] of Object.entries(options.entryPoints)) {
+	const bundleEntryPoint = (entryName: string, entryPoint: AbsolutePath) => {
 		const content = dtsBundler.bundle(entryPoint);
 		if (content.length > 0) {
 			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}${FileExtension.DTS}`);
 			bundleTasks.push(writeFile(outPath, content, Encoding.utf8).then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length })));
+		}
+	};
+
+	if (options.parallelTranspile) {
+		for (const [ entryName, entryPoint ] of Object.entries(options.entryPoints)) {
+			await new Promise<void>((resolve) => void setImmediate(resolve));
+			bundleEntryPoint(entryName, entryPoint);
+		}
+	} else {
+		for (const [ entryName, entryPoint ] of Object.entries(options.entryPoints)) {
+			bundleEntryPoint(entryName, entryPoint);
 		}
 	}
 

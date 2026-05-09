@@ -88,8 +88,9 @@ const defaultEntryFile = 'src/index.ts' as RelativePath;
 const cacheDirectory = '.tsbuild' as RelativePath;
 const buildInfoFile = 'tsconfig.tsbuildinfo';
 const dtsCacheFile = 'dts_cache.v8.br';
-/** Cache format version - increment when cache structure changes (v2: V8 serialization + pre-processed declarations) */
-const dtsCacheVersion = 2;
+const outputManifestFile = 'outputs.manifest.json';
+/** Cache format version - increment when cache structure changes (v4: V8 serialization + Map-based file storage) */
+const dtsCacheVersion = 4;
 const format = 'esm';
 const newLine = '\n';
 const typeMatcher: RegExp = /\btype\b/;
@@ -121,6 +122,7 @@ export {
 	cacheDirectory,
 	buildInfoFile,
 	dtsCacheFile,
+	outputManifestFile,
 	dtsCacheVersion,
 	format,
 	newLine,

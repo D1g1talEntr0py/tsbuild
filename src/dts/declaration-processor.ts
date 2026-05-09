@@ -5,6 +5,7 @@ import ts, {
 	isEmptyStatement,
 	isEnumDeclaration,
 	isExportDeclaration,
+	isExportSpecifier,
 	isFunctionDeclaration,
 	isIdentifier,
 	isImportDeclaration,
@@ -32,6 +33,8 @@ import MagicString from 'magic-string';
 import { UnsupportedSyntaxError } from 'src/errors';
 import { FileExtension, newLine, typeMatcher } from 'src/constants';
 import type { NameRange, PreProcessOutput } from './@types';
+
+const commaCharacter = 44;
 
 /**
  * Processes TypeScript declaration files before and after bundling.
@@ -370,21 +373,32 @@ export class DeclarationProcessor {
 				const { flags } = node.declarationList;
 				const prefix = `declare ${flags & NodeFlags.Let ? 'let' : flags & NodeFlags.Const ? 'const' : 'var'} `;
 
-				let commaPos = 0;
-				for (const declarationNode of node.declarationList.getChildren().find((n) => n.kind === SyntaxKind.SyntaxList)?.getChildren() ?? []) {
-					if (declarationNode.kind === SyntaxKind.CommaToken) {
-						code.remove(commaPos = declarationNode.getStart(), declarationNode.getEnd());
-					} else if (commaPos) {
-						code.appendLeft(commaPos, `;${newLine}`);
-						const start = declarationNode.getFullStart();
-						const slice = code.slice(start, declarationNode.getStart());
-						const whitespace = slice.length - slice.trimStart().length;
+				// Walk declarations directly via AST instead of token-level getChildren() (~2x faster).
+				// Find each comma between consecutive declarations by scanning source text.
+				const sourceText = sourceFile.text;
+				for (let i = 1; i < declarations.length; i++) {
+					const prev = declarations[i - 1];
+					const curr = declarations[i];
 
-						if (whitespace) {
-							code.overwrite(start, start + whitespace, prefix);
-						} else {
-							code.appendLeft(start, prefix);
-						}
+					// Find comma token between prev.end and curr.getStart()
+					let commaPos = -1;
+					const limit = curr.getStart();
+					for (let p = prev.end; p < limit; p++) {
+						if (sourceText.charCodeAt(p) === commaCharacter /* , */) { commaPos = p; break }
+					}
+					if (commaPos === -1) { continue }
+
+					code.remove(commaPos, commaPos + 1);
+					code.appendLeft(commaPos, `;${newLine}`);
+
+					const start = curr.getFullStart();
+					const slice = sourceText.substring(start, curr.getStart());
+					const whitespace = slice.length - slice.trimStart().length;
+
+					if (whitespace) {
+						code.overwrite(start, start + whitespace, prefix);
+					} else {
+						code.appendLeft(start, prefix);
 					}
 				}
 			}
@@ -488,16 +502,8 @@ export class DeclarationProcessor {
 			}
 
 			// Remove redundant `{ Foo as Foo }` exports from namespaces
-			if (isModuleDeclaration(node) && node.body && isModuleBlock(node.body)) {
-				for (const bodyStatement of node.body.statements) {
-					if (isExportDeclaration(bodyStatement) && bodyStatement.exportClause && !isNamespaceExport(bodyStatement.exportClause)) {
-						for (const { name, propertyName } of bodyStatement.exportClause.elements) {
-							if (propertyName && isIdentifier(propertyName) && isIdentifier(name) && propertyName.getText() === name.getText()) {
-								magic.remove(propertyName.getStart(), name.getStart());
-							}
-						}
-					}
-				}
+			if (isExportSpecifier(node) && node.propertyName && isIdentifier(node.propertyName) && isIdentifier(node.name) && node.propertyName.text === node.name.text) {
+				magic.remove(node.propertyName.getStart(), node.name.getStart());
 			}
 
 			// Recurse into children for other possible matches deeper in the tree

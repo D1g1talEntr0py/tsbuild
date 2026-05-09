@@ -27,6 +27,8 @@ type DtsBundleOptions = {
 	/** Force bundling of these packages even if they're in node_modules */
 	noExternal: Pattern[];
 	compilerOptions: DtsCompilerOptions;
+	/** Whether transpile is running in parallel (only yield if true) */
+	parallelTranspile: boolean;
 };
 
 /** Type and value identifier collections from AST analysis */
@@ -74,15 +76,20 @@ type VersionedCache = {
 	/** Cache format version for compatibility checking */
 	version: number;
 	/** Cached declaration files: path -> pre-processed code with extracted references */
-	files: Record<string, CachedDeclaration>;
+	files: Map<string, CachedDeclaration>;
 };
+
+/** Structured external import preserved during DTS bundling. Avoids re-parsing import text via regex. */
+type ExternalImport =
+	| { kind: 'named'; specifier: string; isType: boolean; names: string[] }
+	| { kind: 'raw'; text: string };
 
 /** Declaration code with collected export information */
 type DeclarationCode = {
 	/** The processed code with imports/exports removed */
 	code: string;
-	/** External import statements to preserve */
-	externalImports: string[];
+	/** External import statements to preserve (structured, not text) */
+	externalImports: ExternalImport[];
 	/** Type-only exports */
 	typeExports: string[];
 	/** Value exports */
@@ -107,4 +114,4 @@ type BundledDeclaration = {
 	allDeclarations: Set<string>;
 };
 
-export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, VersionedCache, IdentifierMap, DeclarationCode, ModuleDependencyGraph, BundledDeclaration };
+export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, VersionedCache, IdentifierMap, DeclarationCode, ExternalImport, ModuleDependencyGraph, BundledDeclaration };

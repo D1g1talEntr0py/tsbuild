@@ -62,10 +62,9 @@ function outputToSourcePath(outputPath: string, outDir: string, sourceDir: strin
 
 	const relativePortion = normalizedOutput.slice(normalizedOutDir.length + 1);
 
-	for (const [outExt, srcExt] of outputToSourceExtension) {
+	for (const [ outExt, srcExt ] of outputToSourceExtension) {
 		if (relativePortion.endsWith(outExt)) {
-			const stem = relativePortion.slice(0, -outExt.length);
-			return `./${sourceDir}/${stem}${srcExt}` as RelativePath;
+			return `./${sourceDir}/${relativePortion.slice(0, -outExt.length)}${srcExt}` as RelativePath;
 		}
 	}
 
@@ -102,6 +101,7 @@ function subpathToEntryName(subpath: string, packageName?: string): string {
 
 	const withoutPrefix = subpath.replace(/^\.\//, '');
 	const lastSegment = withoutPrefix.lastIndexOf('/');
+
 	return lastSegment === -1 ? withoutPrefix : withoutPrefix.slice(lastSegment + 1);
 }
 
@@ -121,7 +121,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 			const sourcePath = outputToSourcePath(packageJson.exports, outDir, sourceDir);
 			if (sourcePath) { entryPoints[stemOf(sourcePath)] = sourcePath }
 		} else {
-			for (const [subpath, exportValue] of Object.entries(packageJson.exports)) {
+			for (const [ subpath, exportValue ] of Object.entries(packageJson.exports)) {
 				if (subpath.includes('*')) { continue }
 
 				const outputPath = resolveConditionalExport(exportValue);
@@ -136,7 +136,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	if (packageJson.bin !== undefined) {
 		const binEntries = typeof packageJson.bin === 'string' ? { [packageJson.name ?? 'cli']: packageJson.bin } : packageJson.bin;
 
-		for (const [name, outputPath] of Object.entries(binEntries)) {
+		for (const [ name, outputPath ] of Object.entries(binEntries)) {
 			if (entryPoints[name] === undefined) {
 				const sourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
 				if (sourcePath) { entryPoints[name] = sourcePath }
@@ -145,6 +145,9 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	}
 
 	let hasEntries = false;
+	// Why use a loop to check for entries instead of Object.keys().length? Because entryPoints may have a prototype, and we only want own properties.
+	// Then why not use Object.hasOwnProperty? Because entryPoints may be a plain object without a prototype at all (i.e., `Object.create(null)`),
+	// so we can't rely on hasOwnProperty either. The safest way is to just loop through the keys and break immediately after finding the first one.
 	for (const _ in entryPoints) { hasEntries = true; break }
 
 	if (!hasEntries) {
@@ -156,6 +159,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	}
 
 	for (const _ in entryPoints) { return entryPoints }
+
 	return undefined;
 }
 

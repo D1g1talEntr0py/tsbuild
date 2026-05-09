@@ -119,24 +119,36 @@ export class FileManager implements Closable {
 		// reduce the time spent inside TypeScript's synchronous emit() call.
 		this.processEmittedFiles();
 
-		// Write .tsbuildinfo asynchronously (was sync sys.writeFile during emit)
-		const tasks: Promise<void>[] = [];
-		if (this.pendingBuildInfo) { tasks.push(Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text)) }
-
-		this.pendingBuildInfo = undefined;
-
-		if (this.cache && this.hasEmittedFiles) { tasks.push(this.cache.save(this.declarationFiles)) }
-
-		// Fire-and-forget cache save — the cache is only needed on the *next* build,
-		// so we don't block the current build's parallel phases (transpile + dts bundling).
-		// The promise is awaited in initialize() (watch mode) and close() (process exit).
-		// Suppress unhandled rejection warnings — errors are handled when awaited.
-		this.pendingSave = Promise.all(tasks).then(() => {}, () => {});
-		this.pendingSave?.catch(() => {});
+		// NOTE: neither the .tsbuildinfo write nor the dts cache Brotli compression are started here.
+		// Both are libuv-threadpool work (libuv worker for fs writes, libuv worker for zlib_brotli)
+		// that competes with esbuild's output writes and dts bundling I/O. Starting them during
+		// finalize() — i.e. immediately before the parallel transpile + dts phases — caused esbuild's
+		// `await build()` wall time to inflate by 50-90ms on incremental rebuilds. Caller must invoke
+		// persistCache() AFTER the parallel phases settle to keep persistence off the critical path.
 
 		// For non-incremental builds (no cache), always assume files were emitted
 		// For incremental builds, hasEmittedFiles tracks actual emission
 		return this.cache === undefined || this.hasEmittedFiles;
+	}
+
+	/**
+	 * Persists the .tsbuildinfo file and the dts cache to disk in the background. Call this
+	 * AFTER the build's parallel phases (transpile + dts bundling) have completed so the writes
+	 * (and Brotli compression for the dts cache) don't compete with esbuild for libuv threadpool
+	 * slots.
+	 */
+	persistCache(): void {
+		const tasks: Promise<void>[] = [];
+		if (this.pendingBuildInfo) {
+			tasks.push(Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text));
+			this.pendingBuildInfo = undefined;
+		}
+		if (this.cache !== undefined && this.hasEmittedFiles) {
+			tasks.push(this.cache.save(this.declarationFiles));
+		}
+		if (tasks.length === 0) { return }
+		const save = tasks.length === 1 ? tasks[0].then(() => {}, () => {}) : Promise.all(tasks).then(() => {}, () => {});
+		this.pendingSave = this.pendingSave === undefined ? save : Promise.all([ this.pendingSave, save ]).then(() => {}, () => {});
 	}
 
 	/**
