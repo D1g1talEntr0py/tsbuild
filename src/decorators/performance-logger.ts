@@ -19,7 +19,6 @@ class PerformanceLogger implements Closable {
 				// Special formatting for top-level "Build" step ⚡
 				if (message === 'Build') {
 					Logger.separator();
-					// Check if build failed by examining process.exitCode
 					if (process.exitCode) {
 						Logger.error(`✗ Build failed in ${TextFormat.cyan(PerformanceLogger.formatDuration(duration))}\n`);
 					} else {

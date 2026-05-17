@@ -32,7 +32,6 @@ import {
 import type { SourceFile, Node, StringLiteral, ModuleResolutionHost } from 'typescript';
 import type { AbsolutePath, CachedDeclaration, Pattern, WrittenFile } from 'src/@types';
 import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, BundledDeclaration, ExternalImport } from './@types';
-import { Files } from 'src/files';
 
 const nodeModules = '/node_modules/';
 const emptySet: ReadonlySet<string> = new Set();
@@ -614,10 +613,9 @@ class DeclarationBundler {
 
 		// Value exports take precedence - remove any types that are also values
 		const finalValueExportsSet = new Set(valueExports.map(exportsMapper));
-		const finalValueExports = [...finalValueExportsSet];
-		const finalTypeExports = [...new Set(typeExports.map(exportsMapper).filter(t => !finalValueExportsSet.has(t)))];
+		const finalTypeExports = [ ...new Set(typeExports.map(exportsMapper).filter((type) => !finalValueExportsSet.has(type))) ];
 
-		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: finalValueExports };
+		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: [ ...finalValueExportsSet ] };
 	}
 
 	/**
@@ -642,13 +640,14 @@ class DeclarationBundler {
 		const renameMap = new Map<string, string>(); // original name + module -> renamed identifier
 
 		// First pass: collect all declarations and detect conflicts
-		for (const { path, identifiers } of sortedModules) {
-			for (const name of identifiers.types) {
+		for (const { path, identifiers: { types, values } } of sortedModules) {
+			for (const name of types) {
 				let set = declarationSources.get(name);
 				if (set === undefined) { declarationSources.set(name, set = new Set()) }
 				set.add(path);
 			}
-			for (const name of identifiers.values) {
+
+			for (const name of values) {
 				let set = declarationSources.get(name);
 				if (set === undefined) { declarationSources.set(name, set = new Set()) }
 				set.add(path);
@@ -656,7 +655,7 @@ class DeclarationBundler {
 		}
 
 		// Second pass: generate unique names for conflicting identifiers
-		for (const [name, sourcesSet] of declarationSources) {
+		for (const [ name, sourcesSet ] of declarationSources) {
 			if (sourcesSet.size > 1) {
 				// First module keeps original name, subsequent modules get $1, $2, etc.
 				// Each candidate is verified against all known declarations to avoid collisions
@@ -673,7 +672,7 @@ class DeclarationBundler {
 		}
 
 		// Collect all references and code
-		for (const { path, typeReferences, fileReferences, sourceFile, code, identifiers } of sortedModules) {
+		for (const { path, typeReferences, fileReferences, sourceFile, code, identifiers: { types, values } } of sortedModules) {
 			// Collect references — Sets dedupe as we go
 			for (const r of typeReferences) { typeReferencesSet.add(r) }
 			for (const r of fileReferences) { fileReferencesSet.add(r) }
@@ -681,7 +680,7 @@ class DeclarationBundler {
 			// Strip import/export statements, preserving external imports.
 			// Use cached identifiers and sourceFile (both always present after buildModuleGraph).
 			const bundledForThisModule = bundledSpecifiers.get(path) ?? emptySet;
-			const { code: strippedCode, externalImports, typeExports, valueExports } = this.stripImportsExports(code, sourceFile, identifiers, bundledForThisModule, renameMap, path);
+			const { code: strippedCode, externalImports, typeExports, valueExports } = this.stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path);
 
 			// Collect external imports from all modules (merged later by mergeImports)
 			for (const imp of externalImports) { allExternalImports.push(imp) }
@@ -697,8 +696,8 @@ class DeclarationBundler {
 
 				// Collect ALL declarations from project modules (exported or not).
 				// These should be preserved during tree-shaking since TypeScript emitted them.
-				for (const name of identifiers.types) { allDeclarations.add(name) }
-				for (const name of identifiers.values) { allDeclarations.add(name) }
+				for (const name of types) { allDeclarations.add(name) }
+				for (const name of values) { allDeclarations.add(name) }
 			}
 
 			// Skip modules that only contain imports/exports (pure re-export files)
@@ -833,10 +832,9 @@ class DeclarationBundler {
  * processed promptly instead of being delayed by declaration bundling work.
  */
 export async function bundleDeclarations(options: DtsBundleOptions): Promise<WrittenFile[]> {
-	// Ensure output directory exists
-	if (!(await Files.exists(options.compilerOptions.outDir))) {
-		await mkdir(options.compilerOptions.outDir, defaultDirOptions);
-	}
+	// mkdir with { recursive: true } is idempotent — no-op when the directory already exists,
+	// so we skip the redundant Files.exists check and save one syscall per build.
+	await mkdir(options.compilerOptions.outDir, defaultDirOptions);
 
 	const dtsBundler = new DeclarationBundler(options);
 
@@ -855,8 +853,10 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 	};
 
 	if (options.parallelTranspile) {
+		const queueImmediateTask = (resolve: (value: void | PromiseLike<void>) => void): undefined => void setImmediate(resolve);
+
 		for (const [ entryName, entryPoint ] of Object.entries(options.entryPoints)) {
-			await new Promise<void>((resolve) => void setImmediate(resolve));
+			await new Promise<void>(queueImmediateTask);
 			bundleEntryPoint(entryName, entryPoint);
 		}
 	} else {
