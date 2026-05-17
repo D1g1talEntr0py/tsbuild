@@ -1,3 +1,39 @@
+## [1.8.8](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.7...v1.8.8) (2026-05-17)
+
+### Bug Fixes
+
+* **project:** do not auto-inject node types for non-node platforms (7e23a502d4fda7805fd0fd35081a1b3fdbdda160)
+- Check if the target platform is Node before automatically applying 'node' to the compiler types array
+- Ensure user-specified types arrays are properly respected on browser builds
+- Include assertions and test coverage to verify DOM library types do not implicitly load @types/node
+
+
+### Performance Improvements
+
+* **loader:** implement deterministic stat caching and stable path hashing (585b055934e61d6d8f6133b9a280658c1afbae57)
+- Add a fast-path to skip caching logic for non-relative bare specifiers
+- Snapshot the cache directory on startup to prevent repeated ENOENT lookups
+- Hash the running Node version and esbuild version into the cache key for robust invalidation
+- Implement a SHA-256 stable path hashing and share `statSync` calls between `resolve` and `load`
+
+
+### Code Refactoring
+
+* simplify internals in declaration bundler and logger (70b91297a12138a35f45cb759ef65b53adf13b73)
+- Remove redundant files existence check before creating the out directory in bundler
+- Remove unneeded node module imports and process logic in logger
+- Optimize declaration source collection loop in declaration bundler
+- Ensure recursive mkdir handles already-existing folders safely
+
+
+### Miscellaneous Chores
+
+* update dependencies and rewrite benchmarks with mitata (5ace062e6a5d8fa070493aadb12d4986a55df0c4)
+- Update various dev dependencies including pnpm, vitest, eslint, and typescript-eslint
+- Replace tinybench with mitata for benchmarking
+- Rewrite the benchmark script to compare bundlers and measure artifact metadata
+- Update the generated benchmarking docs with the new mitata measurements
+
 ## [1.8.7](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.6...v1.8.7) (2026-05-09)
 
 ### Performance Improvements
