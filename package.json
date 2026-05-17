@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@11.0.8",
+  "packageManager": "pnpm@11.1.2",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -62,18 +62,18 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.6.0",
-    "@typescript-eslint/eslint-plugin": "^8.59.2",
-    "@typescript-eslint/parser": "^8.59.2",
-    "@vitest/coverage-v8": "^4.1.5",
-    "eslint": "^10.3.0",
+    "@types/node": "^25.8.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.3",
+    "@typescript-eslint/parser": "^8.59.3",
+    "@vitest/coverage-v8": "^4.1.6",
+    "eslint": "^10.4.0",
     "eslint-plugin-jsdoc": "^62.9.0",
     "fs-monkey": "^1.1.0",
     "memfs": "^4.57.2",
-    "tinybench": "^6.0.1",
+    "mitata": "^1.0.34",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.2",
-    "vitest": "^4.1.5"
+    "typescript-eslint": "^8.59.3",
+    "vitest": "^4.1.6"
   },
   "peerDependencies": {
     "typescript": ">=5.6.3"

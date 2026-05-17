@@ -1546,6 +1546,438 @@
         "total_ms": 21,
         "percent": 4.8
       }
+    },
+    {
+      "date": "2026-05-15",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 440,
+      "stddev_ms": 4,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 13
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      }
+    },
+    {
+      "date": "2026-05-15",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 6,
+      "stddev_ms": 1,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 434,
+        "percent": 98.6
+      }
+    },
+    {
+      "date": "2026-05-15",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 419,
+      "stddev_ms": 4,
+      "samples": 5,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 21,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 21,
+        "percent": 4.8
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "build_type": "cold_build_fresh_cache",
+      "description": "Cold build after clearing .tsbuild cache",
+      "total_ms": 458,
+      "stddev_ms": 11,
+      "samples": 5,
+      "peak_rss_mb": 298,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 25,
+        "bundle_declarations_ms": 14
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "build_type": "incremental_no_changes",
+      "description": "Incremental rebuild with no file changes",
+      "total_ms": 6,
+      "stddev_ms": 0,
+      "samples": 5,
+      "peak_rss_mb": 246,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 452,
+        "percent": 98.7
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "build_type": "incremental_with_change",
+      "description": "Incremental rebuild after modifying src/logger.ts",
+      "total_ms": 422,
+      "stddev_ms": 4,
+      "samples": 5,
+      "peak_rss_mb": 295,
+      "phases": {
+        "type_checking_ms": 0,
+        "transpile_ms": 23,
+        "bundle_declarations_ms": 15
+      },
+      "phase_breakdown": {
+        "type_checking": {}
+      },
+      "speedup_vs_cold": {
+        "total_ms": 36,
+        "percent": 7.9
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_cold",
+      "description": "Cold self-build after clearing .tsbuild cache",
+      "total_ms": 1084,
+      "stddev_ms": 36,
+      "samples": 5,
+      "peak_rss_mb": 298,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 437,
+        "transpile_ms": 27,
+        "bundle_declarations_ms": 15
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_no_change",
+      "description": "Incremental self-build, no file changes",
+      "total_ms": 536,
+      "stddev_ms": 22,
+      "samples": 5,
+      "peak_rss_mb": 248,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 6,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_with_change",
+      "description": "Incremental self-build, src/logger.ts touched",
+      "total_ms": 1035,
+      "stddev_ms": 14,
+      "samples": 5,
+      "peak_rss_mb": 295,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 417,
+        "transpile_ms": 22,
+        "bundle_declarations_ms": 15
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsc",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (tsc)",
+      "total_ms": 808,
+      "stddev_ms": 7,
+      "samples": 5,
+      "peak_rss_mb": 205,
+      "output_kb": 102,
+      "speedup_vs_fastest": {
+        "factor": 2.79
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "esbuild",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (esbuild)",
+      "total_ms": 290,
+      "stddev_ms": 2,
+      "samples": 5,
+      "peak_rss_mb": 135,
+      "output_kb": 48,
+      "speedup_vs_fastest": {
+        "factor": 1
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "swc",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (swc)",
+      "total_ms": 432,
+      "stddev_ms": 8,
+      "samples": 5,
+      "peak_rss_mb": 222,
+      "output_kb": 307,
+      "speedup_vs_fastest": {
+        "factor": 1.49
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_cold",
+      "description": "Cold self-build after clearing .tsbuild cache",
+      "total_ms": 1077,
+      "stddev_ms": 39,
+      "samples": 5,
+      "peak_rss_mb": 300,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 437,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 15
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_no_change",
+      "description": "Incremental self-build, no file changes",
+      "total_ms": 543,
+      "stddev_ms": 14,
+      "samples": 5,
+      "peak_rss_mb": 248,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 6,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_with_change",
+      "description": "Incremental self-build, src/logger.ts touched",
+      "total_ms": 1031,
+      "stddev_ms": 11,
+      "samples": 5,
+      "peak_rss_mb": 296,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 406,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 15
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsc",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (tsc)",
+      "total_ms": 718,
+      "stddev_ms": 18,
+      "samples": 5,
+      "peak_rss_mb": 161,
+      "output_kb": 102,
+      "speedup_vs_fastest": {
+        "factor": 2.44
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "esbuild",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (esbuild)",
+      "total_ms": 294,
+      "stddev_ms": 4,
+      "samples": 5,
+      "peak_rss_mb": 134,
+      "output_kb": 48,
+      "speedup_vs_fastest": {
+        "factor": 1
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "swc",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (swc)",
+      "total_ms": 433,
+      "stddev_ms": 9,
+      "samples": 5,
+      "peak_rss_mb": 222,
+      "output_kb": 307,
+      "speedup_vs_fastest": {
+        "factor": 1.47
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsup",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (tsup)",
+      "total_ms": 1165,
+      "stddev_ms": 29,
+      "samples": 5,
+      "peak_rss_mb": 307,
+      "output_kb": 98,
+      "speedup_vs_fastest": {
+        "factor": 3.96
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_cold",
+      "description": "Cold self-build after clearing .tsbuild cache",
+      "total_ms": 1089,
+      "stddev_ms": 19,
+      "samples": 5,
+      "peak_rss_mb": 301,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 438,
+        "transpile_ms": 26,
+        "bundle_declarations_ms": 15
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_no_change",
+      "description": "Incremental self-build, no file changes",
+      "total_ms": 546,
+      "stddev_ms": 6,
+      "samples": 5,
+      "peak_rss_mb": 248,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 6,
+        "transpile_ms": 0,
+        "bundle_declarations_ms": 0
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "self_build_with_change",
+      "description": "Incremental self-build, src/logger.ts touched",
+      "total_ms": 1052,
+      "stddev_ms": 14,
+      "samples": 5,
+      "peak_rss_mb": 296,
+      "output_kb": 150,
+      "phases": {
+        "type_checking_ms": 416,
+        "transpile_ms": 27,
+        "bundle_declarations_ms": 15
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsbuild",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (tsbuild)",
+      "total_ms": 833,
+      "stddev_ms": 10,
+      "samples": 5,
+      "peak_rss_mb": 270,
+      "output_kb": 97,
+      "phases": {
+        "type_checking_ms": 232,
+        "transpile_ms": 40,
+        "bundle_declarations_ms": 25
+      },
+      "speedup_vs_fastest": {
+        "factor": 2.8
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsc",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (tsc)",
+      "total_ms": 733,
+      "stddev_ms": 18,
+      "samples": 5,
+      "peak_rss_mb": 162,
+      "output_kb": 102,
+      "speedup_vs_fastest": {
+        "factor": 2.46
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "esbuild",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (esbuild)",
+      "total_ms": 298,
+      "stddev_ms": 3,
+      "samples": 5,
+      "peak_rss_mb": 134,
+      "output_kb": 48,
+      "speedup_vs_fastest": {
+        "factor": 1
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "swc",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (swc)",
+      "total_ms": 440,
+      "stddev_ms": 9,
+      "samples": 5,
+      "peak_rss_mb": 222,
+      "output_kb": 307,
+      "speedup_vs_fastest": {
+        "factor": 1.48
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "tool": "tsup",
+      "build_type": "synthetic_100_files_cold",
+      "description": "Cold build of synthetic 100-file project (tsup)",
+      "total_ms": 1187,
+      "stddev_ms": 27,
+      "samples": 5,
+      "peak_rss_mb": 304,
+      "output_kb": 98,
+      "speedup_vs_fastest": {
+        "factor": 3.98
+      }
     }
   ],
   "regression_thresholds": {
