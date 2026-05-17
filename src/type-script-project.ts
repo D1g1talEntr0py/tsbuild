@@ -167,7 +167,6 @@ export class TypeScriptProject implements Closable {
 				// Process declarations if enabled
 				if (this.configuration.compilerOptions.declaration) { processes.push(this.processDeclarations()) }
 
-				// Transpile unless emitDeclarationOnly is set
 				if (!this.configuration.compilerOptions.emitDeclarationOnly) { processes.push(this.transpile()) }
 			} else if (eagerCleanPromise !== undefined) {
 				// We started a clean but won't emit — still wait for it to finish so the directory
@@ -566,8 +565,12 @@ export class TypeScriptProject implements Closable {
 				...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, incremental: true, tsBuildInfoFile: Paths.join(cacheDirectory, buildInfoFile), lib: [] },
 				...configResult.config.compilerOptions,
 				...typeScriptOptions.compilerOptions,
-				// Always include 'node' and merge with any user-specified types
-				types: [ ...new Set([ 'node', ...(configResult.config.compilerOptions?.types ?? []), ...(typeScriptOptions.compilerOptions?.types ?? []) ]) ]
+				// Auto-inject 'node' only on Node platform — browser/neutral builds shouldn't pay the
+				// cost of loading @types/node (~3 MB of declarations). Users can still opt in by
+				// listing 'node' explicitly in their tsconfig types array.
+				types: platform === Platform.NODE
+					? [ ...new Set([ 'node', ...(configResult.config.compilerOptions?.types ?? []), ...(typeScriptOptions.compilerOptions?.types ?? []) ]) ]
+					: [ ...new Set([ ...(configResult.config.compilerOptions?.types ?? []), ...(typeScriptOptions.compilerOptions?.types ?? []) ]) ]
 			}
 		};
 

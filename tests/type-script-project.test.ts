@@ -184,6 +184,25 @@ describe('TypeScriptProject', () => {
 			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
 			expect(callOptions.types?.filter((t: string) => t === 'node')).toHaveLength(1);
 		});
+
+		it('does not auto-inject node on browser platform (DOM lib)', () => {
+			vi.mocked(createIncrementalProgram).mockClear();
+			TestHelper.createTestProject({ tsconfig: { compilerOptions: { lib: ['DOM', 'ESNext'] } } });
+
+			createProject(process.cwd());
+			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
+			expect(callOptions.types).not.toContain('node');
+		});
+
+		it('respects user-specified node type on browser platform', () => {
+			vi.mocked(createIncrementalProgram).mockClear();
+			TestHelper.createTestProject({ tsconfig: { compilerOptions: { lib: ['DOM', 'ESNext'], types: ['node', 'jest'] } } });
+
+			createProject(process.cwd());
+			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
+			expect(callOptions.types).toContain('node');
+			expect(callOptions.types).toContain('jest');
+		});
 	});
 
 	describe('clean', () => {
@@ -307,6 +326,9 @@ describe('TypeScriptProject', () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
 			});
+			// Pre-populate .tsbuildinfo so the build is treated as hot/incremental (no new files emitted).
+			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
+			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
 			const project = createProject(projectPath);
 			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
 
@@ -319,6 +341,8 @@ describe('TypeScriptProject', () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: false, incremental: true } }
 			});
+			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
+			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
 			const project = createProject(projectPath);
 			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
 
