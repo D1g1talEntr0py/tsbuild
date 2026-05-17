@@ -1,10 +1,11 @@
-import process from 'node:process';
-import { createHash } from 'node:crypto';
-import { transformSync } from 'esbuild';
+import { transformSync, version as esbuildVersion } from 'esbuild';
+import { writeFile } from 'node:fs/promises';
+import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { createHash } from 'node:crypto';
 import { registerHooks, type LoadHookSync, type ResolveHookSync } from 'node:module';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import process from 'node:process';
 
 const projectRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 const srcRoot = resolvePath(projectRoot, 'src');
@@ -15,23 +16,58 @@ const cacheDir = resolvePath(projectRoot, 'node_modules', '.cache', 'tsbuild-loa
 
 mkdirSync(cacheDir, { recursive: true });
 
+// Snapshot the cache directory once at startup. Membership lookups replace per-load
+// readFileSync+ENOENT control flow on cold misses. New entries are added as they're written.
+const cachedEntries = new Set<string>(readdirSync(cacheDir));
+
+// Bake the running Node version and esbuild version into every cache key so that
+// upgrading either automatically invalidates stale transforms.
+const cacheVersion = `${process.versions.node}-${esbuildVersion}`;
+
+type StatInfo = { mtimeMs: number; size: number };
+
 const resolveCache = new Map<string, ReturnType<ResolveHookSync>>();
-const existsCache = new Map<string, boolean>();
+// Only positive results are cached. Negative results would go stale in long-running watch processes when new files appear.
+const statCache = new Map<string, StatInfo>();
 const pathHashCache = new Map<string, string>();
 
 /**
- * Returns a short stable hash for a filesystem path.
+ * Returns a stable 16-hex-character SHA-256 hash for a filesystem path.
+ *
+ * 16 hex chars = 64 bits of hash space (~1.8×10¹⁹ combinations), making
+ * collisions effectively impossible even in large monorepos. The result is
+ * memoised per process, so each unique path pays the hashing cost at most once.
+ *
  * @param path Absolute filesystem path.
- * @returns Deterministic short hash used in cache file names.
+ * @returns Deterministic 16-char hex hash used in cache file names.
  */
 function hashPath(path: string): string {
 	const cached = pathHashCache.get(path);
 	if (cached !== undefined) { return cached }
 
-	const hash = createHash('sha1').update(path).digest('hex').slice(0, 16);
+	const hash = createHash('sha256').update(path).digest('hex').slice(0, 16);
 	pathHashCache.set(path, hash);
 
 	return hash;
+}
+
+/**
+ * Returns cached stat info for a regular file, or undefined when the path is missing or not a file.
+ * Cached so resolve() and load() share a single statSync() per file.
+ * @param path Absolute filesystem path.
+ * @returns Stat info (mtimeMs + size) or undefined.
+ */
+function getStat(path: string): StatInfo | undefined {
+	const cached = statCache.get(path);
+	if (cached !== undefined) { return cached }
+
+	const stat = statSync(path, { throwIfNoEntry: false });
+	if (stat === undefined || !stat.isFile()) { return undefined }
+
+	const info: StatInfo = { mtimeMs: stat.mtimeMs, size: stat.size };
+	statCache.set(path, info);
+
+	return info;
 }
 
 /**
@@ -40,14 +76,7 @@ function hashPath(path: string): string {
  * @returns True when the path exists and is a file.
  */
 function fileExists(path: string): boolean {
-	const cached = existsCache.get(path);
-	if (cached !== undefined) { return cached }
-
-	const stat = statSync(path, { throwIfNoEntry: false });
-	const exists = stat !== undefined && stat.isFile();
-	existsCache.set(path, exists);
-
-	return exists;
+	return getStat(path) !== undefined;
 }
 
 /**
@@ -81,15 +110,22 @@ const hooks = {
 	 * @returns Resolve result for Node's module loader.
 	 */
 	resolve(specifier, context, nextResolve) {
+		// Fast-path: bare specifiers (node:*, npm packages, absolute paths) skip the cache entirely.
+		// Only relative ('.') and src/ aliased imports need TS resolution.
+		const firstChar = specifier.charCodeAt(0);
+		const isRelative = firstChar === 46 /* . */;
+		const isSrcAlias = firstChar === 115 /* s */ && specifier.startsWith('src/');
+		if (!isRelative && !isSrcAlias) { return nextResolve(specifier, context) }
+
 		const cacheKey = context.parentURL !== undefined ? specifier + '\0' + context.parentURL : specifier;
 		const cached = resolveCache.get(cacheKey);
 		if (cached !== undefined) { return cached }
 
 		let absPath: string | null = null;
 
-		if (specifier.startsWith('src/')) {
+		if (isSrcAlias) {
 			absPath = resolvePath(srcRoot, specifier.slice(4));
-		} else if (specifier.charCodeAt(0) === 46 /* . */ && context.parentURL !== undefined && context.parentURL.startsWith('file:')) {
+		} else if (context.parentURL !== undefined && context.parentURL.startsWith('file:')) {
 			absPath = resolvePath(dirname(fileURLToPath(context.parentURL)), specifier);
 		}
 
@@ -98,6 +134,7 @@ const hooks = {
 			if (tsPath !== null) {
 				const result = { url: pathToFileURL(tsPath).href, format: 'module', shortCircuit: true };
 				resolveCache.set(cacheKey, result);
+
 				return result;
 			}
 		}
@@ -112,37 +149,46 @@ const hooks = {
 	 * @returns Load result for Node's module loader.
 	 */
 	load(url, context, nextLoad) {
-		if (!url.startsWith('file:') || !url.endsWith('.ts')) return nextLoad(url, context);
+		if (!url.startsWith('file:') || !url.endsWith('.ts')) { return nextLoad(url, context) }
 
 		const path = fileURLToPath(url);
-		const stat = statSync(path);
-		const cachePath = resolvePath(cacheDir, hashPath(path) + '-' + stat.mtimeMs + '-' + stat.size + '.js');
+		// Reuse stat info populated by resolve() when available; fall back to statSync otherwise.
+		const info = getStat(path);
+		if (info === undefined) { return nextLoad(url, context) }
 
-		let code: string;
-		try {
-			code = readFileSync(cachePath, 'utf8');
-		} catch {
-			const source = readFileSync(path, 'utf8');
-			code = transformSync(source, {
-				loader: 'ts',
-				format: 'esm',
-				target: 'es2024',
-				sourcefile: path,
-				sourcemap: 'inline',
-				platform: 'node'
-			}).code;
-			writeFileSync(cachePath, code);
+		const cacheFileName = hashPath(path) + '-' + info.mtimeMs + '-' + info.size + '-' + cacheVersion + '.js';
+		const cachePath = resolvePath(cacheDir, cacheFileName);
+
+		// Source must be a string: Node's --experimental-strip-types re-processes Buffer sources
+		// for .ts URLs, which corrupts pre-transpiled output (e.g. legacy decorators).
+		let source: string;
+		if (cachedEntries.has(cacheFileName)) {
+			source = readFileSync(cachePath, 'utf8');
+		} else {
+			// Target the exact running Node version so esbuild only down-levels what's needed.
+			// minifyWhitespace reduces cache file size for faster warm reads (minifySyntax and
+			// minifyIdentifiers are intentionally off — syntax changes risk correctness, and
+			// identifier minification breaks debuggers). keepNames prevents esbuild from
+			// renaming variables even when minification is off. supported.decorators=false forces
+			// decorator transformation because Node's --experimental-strip-types skips it.
+			source = transformSync(readFileSync(path), { loader: 'ts', format: 'esm', target: `node${process.versions.node}`, sourcefile: path, platform: 'node', supported: { decorators: false }, minifyWhitespace: true, keepNames: true }).code;
+			cachedEntries.add(cacheFileName);
+			// Fire-and-forget: the in-memory `source` is already returned to Node; the disk write
+			// only matters for future runs, so we don't block the loader on it.
+			writeFile(cachePath, source).catch((err: unknown) => {
+				process.stderr.write(`[tsbuild-loader] cache write failed for ${cacheFileName}: ${err instanceof Error ? err.message : String(err)}\n`);
+			});
 		}
 
-		return { format: 'module', source: code, shortCircuit: true };
+		return { format: 'module', source, shortCircuit: true };
 	}
 } satisfies { resolve: ResolveHookSync; load: LoadHookSync };
 
 registerHooks(hooks);
 
+// If an entry file is provided as a command-line argument, load it to start the application.
 const entry = process.argv[2];
 if (entry !== undefined) {
-	const entryUrl = entry.startsWith('file:') ? entry : pathToFileURL(resolvePath(entry)).href;
 	process.argv.splice(1, 1);
-	await import(entryUrl);
+	await import(entry.startsWith('file:') ? entry : pathToFileURL(resolvePath(entry)).href);
 }
