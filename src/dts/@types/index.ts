@@ -1,5 +1,5 @@
 import type { AbsolutePath, Brand, CachedDeclaration, EntryPoints, Pattern } from '../../@types/index.js';
-import type { ModuleResolutionKind, Node, SourceFile } from 'typescript';
+import type { ModuleResolutionKind, SourceFile } from 'typescript';
 
 declare const NameRangeBrand: unique symbol;
 type NameRange = Brand<[start: number, end: number], typeof NameRangeBrand>;

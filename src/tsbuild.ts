@@ -34,7 +34,7 @@ if (help) {
 
 // Handle version option
 if (version) {
-	console.log(import.meta.env?.tsbuild_version ?? process.env.npm_package_version);
+	console.log(import.meta.env?.tsbuild_version ?? process.env['npm_package_version']);
 	process.exit(0);
 }
 

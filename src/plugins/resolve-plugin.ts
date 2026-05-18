@@ -43,7 +43,7 @@ async function resolveReference(reference: PluginReference, projectDir: string):
 		throw new ConfigurationError(`Failed to load plugin "${specifier}": ${error instanceof Error ? error.message : String(error)}`);
 	}
 
-	const defaultExport = module.default;
+	const defaultExport = module['default'];
 	if (defaultExport === undefined) {
 		throw new ConfigurationError(`Plugin "${specifier}" has no default export. The module must export a plugin factory function or Plugin object as its default export.`);
 	}

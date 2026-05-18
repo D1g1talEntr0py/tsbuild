@@ -2,8 +2,8 @@ import { isatty } from 'node:tty';
 import type { FormatSupplier } from './@types';
 
 const { env = {}, platform = '' } = process;
-const isDumbTerminal = env.TERM === 'dumb';
-const isCompatibleTerminal = isatty(1) && env.TERM && !isDumbTerminal;
+const isDumbTerminal = env['TERM'] === 'dumb';
+const isCompatibleTerminal = isatty(1) && env['TERM'] && !isDumbTerminal;
 const isColorSupported = !('NO_COLOR' in env) && ('FORCE_COLOR' in env || (platform === 'win32' && !isDumbTerminal) || isCompatibleTerminal);
 
 /**

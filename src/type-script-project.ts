@@ -133,7 +133,7 @@ export class TypeScriptProject implements Closable {
 	 */
 	@logPerformance('Build')
 	async build(): Promise<void> {
-		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env.npm_package_version}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
+		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env['npm_package_version']}${this.configuration.compilerOptions.incremental && this.configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
 
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];
@@ -697,19 +697,5 @@ export class TypeScriptProject implements Closable {
 
 		// Throw to signal build failure - handleBuildError will set the exit code
 		throw new TypeCheckError(message, formatDiagnostics(diagnostics, diagnosticsHost));
-	}
-
-	/**
-	 * Calculates elapsed time since a performance mark and clears the mark.
-	 * @param markName - The name of the performance mark to measure from
-	 * @returns Elapsed time in milliseconds
-	 */
-	private static elapsed(markName: string) {
-		const { name, startTime } = performance.mark(`${markName}:end`);
-		const ms = ~~(startTime - performance.getEntriesByName(markName, 'mark')[0].startTime);
-		performance.clearMarks(markName);
-		performance.clearMarks(name);
-
-		return ms;
 	}
 }
