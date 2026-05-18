@@ -1,3 +1,22 @@
+## [1.8.9](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.8...v1.8.9) (2026-05-18)
+
+### Bug Fixes
+
+* **diagnostics:** deduplicate type-checking errors (0732f6be4b4cf260d500602411781297b348fb29)
+- Changes diagnostic array type to allow mutability
+- Implements Map-based deduplication for semantic diagnostics
+- Deduplicates errors based on file name, start position, and error code
+- Adds comprehensive unit tests to verify deduplication behavior under various compiler configurations
+
+
+### Build System
+
+* **config:** enable stricter typescript compiler options (9c51544b3d21df253beb5a31cd5e1559c9982044)
+- Enables noUnusedLocals, noUnusedParameters, and noPropertyAccessFromIndexSignature in tsconfig
+- Changes property access to index signatures for process.env and module default exports
+- Removes unused TypeScript Node import from type definitions
+- Removes unused elapsed performance measurement method from TypeScriptProject
+
 ## [1.8.8](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.7...v1.8.8) (2026-05-17)
 
 ### Bug Fixes
