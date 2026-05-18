@@ -236,7 +236,7 @@ export class TypeScriptProject implements Closable {
 	private async typeCheck() {
 		await this.fileManager.initialize();
 
-		let allDiagnostics: ReadonlyArray<Diagnostic>;
+		let allDiagnostics: Diagnostic[];
 		if (this.configuration.compilerOptions.noEmit) {
 			// For noEmit, collect diagnostics first to populate the builder's incremental state,
 			// then emit() writes .tsbuildinfo with the populated cache for use on the next run.
@@ -263,7 +263,14 @@ export class TypeScriptProject implements Closable {
 		}
 
 		if (allDiagnostics.length > 0) {
-			TypeScriptProject.handleTypeErrors('Type-checking failed', allDiagnostics, this.directory);
+			// Deduplicate: with isolatedDeclarations, errors like TS9007 appear in both
+			// getSemanticDiagnostics() and emit/declaration diagnostics simultaneously.
+			const unique = new Map<string, Diagnostic>();
+			for (const diagnostic of allDiagnostics) {
+				const key = `${diagnostic.file?.fileName ?? ''}:${diagnostic.start ?? -1}:${diagnostic.code}`;
+				if (!unique.has(key)) { unique.set(key, diagnostic) }
+			}
+			TypeScriptProject.handleTypeErrors('Type-checking failed', Array.from(unique.values()), this.directory);
 		}
 
 		// When declaration is disabled, TypeScript never emits .d.ts files, so finalize()

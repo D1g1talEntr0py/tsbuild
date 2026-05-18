@@ -299,6 +299,82 @@ describe('TypeScriptProject', () => {
 			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 2 errors in 2 files.'));
 		});
 
+		describe('diagnostic deduplication', () => {
+			it('reports each error once when emit and getSemanticDiagnostics return the same diagnostic', async () => {
+				// Regression: with isolatedDeclarations, errors like TS9007 appear in both
+				// getSemanticDiagnostics() and the diagnostics returned by emit(), causing
+				// each error to be displayed twice in the output.
+				const projectPath = TestHelper.createTestProject({
+					tsconfig: { compilerOptions: { declaration: false } }
+				});
+				const project = createProject(projectPath);
+
+				const mockFile = { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
+				const sharedDiagnostic = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
+
+				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ sharedDiagnostic ]);
+				mocks.emitMock.mockReturnValueOnce({ diagnostics: [ sharedDiagnostic ] });
+
+				await project.build();
+				expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
+			});
+
+			it('reports all distinct errors when emit and getSemanticDiagnostics return different diagnostics', async () => {
+				const projectPath = TestHelper.createTestProject({
+					tsconfig: { compilerOptions: { declaration: false } }
+				});
+				const project = createProject(projectPath);
+
+				const mockFile = { fileName: 'test.ts', text: 'xy', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
+				const semanticDiag = { file: mockFile, messageText: 'Cannot find name', start: 0, length: 1, category: 1, code: 2304 } as unknown as import('typescript').Diagnostic;
+				const emitDiag = { file: mockFile, messageText: 'Declaration emit error', start: 1, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
+
+				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ semanticDiag ]);
+				mocks.emitMock.mockReturnValueOnce({ diagnostics: [ emitDiag ] });
+
+				await project.build();
+				expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 2 errors in the same file'));
+			});
+
+			it('reports each error once when getSemanticDiagnostics and getDeclarationDiagnostics return the same diagnostic (noEmit path)', async () => {
+				// Regression: noEmit + declaration: true path combines getSemanticDiagnostics()
+				// and getDeclarationDiagnostics(), which both report isolatedDeclarations errors.
+				const projectPath = TestHelper.createTestProject({
+					tsconfig: { compilerOptions: { declaration: true, noEmit: true } }
+				});
+				const project = createProject(projectPath);
+
+				const mockFile = { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
+				const sharedDiagnostic = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
+
+				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ sharedDiagnostic ]);
+				mocks.getDeclarationDiagnosticsMock.mockReturnValueOnce([ sharedDiagnostic as import('typescript').DiagnosticWithLocation ]);
+
+				await project.build();
+				expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
+			});
+
+			it('deduplicates by file + start + code, not by object identity', async () => {
+				const projectPath = TestHelper.createTestProject({
+					tsconfig: { compilerOptions: { declaration: false } }
+				});
+				const project = createProject(projectPath);
+
+				const mockFile = { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
+				// Two distinct object instances with the same semantic identity
+				const diagA = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
+				const diagB = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
+
+				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ diagA ]);
+				mocks.emitMock.mockReturnValueOnce({ diagnostics: [ diagB ] });
+
+				await project.build();
+				// toHaveBeenLastCalledWith avoids false positives from Logger.error calls
+				// accumulated by previous tests — only the summary from this build counts.
+				expect(Logger.error).toHaveBeenLastCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
+			});
+		});
+
 		it('calls transpile when declaration is false', async () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: false } }
