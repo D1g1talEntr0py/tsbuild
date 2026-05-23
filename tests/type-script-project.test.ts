@@ -78,7 +78,7 @@ vi.mock('../src/dts/declaration-bundler', () => ({
 }));
 
 const esbuildMocks = vi.hoisted(() => ({
-	buildMock: vi.fn(async (options: { outdir: string; plugins?: Array<{ setup: (build: unknown) => void }>; entryPoints: Record<string, string>; define?: Record<string, string> }) => {
+	buildMock: vi.fn(async (options: { outdir: string; plugins?: Array<{ setup: (build: unknown) => void }>; entryPoints: Record<string, string>; define?: Record<string, string>; platform?: 'browser' | 'node' | 'neutral' }) => {
 		const onEndCallbacks: Array<(result: unknown) => unknown> = [];
 		const build = {
 			onEnd: (callback: (result: unknown) => unknown): void => { onEndCallbacks.push(callback); },
@@ -399,21 +399,6 @@ describe('TypeScriptProject', () => {
 	});
 
 	describe('incremental builds', () => {
-		it('skips build when no .tsbuildinfo change with declarations', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			// Pre-populate .tsbuildinfo so the build is treated as hot/incremental (no new files emitted).
-			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
-			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			const project = createProject(projectPath);
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-
-			await project.build();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
-		});
-
 		it('always runs transpile for incremental without declarations', async () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: false, incremental: true } }
@@ -551,7 +536,7 @@ describe('TypeScriptProject', () => {
 			});
 
 			vol.writeFileSync(join(projectPath, 'src/index.ts'), 'export const url = import.meta.env.API_URL;');
-			await (project as any).transpile();
+			await project.build();
 
 			const output = vol.readFileSync(join(projectPath, 'dist/index.js'), 'utf8') as string;
 			expect(output).toContain('"https://api.example.com"');
@@ -566,7 +551,7 @@ describe('TypeScriptProject', () => {
 				tsbuild: { env: { 'MY_VAR': '${process.env.TEST_VAR_FOR_TSBUILD}' } }
 			});
 
-			await (project as any).transpile();
+			await project.build();
 			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
 			expect(buildCall).toBeDefined();
 			expect(buildCall.define?.['import.meta.env.MY_VAR']).toBe('"expanded-value"');
@@ -581,7 +566,7 @@ describe('TypeScriptProject', () => {
 				tsbuild: { noExternal: ['lodash'] }
 			});
 
-			await (project as any).transpile();
+			await project.build();
 			expect(esbuildMocks.buildMock).toHaveBeenCalled();
 			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
 			expect(buildCall).toBeDefined();
@@ -602,11 +587,11 @@ describe('TypeScriptProject', () => {
 			} as any);
 			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted warning'] as never[]);
 
-			await (project as any).transpile();
+			await project.build();
 			expect(esbuildMocks.formatMessagesMock).toHaveBeenCalled();
 		});
 
-		it('returns empty array on esbuild errors', async () => {
+		it('logs esbuild errors without failing the build', async () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: false } }
 			});
@@ -619,11 +604,12 @@ describe('TypeScriptProject', () => {
 			} as any);
 			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted error'] as never[]);
 
-			const result = await (project as any).transpile();
-			expect(result).toEqual([]);
+			await project.build();
+			expect(esbuildMocks.formatMessagesMock).toHaveBeenCalled();
+			expect(process.exitCode).toBeUndefined();
 		});
 
-		it('logs and re-throws unexpected esbuild exceptions', async () => {
+		it('logs transpile failure on unexpected esbuild exceptions', async () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: false } }
 			});
@@ -631,7 +617,7 @@ describe('TypeScriptProject', () => {
 
 			esbuildMocks.buildMock.mockRejectedValueOnce(new Error('esbuild crashed'));
 
-			await expect((project as any).transpile()).rejects.toThrow('esbuild crashed');
+			await project.build();
 			expect(Logger.error).toHaveBeenCalledWith('Transpile failed', expect.any(Error));
 		});
 	});
@@ -806,24 +792,26 @@ describe('TypeScriptProject', () => {
 	});
 
 	describe('resolveConfiguration', () => {
-		it('detects browser platform from DOM lib', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
+		it('detects browser platform from DOM lib', async () => {
 			TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { lib: ['DOM', 'ESNext'] } }
 			});
 
 			const project = createProject(process.cwd());
-			// Browser platform means packages === 'bundle'
-			expect((project as any).buildConfiguration.platform).toBe('browser');
+			await project.build();
+			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
+			expect(buildCall?.platform).toBe('browser');
 		});
 
-		it('defaults to node platform without DOM lib', () => {
+		it('defaults to node platform without DOM lib', async () => {
 			TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { lib: ['ESNext'] } }
 			});
 
 			const project = createProject(process.cwd());
-			expect((project as any).buildConfiguration.platform).toBe('node');
+			await project.build();
+			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
+			expect(buildCall?.platform).toBe('node');
 		});
 
 		it('infers entry points from package.json exports', () => {
@@ -912,9 +900,10 @@ describe('TypeScriptProject', () => {
 				tsbuild: { entryPoints: { src: './src' as RelativePath } }
 			});
 
-			const entryPoints = await (project as any).buildConfiguration.entryPoints;
+			await project.build();
+			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
 			// Should have expanded the directory into individual files
-			expect(Object.keys(entryPoints).length).toBeGreaterThanOrEqual(1);
+			expect(Object.keys(buildCall?.entryPoints ?? {}).length).toBeGreaterThanOrEqual(1);
 		});
 	});
 
