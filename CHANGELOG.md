@@ -1,3 +1,56 @@
+## [1.9.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.10...v1.9.0) (2026-05-23)
+
+### Features
+
+* **cache:** implement configuration fingerprinting for incremental builds (4bb8b9ec6415cd5a3bd15d9a5265725c3ff0242c)
+- Introduces deterministic JSON fingerprinting covering platform, target, formats, and bundler options
+- Replaces strict boolean minification caching with robust multi-variable configuration fingerprints
+- Compares fresh configurations with on-disk persisted fingerprint states to flush outputs dynamically
+- Enhances cache manager implementations allowing seamless integration with esbuild pipelines
+- Overrides unit tests validating caching scenarios evaluating string-based hashes correctly
+
+
+### Performance Improvements
+
+* **core:** optimize iteration loops during data serialization (08cd6d3f77af3b58072dab008bee7a3217cc1d56)
+- Restructures array destructuring and explicit index loops addressing slow map operations
+- Avoids `Object.entries()` array memory spikes during physical build loop mapping
+- Optimizes the declaration exports loop preventing excessive intermediary filtering blocks
+- Reduces overall execution times slightly during intensive build output parsing
+
+
+### Documentation
+
+* **readme:** update build documentation with cache and loader details (764514b987812743ffd11153e678e6723f8e09e4)
+- Details the configuration change detection mechanism that avoids stale caches when the config differs
+- Adds a dedicated section for the self-hosting loader to help clarify bootstrapping logic
+
+
+### Styles
+
+* **docs:** prune redundant jsdoc comments across codebase (3b106dade1b5bc7dc713ef37463a984ca40f02b4)
+- Removes repetitive property comments from standard interfaces like typescript configurations
+- Strips excess constructor `@param` tags throughout standard object models
+- Erases leftover `@returns` definitions across standard helper functions
+- Fixes minor spacing issues affecting multiple comment block fragments
+
+
+### Miscellaneous Chores
+
+* **eslint:** disable excessive jsdoc property requirements (11f4d21f0515841cdd2c5b1e112db67f42cbaf02)
+- Reduces the strictness of JSDoc returns and param description rules
+- Subdues linting checks on empty constructors and standard types to cut down developer fatigue
+
+
+### Tests
+
+* **project:** refactor integration suites adopting build method structures (749970133479e51bc8d9a68c591ac926d394170e)
+- Rewrites older validation strategies bypassing internal private methods completely
+- Tests public `project.build()` execution flows simulating realistic cli invocations directly
+- Handles unexpected esbuild crash reporting verifications robustly
+- Adjusts browser platform resolving logic testing ensuring appropriate outputs trigger successfully
+- Drops deprecated testing suites previously locked behind internal mock validations
+
 ## [1.8.10](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.9...v1.8.10) (2026-05-23)
 
 ### Bug Fixes
