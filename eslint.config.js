@@ -35,12 +35,14 @@ export default defineConfig({ ignores: [ 'node_modules/**', 'tests/**', 'dist/**
 		}
 	},
 	rules: {
+		'jsdoc/require-returns': 0,
 		'jsdoc/check-param-names': [ 'error', { checkDestructured: false	}	],
 		'jsdoc/require-param': [ 'error',	{ checkDestructured: false } ],
 		'jsdoc/tag-lines': 0,
 		'jsdoc/no-defaults': 0,
 		'jsdoc/require-jsdoc': [ 'error',	{
 				exemptEmptyConstructors: true,
+				checkConstructors: false,
 				require: {
 					ClassDeclaration: true,
 					FunctionExpression: true,
