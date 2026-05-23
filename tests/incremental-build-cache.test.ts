@@ -220,79 +220,51 @@ describe('IncrementalBuildCache', () => {
 		});
 	});
 
-	describe('minify metadata', () => {
-		it('forces build when minify is enabled but previous state was not minified', async () => {
+	describe('fingerprint matching', () => {
+		it('returns false when fingerprint does not match', async () => {
 			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			await cache1.saveMinifyState(false);
+			await cache1.save(new Map(), 'fingerprint-v1');
 			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
 
 			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			expect(await cache2.requiresRebuild(true)).toBe(true);
+			expect(await cache2.fingerprintMatches('fingerprint-v2')).toBe(false);
 		});
 
-		it('does not force build when minify is enabled and previous state was minified', async () => {
+		it('returns true when fingerprint matches', async () => {
 			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			await cache1.saveMinifyState(true);
+			await cache1.save(new Map(), 'fingerprint-v1');
 			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
 
 			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			expect(await cache2.requiresRebuild(true)).toBe(false);
+			expect(await cache2.fingerprintMatches('fingerprint-v1')).toBe(true);
 		});
 
-		it('persists minify state for next build', async () => {
+		it('returns false when cache is invalidated', async () => {
 			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			await cache1.saveMinifyState(true);
-
-			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			expect(await cache2.requiresRebuild(true)).toBe(false);
-		});
-
-		it('forces build when minify is disabled but previous state was minified', async () => {
-			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			await cache1.saveMinifyState(true);
+			await cache1.save(new Map(), 'fingerprint-v1');
 			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
-
-			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			expect(await cache2.requiresRebuild(false)).toBe(true);
-		});
-
-		it('does not force build when minify is disabled and previous state was not minified', async () => {
-			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			await cache1.saveMinifyState(false);
-			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
-
-			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			expect(await cache2.requiresRebuild(false)).toBe(false);
-		});
-
-		it('does not overwrite declaration files when saveMinifyState is called after save', async () => {
-			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			const declarations = new Map<string, CachedDeclaration>([['file.d.ts', { code: 'export {};', typeReferences: new Set<string>(), fileReferences: new Set<string>() }]]);
-
-			await cache.save(declarations, false);
-			await cache.saveMinifyState(true);
-
-			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			const restored = new Map<string, CachedDeclaration>();
-			await cache2.restore(restored);
-			expect(restored.get('file.d.ts')?.code).toBe('export {};');
-		});
-
-		it('does not restore stale cache files when saveMinifyState is called after invalidate', async () => {
-			// Populate a cache, then invalidate and call saveMinifyState (no save() called).
-			// saveMinifyState must not read from the pre-invalidation cacheLoaded snapshot.
-			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			const declarations = new Map<string, CachedDeclaration>([['file.d.ts', { code: 'export {};', typeReferences: new Set<string>(), fileReferences: new Set<string>() }]]);
-			await cache1.save(declarations, false);
 
 			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			cache2.invalidate();
-			await cache2.saveMinifyState(true);
+			expect(await cache2.fingerprintMatches('fingerprint-v1')).toBe(false);
+		});
 
-			const cache3 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+		it('returns false when persisted state does not exist', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(await cache.fingerprintMatches('fingerprint-v1')).toBe(false);
+		});
+
+		it('persists fingerprint in cache for next build', async () => {
+			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			const declarations = new Map<string, CachedDeclaration>([['file.d.ts', { code: 'export {};', typeReferences: new Set<string>(), fileReferences: new Set<string>() }]]);
+			await cache1.save(declarations, 'fingerprint-abc123');
+			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
+
+			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(await cache2.fingerprintMatches('fingerprint-abc123')).toBe(true);
 			const restored = new Map<string, CachedDeclaration>();
-			await cache3.restore(restored);
-			expect(restored.size).toBe(0);
+			await cache2.restore(restored);
+			expect(restored.get('file.d.ts')?.code).toBe('export {};');
 		});
 	});
 });

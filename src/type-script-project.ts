@@ -20,14 +20,51 @@ import { performance } from 'node:perf_hooks';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
-import type { BuilderProgram, Diagnostic, FormatDiagnosticsHost } from 'typescript';
-import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString } from './@types';
+import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
+import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern } from './@types';
 
 const globCharacters = /[*?\\[\]!].*$/;
 const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
 const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
 const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
+/**
+ * Computes a deterministic fingerprint of the build configuration.
+ * Fingerprint mismatch on the next build forces a full rebuild.
+ * @param buildConfig - The resolved build configuration
+ * @param compilerOptions - The resolved compiler options
+ * @returns A deterministic JSON string representing the build configuration
+ */
+/**
+ * Serializes a Pattern so RegExp instances produce a stable, unique string.
+ * @param p - The pattern to serialize.
+ */
+const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
 
+/**
+ * @param buildConfig - The project build configuration.
+ * @param compilerOptions - The TypeScript compiler options.
+ */
+function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOptions: CompilerOptions): string {
+	return JSON.stringify({
+		minify: buildConfig.minify,
+		iife: buildConfig.iife,
+		declaration: compilerOptions.declaration,
+		emitDeclarationOnly: compilerOptions.emitDeclarationOnly,
+		emitDecoratorMetadata: compilerOptions.emitDecoratorMetadata,
+		bundle: buildConfig.bundle,
+		splitting: buildConfig.splitting,
+		format,
+		target: buildConfig.target,
+		platform: buildConfig.platform,
+		sourceMap: buildConfig.sourceMap,
+		banner: buildConfig.banner,
+		footer: buildConfig.footer,
+		noExternal: buildConfig.noExternal.map(serializePattern),
+		dtsResolve: buildConfig.dts.resolve,
+		dtsEntryPoints: buildConfig.dts.entryPoints,
+		env: buildConfig.env
+	});
+}
 /** Class representing a TypeScript project */
 @closeOnExit
 export class TypeScriptProject implements Closable {
@@ -138,8 +175,13 @@ export class TypeScriptProject implements Closable {
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];
 			const buildCache = this.configuration.buildCache;
-			const forcedForMinify = await (buildCache?.requiresRebuild(this.buildConfiguration.minify) ?? Promise.resolve(false));
-			const force = this.configuration.tsbuild.force || forcedForMinify;
+
+			// Check if build configuration has changed (minify, iife, declaration, platform, etc.)
+			// If so, invalidate the dts cache and force a full rebuild
+			const currentFingerprint = buildFingerprint(this.buildConfiguration, this.configuration.compilerOptions);
+			const fingerprintMatched = buildCache !== undefined && await buildCache.fingerprintMatches(currentFingerprint);
+			const force = this.configuration.tsbuild.force || !fingerprintMatched;
+
 			const cleanEnabled = this.configuration.clean && !this.configuration.compilerOptions.noEmit;
 
 			// Manifest-driven output cleanup: when a manifest snapshot from a prior build is available,
@@ -186,13 +228,15 @@ export class TypeScriptProject implements Closable {
 
 			// Defer the dts cache Brotli compression until AFTER the parallel phases complete.
 			// Running it during transpile inflates esbuild's wall time by 50-70ms via libuv threadpool contention.
-			this.fileManager.persistCache(this.buildConfiguration.minify);
+			// Pass configChanged so the new fingerprint is persisted even when TypeScript had nothing
+			// new to emit — without this, every subsequent build after a config change would see a
+			// fingerprint mismatch and force an unnecessary full rebuild.
+			this.fileManager.persistCache(currentFingerprint, !fingerprintMatched);
 
 			// Stale-file cleanup + new manifest persistence — both fire-and-forget after the build
 			// has reported completion, so they never inflate the critical path.
 			if (buildCache !== undefined && newOutputs.length > 0) {
 				if (previousOutputs !== undefined) { this.cleanupStaleOutputs(previousOutputs, newOutputs) }
-				void buildCache.saveMinifyState(this.buildConfiguration.minify).catch(() => { /* best-effort build options persistence */ });
 				void buildCache.saveOutputs(newOutputs).catch(() => { /* best-effort manifest persistence */ });
 			}
 		} catch (error) {

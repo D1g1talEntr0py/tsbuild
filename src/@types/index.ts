@@ -184,21 +184,15 @@ type BuildCache = {
 	version: number;
 	/** Cached declaration files: path -> pre-processed code with extracted references */
 	files: Map<string, CachedDeclaration>;
-	/** Minify mode of the last successful JS output generation */
-	minify?: boolean;
+	/** Build configuration fingerprint: hash of output-affecting options (minify, iife, declaration, platform, etc.) */
+	fingerprint?: string;
 };
 
-/** Interface for build cache operations */
 interface BuildCacheManager {
-	/** Invalidates the build cache */
 	invalidate(): void;
-	/** Restores cached declaration files into the provided map */
 	restore(target: Map<string, CachedDeclaration>): Promise<void>;
-	/** Saves declaration files to the cache */
-	save(source: ReadonlyMap<string, CachedDeclaration>, minify: boolean): Promise<void>;
-	/** Checks if the cache is valid */
+	save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void>;
 	isValid(): boolean;
-	/** Checks if a file path is the TypeScript build info file */
 	isBuildInfoFile(filePath: AbsolutePath): boolean;
 	/** Synchronously checks whether persisted incremental state exists on disk (i.e. .tsbuildinfo). */
 	hasPersistedState(): boolean;
@@ -208,25 +202,19 @@ interface BuildCacheManager {
 	getPreviousOutputs(): readonly string[] | undefined;
 	/** Persists the project-relative output paths produced by the current build. Fire-and-forget. */
 	saveOutputs(outputs: readonly string[]): Promise<void>;
-	/** Checks whether current minify mode requires forcing a rebuild. */
-	requiresRebuild(minify: boolean): Promise<boolean>;
-	/** Persists minify mode metadata for future incremental-build compatibility checks. */
-	saveMinifyState(minify: boolean): Promise<void>;
+	/** Checks whether the build configuration has changed since the cache was last saved. */
+	fingerprintMatches(currentFingerprint: string): Promise<boolean>;
 };
 
 type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	clean: boolean;
 	compilerOptions: TypeScriptCompilerConfiguration;
 	tsbuild: BuildConfiguration;
-	/** Project root directory */
 	directory: AbsolutePath;
 	/** Absolute paths of root names used to create the TypeScript program */
 	rootNames: string[];
-	/** Diagnostics encountered while parsing the config file */
 	configFileParsingDiagnostics: Diagnostic[];
-	/** Build cache instance for incremental builds */
 	buildCache: BuildCacheManager | undefined;
-	/** Module Specifiers in 'include', 'exclude', & 'files' */
 	include?: string[];
 	exclude?: string[];
 	files?: string[];

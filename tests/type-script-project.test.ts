@@ -469,52 +469,75 @@ describe('TypeScriptProject', () => {
 			expect(esbuildMocks.buildMock).toHaveBeenCalled();
 		});
 
-		it('forces full build when minify is enabled and previous build was not minified', async () => {
+		it('forces full build when build configuration changes', async () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
 			});
 			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
 			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			await new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo').saveMinifyState(false);
+			// Save a cache with fingerprint for minify: false
+			const cache = new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo');
+			await cache.save(new Map(), 'fingerprint-minify-false');
 
+			// Create project with minify: true, fingerprint will differ from cached value
 			const project = createProject(projectPath, { tsbuild: { minify: true } });
 			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
 
 			await project.build();
+			// Fingerprint mismatch forces full build
 			expect(bundleDeclarations).toHaveBeenCalled();
 			expect(esbuildMocks.buildMock).toHaveBeenCalled();
 		});
 
-		it('follows incremental path when minify is enabled and previous build was minified', async () => {
+		it('forces full build when reverting from minify to default', async () => {
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
 			});
 			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
 			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			await new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo').saveMinifyState(true);
+			// Save a cache with fingerprint representing a prior minify: true build
+			const cache = new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo');
+			await cache.save(new Map(), 'fingerprint-minify-true');
 
-			const project = createProject(projectPath, { tsbuild: { minify: true } });
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-
-			await project.build();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
-		});
-
-		it('forces full build when minify is disabled and previous build was minified', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
-			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			await new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo').saveMinifyState(true);
-
+			// Create project without minify (default minify: false) — fingerprint differs from cached value
 			const project = createProject(projectPath);
 			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
 
 			await project.build();
+			// Fingerprint mismatch forces full build
 			expect(bundleDeclarations).toHaveBeenCalled();
 			expect(esbuildMocks.buildMock).toHaveBeenCalled();
+		});
+
+		it('updates fingerprint after config-change rebuild to prevent cascade forced rebuilds', async () => {
+			// Regression: when a build config change forces a rebuild but TypeScript has no
+			// source changes to emit (hasEmittedFiles = false), persistCache() was skipping
+			// the fingerprint update. Every subsequent build would then see the stale fingerprint,
+			// triggering an unnecessary forced rebuild forever.
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
+			});
+			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
+			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
+			// Stale fingerprint from a prior minify: true build
+			const cache = new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo');
+			await cache.save(new Map(), 'fingerprint-minify-true');
+
+			const project = createProject(projectPath);
+
+			// Build 1: fingerprint mismatch → forced rebuild (TypeScript emits nothing — no code changes)
+			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
+			await project.build();
+			expect(esbuildMocks.buildMock).toHaveBeenCalledTimes(1);
+
+			esbuildMocks.buildMock.mockClear();
+			vi.mocked(bundleDeclarations).mockClear();
+
+			// Build 2: fingerprint must now match the updated config — no forced rebuild
+			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
+			await project.build();
+			expect(bundleDeclarations).not.toHaveBeenCalled();
+			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
 		});
 	});
 

@@ -135,16 +135,19 @@ export class FileManager implements Closable {
 	 * Persists the .tsbuildinfo file and the dts cache to disk in the background. Call this
 	 * AFTER the build's parallel phases (transpile + dts bundling) have completed so the writes
 	 * (and Brotli compression for the dts cache) don't compete with esbuild for libuv threadpool slots.
-	 * @param minify Whether the current build is minified, for future cache compatibility checks
+	 * @param fingerprint Build configuration fingerprint for cache invalidation on config change
+	 * @param configChanged True when the build configuration fingerprint changed — forces the new
+	 *   fingerprint to be saved even when TypeScript did not re-emit any files, preventing the
+	 *   mismatch from triggering unnecessary forced rebuilds on every subsequent build.
 	 */
-	persistCache(minify: boolean): void {
+	persistCache(fingerprint: string, configChanged = false): void {
 		const tasks: Promise<void>[] = [];
 		if (this.pendingBuildInfo) {
 			tasks.push(Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text));
 			this.pendingBuildInfo = undefined;
 		}
-		if (this.cache !== undefined && this.hasEmittedFiles) {
-			tasks.push(this.cache.save(this.declarationFiles, minify));
+		if (this.cache !== undefined && (this.hasEmittedFiles || configChanged)) {
+			tasks.push(this.cache.save(this.declarationFiles, fingerprint));
 		}
 		if (tasks.length === 0) { return }
 		const save = tasks.length === 1 ? tasks[0].then(() => {}, () => {}) : Promise.all(tasks).then(() => {}, () => {});

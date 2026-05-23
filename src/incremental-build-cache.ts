@@ -23,12 +23,10 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * subsequent in-process reads are race-free.
 	 */
 	private outputsSnapshot: readonly string[] | undefined;
-	/** Snapshot of whether previous successful transpile output used minification. */
-	private minifySnapshot: boolean | undefined;
 	/** Set to true when invalidate() is called to prevent stale cache from being restored */
 	private invalidated = false;
-	/** Tracks the most recently saved declaration files so saveMinifyState() doesn't revert them */
-	private latestFiles: ReadonlyMap<string, CachedDeclaration> | undefined;
+	/** Updated synchronously in save() so fingerprintMatches() sees fresh data without re-reading from disk. */
+	private savedFingerprint: string | undefined;
 
 	/**
 	 * Creates a new build cache instance and begins pre-loading the cache asynchronously.
@@ -45,7 +43,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 		// Capture the manifest synchronously so it survives invalidate() and downstream code can
 		// read it without awaiting. The file is small (a JSON array of paths) so sync I/O is fine.
 		this.outputsSnapshot = IncrementalBuildCache.loadOutputsSync(this.outputsManifestPath);
-		this.minifySnapshot = undefined;
 	}
 
 	/**
@@ -58,7 +55,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 
 			// Validate cache version - silently ignore incompatible caches
 			if (cache.version !== version) { return undefined }
-			this.minifySnapshot = cache.minify;
 			return cache;
 		} catch {
 			// Cache doesn't exist or couldn't be read - this is fine for first build
@@ -87,16 +83,30 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	}
 
 	/**
-	 * Saves declaration files to the compressed cache file with version information.
+	 * Saves declaration files to the compressed cache file with version and fingerprint information.
 	 * Uses V8 serialization for faster read performance on subsequent builds.
 	 * @param source - The declaration files to cache
-	 * @param minify - Whether the current build is minified, for future compatibility checks
-	 * @remarks This should be called after the build completes successfully, so the cache always reflects a valid state on disk. If the build fails, the in-memory cache is still updated to reflect the latest state, but the on-disk cache remains unchanged to preserve compatibility with future builds. The next successful build will overwrite the cache with the correct state.
+	 * @param fingerprint - Deterministic hash of build configuration for cache invalidation on config change
 	 */
-	async save(source: ReadonlyMap<string, CachedDeclaration>, minify: boolean): Promise<void> {
-		this.latestFiles = source;
-		this.minifySnapshot = minify;
-		await Files.writeCompressed(this.cacheFilePath, { version, files: source, minify });
+	async save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void> {
+		this.savedFingerprint = fingerprint; // set before await so fingerprintMatches() sees it immediately
+		await Files.writeCompressed(this.cacheFilePath, { version, files: source, fingerprint });
+	}
+
+	/**
+	 * Checks whether the build configuration has changed since the cache was last saved.
+	 * Returns true if the cache is valid and fingerprints match, false if config changed or cache is invalid.
+	 * @param currentFingerprint - The fingerprint of the current build configuration
+	 * @returns True if the cached configuration matches the current configuration
+	 */
+	async fingerprintMatches(currentFingerprint: string): Promise<boolean> {
+		if (this.invalidated) { return false }
+		if (!this.hasPersistedState()) { return false }
+
+		if (this.savedFingerprint !== undefined) { return this.savedFingerprint === currentFingerprint }
+
+		const cache = await this.cacheLoaded;
+		return cache?.fingerprint === currentFingerprint;
 	}
 
 	/**
@@ -135,30 +145,11 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	}
 
 	/**
-	 * Checks whether the current minify mode requires forcing a rebuild.
-	 * Forces when the minify setting differs from the previously persisted state in either direction.
-	 * Unknown previous state is treated as not-minified (safe default for pre-minify-awareness builds).
-	 * @param minify - Current build minify mode
-	 * @returns True when a full rebuild should be forced.
+	 * Checks if the cache is valid (not invalidated).
+	 * @returns True if the cache is valid, false if it has been invalidated
 	 */
-	async requiresRebuild(minify: boolean): Promise<boolean> {
-		if (!this.hasPersistedState()) { return false }
-
-		return minify !== (this.minifySnapshot ?? (await this.cacheLoaded)?.minify ?? false);
-	}
-
-	/**
-	 * Persists minify mode metadata for future incremental-build compatibility checks.
-	 * @param minify - Current build minify mode
-	 */
-	async saveMinifyState(minify: boolean): Promise<void> {
-		this.minifySnapshot = minify;
-		// If save() was already called this run, the cache already has the correct minify state.
-		if (this.latestFiles !== undefined) { return }
-
-		// Do not read from cacheLoaded when invalidated — it holds pre-invalidation data.
-		const files = this.invalidated ? new Map<string, CachedDeclaration>() : ((await this.cacheLoaded)?.files ?? new Map<string, CachedDeclaration>());
-		await Files.writeCompressed(this.cacheFilePath, { version, files, minify });
+	isValid(): boolean {
+		return !this.invalidated;
 	}
 
 	/** Invalidates the build cache by removing the cache directory. */
@@ -177,14 +168,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	isBuildInfoFile(filePath: AbsolutePath): boolean {
 		return filePath === this.buildInfoPath;
-	}
-
-	/**
-	 * Checks if the cache is valid (not invalidated).
-	 * @returns True if the cache is valid, false if it has been invalidated
-	 */
-	isValid(): boolean {
-		return !this.invalidated;
 	}
 
 	/**
