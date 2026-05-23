@@ -41,9 +41,9 @@ class PerformanceLogger implements Closable {
 
 	/**
 	 * Measures the performance of a method and logs the result.
-	 * @param message - The message to log with the performance measurement.
-	 * @param logResult - Whether to log the result of the method.
-	 * @returns A Stage 3 method decorator that measures the performance of the method it decorates.
+	 * @param message - The message to log with the performance measurement
+	 * @param logResult - Whether to include the method return value in the log output
+	 * @returns A Stage 3 method decorator that measures execution time of the decorated method
 	 */
 	measure(message: string, logResult: boolean = false) {
 		const _measure = <R>(propertyKey: string, result: R, options: PerformanceMeasureOptions<R>): R => {

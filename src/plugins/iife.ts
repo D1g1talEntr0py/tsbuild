@@ -20,8 +20,7 @@ const textDecoder = new TextDecoder();
  * Runs a secondary esbuild build with `format: 'iife'` and `splitting: false`, using the
  * primary build's output files as input via a virtual loader. This inlines all dynamic imports
  * for self-contained browser/CDN usage. Output is written to an `iife` subdirectory.
- * @param options IIFE plugin options
- * @returns An object containing the esbuild Plugin and a files array populated after the build
+ * @param options - IIFE plugin options
  */
 export function iifePlugin(options?: IifeOptions): IifePluginInstance {
 	const files: WrittenFile[] = [];
@@ -31,8 +30,8 @@ export function iifePlugin(options?: IifeOptions): IifePluginInstance {
 		plugin: {
 			name: 'esbuild:iife',
 			/**
-			 * Configures the esbuild build instance to produce IIFE output
-			 * @param build The esbuild build instance
+			 * Configures the esbuild build instance to produce IIFE output.
+			 * @param build The esbuild plugin build object.
 			 */
 			setup(build) {
 				const outdir = build.initialOptions.outdir;

@@ -44,7 +44,7 @@ class ProcessManager implements Closable {
 		this.close();
 	};
 
-	/** Handles console exit (ctrl+c) */
+	/** Handles SIGINT (ctrl+c) */
 	private consoleExit = () => {
 		Logger.warn('\nProcess terminated by user');
 		this.hasHandledExit = true;

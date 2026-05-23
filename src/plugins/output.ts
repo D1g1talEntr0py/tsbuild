@@ -6,7 +6,7 @@ import type { BuildResult, Plugin } from 'esbuild';
 /**
  * Sets executable permissions on a file if it starts with a shebang (#!).
  * Reads only the first 2 bytes to minimize I/O.
- * @param filePath Path to the output file
+ * @param filePath The path to the output file.
  */
 async function setShebangPermissions(filePath: string): Promise<void> {
 	const handle = await open(filePath, 'r');
@@ -25,14 +25,13 @@ async function setShebangPermissions(filePath: string): Promise<void> {
 /**
  * Post-processes esbuild output to set executable permissions on JS entry points with shebangs.
  * Designed for use with esbuild's `write: true` mode where files are already written to disk.
- * @returns The esbuild plugin for handling output file permissions
  */
 export const outputPlugin = (): Plugin => {
 	return {
 		name: 'esbuild:output-plugin',
 		/**
-		 * Checks JS entry points for shebangs and sets executable permissions
-		 * @param build The esbuild build instance
+		 * Checks JS entry points for shebangs and sets executable permissions.
+		 * @param build The esbuild plugin build object.
 		 */
 		setup(build): void {
 			build.onEnd(async ({ metafile }: BuildResult): Promise<void> => {

@@ -111,11 +111,9 @@ type BuildOptions = {
 	project?: Path;
 	/** Force a full rebuild, even if no files have changed. Applicable for incremental builds */
 	force?: boolean;
-	/** Entry points for the build */
 	entryPoints?: EntryPoints<RelativePath>;
 	/** Platform target. Auto-detected from tsconfig lib (DOM = browser, no DOM = node) */
 	platform?: 'browser' | 'node' | 'neutral';
-	/** Whether to bundle source files together */
 	bundle?: boolean;
 	/** Remove all files from the output directory before building. Defaults to true */
 	clean?: boolean;
@@ -125,21 +123,14 @@ type BuildOptions = {
 	external?: Pattern[];
 	/** Specific dependencies to bundle (override packages setting) */
 	noExternal?: Pattern[];
-	/** Enable code splitting */
 	splitting?: boolean;
-	/** Minify the output */
 	minify?: boolean;
 	/** Source map options. Overrides the value in tsconfig.json CompilerOptions */
 	sourceMap?: boolean | 'inline' | 'external' | 'both';
-	/** Banner to inject at the start of output files */
 	banner?: BannerOrFooter;
-	/** Footer to inject at the end of output files */
 	footer?: BannerOrFooter;
-	/** Environment variables to inject */
 	env?: Record<string, string>;
-	/** Declaration bundling configuration */
 	dts?: DtsOptions;
-	/** Watch mode configuration */
 	watch?: WatchOptions;
 	/** Emit decorator metadata (requires `@swc/core` as optional dependency) */
 	decoratorMetadata?: boolean;
@@ -180,7 +171,6 @@ type TypeScriptOptions = {
 
 /** Cached declaration file with pre-processed code and extracted references */
 type CachedDeclaration = {
-	/** Pre-processed declaration code */
 	code: string;
 	/** Triple-slash type reference directives extracted during pre-processing */
 	typeReferences: ReadonlySet<string>;

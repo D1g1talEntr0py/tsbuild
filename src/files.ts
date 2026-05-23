@@ -13,7 +13,6 @@ const windowsDrivePathRegex = /^[A-Za-z]:[\\/]/;
 
 /**
  * A class for handling file operations such as reading, writing, compressing, and decompressing files.
- * @author D1g1talEntr0py (Jason DiMeo)
  */
 export class Files {
 	private constructor() { /* Static class - no instantiation */ }
@@ -21,7 +20,6 @@ export class Files {
 	/**
 	 * Check if a file exists.
 	 * @param filePath The path to the file.
-	 * @returns True if the file exists, false otherwise.
 	 */
 	static async exists(filePath: Path | string): Promise<boolean> {
 		try {
@@ -67,7 +65,7 @@ export class Files {
 
 	/**
 	 * Write data to a file.
-	 * Ensures the directory exists before writing
+	 * Ensures the directory exists before writing.
 	 * @param filePath The path to the file.
 	 * @param data The data to write to the file.
 	 * @param options Optional write file options.

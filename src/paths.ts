@@ -10,8 +10,7 @@ export class Paths {
 
 	/**
 	 * Computes the absolute path by joining the provided segments.
-	 * @param paths Array of path segments to join
-	 * @returns The absolute path
+	 * @param paths Array of path segments to join.
 	 */
 	static absolute(...paths: string[] | Path[]): AbsolutePath {
 		return resolve(...paths) as AbsolutePath;
@@ -19,18 +18,16 @@ export class Paths {
 
 	/**
 	 * Computes the relative path from one location to another.
-	 * @param from The starting location
-	 * @param to The target location
-	 * @returns The relative path
+	 * @param from The starting location.
+	 * @param to The target location.
 	 */
 	static relative(from: string, to: string): RelativePath {
 		return relative(from, to) as RelativePath;
 	}
 
 	/**
-	 * Returns the directory name of a path.
-	 * @param path - The path to evaluate
-	 * @returns The directory name of the path
+	 * Parses a path string into its component parts.
+	 * @param path The path to parse.
 	 */
 	static parse(path: string): ParsedPath {
 		return parse(path);
@@ -40,7 +37,6 @@ export class Paths {
 	 * Checks if the given path is a directory.
 	 * Returns false if the path does not exist.
 	 * @param path - The path to check
-	 * @returns True if the path is a directory, false otherwise
 	 */
 	static async isDirectory<T extends Path>(path: T | string): Promise<boolean> {
 		try { return (await lstat(path)).isDirectory() } catch (error) {
@@ -53,7 +49,6 @@ export class Paths {
 	 * Checks if the given path is a file.
 	 * Returns false if the path does not exist.
 	 * @param path - The path to check
-	 * @returns True if the path is a file, false otherwise
 	 */
 	static async isFile<T extends Path>(path: T | string): Promise<boolean> {
 		try { return (await lstat(path)).isFile() } catch (error) {
