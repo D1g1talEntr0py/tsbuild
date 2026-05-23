@@ -1,3 +1,46 @@
+## [1.8.10](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.9...v1.8.10) (2026-05-23)
+
+### Bug Fixes
+
+* **cache:** fix minify state caching and rename manager interfaces (a66c98ec190b7398b2a9a81d9b02bbf36617c8e4)
+- Added `latestFiles` field to prevent `saveMinifyState()` from overwriting concurrent build declarations
+- Updated `save()` signature to accept and persist `minify: boolean` correctly
+- Fixed `saveMinifyState()` to empty its Map when invalidated, avoiding stale cache writes
+- Updated rebuild forcing logic to trigger when minify mode differs in either direction
+- Renamed `shouldForceForMinify` to `requiresRebuild`
+- Renamed cache types to `BuildCache` and `BuildCacheManager` for clearer API boundaries
+- Propagated minify configuration arguments into `FileManager` and `TypeScriptProject`
+- Added thorough regression tests for incremental cache behaviors and minify configurations
+
+* **iife:** forward minify option to secondary esbuild call (bec434d1ab86ef2de1b3defdc2922fda9cb62890)
+- Captured the minify option from build.initialOptions in iifePlugin
+- Passed the minify parameter down through buildIife() hook
+- Enabled minify inside secondary esbuild configurations when requested
+- Added plugin tests to ensure minify toggles are correctly respected for true and false
+
+
+### Miscellaneous Chores
+
+* **ci:** Update GitHub Actions to latest version (68c227fadab5d71d40afb6c965eeb91139294261)
+
+### Tests
+
+* **core:** improve watch mode and fix diverse testing warnings (b30822589036113be622c655e9a8f995a0f78992)
+- Replaced private method watch() calls with project.build() in integration tests alongside setImmediate flush
+- Added `@d1g1tal/watchr` vi.mock stub to enable integration testing isolation
+- Removed leftover `process.exit()` spies
+- Improved object indexing semantics (dot vs bracket notation) safely ignoring TypeScript index issues in tsbuild.test.ts and benchmark.ts
+- Added assertions via `.toBeDefined()` and updated mock object casting mechanisms
+- Updated `tsconfig.json` to properly traverse and handle local `src/@types` directory
+
+
+### Build System
+
+* **deps:** update dependencies to latest (c7fc745a1f61ad92c3e9328e6e187fdbb8d29348)
+- Updated @types/node, @typescript-eslint plugins, @vitest tools, and eslint-plugin-jsdoc to latest versions in package.json
+- Updated object-deep-merge, postcss, and semver to their latest versions
+- Refreshed pnpm-lock.yaml to lock all dependency updates
+
 ## [1.8.9](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.8...v1.8.9) (2026-05-18)
 
 ### Bug Fixes
