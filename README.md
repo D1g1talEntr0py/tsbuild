@@ -301,6 +301,8 @@ With incremental enabled, each build maintains two caches inside a `.tsbuild/` d
 
 On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
 
+**Config change detection** — tsbuild stores a fingerprint of the current build configuration (minify, platform, source maps, iife, splitting, banner/footer, env, noExternal, dts options, etc.) alongside the DTS cache. If any of these settings change between builds, the output phase is forced even when TypeScript reports no source changes. The fingerprint is updated at the end of each build so subsequent runs do not repeatedly trigger a forced rebuild.
+
 ### Ignoring the cache directory
 
 The `.tsbuild/` directory contains build artifacts that should not be committed to source control. Add it to your `.gitignore`:
@@ -615,6 +617,10 @@ pnpm test:coverage
 # Lint
 pnpm lint
 ```
+
+### Self-hosting loader
+
+tsbuild bootstraps itself using a minimal custom Node.js module hook (`scripts/loader.ts`). It registers resolve and load hooks via `node:module`'s `registerHooks` API and uses esbuild's `transformSync` to compile TypeScript on-the-fly. Transformed files are cached in `node_modules/.cache/tsbuild-loader`, keyed by file path hash, mtime, byte size, and the running Node.js + esbuild versions, so warm starts pay only a `readFileSync` per file. The cache directory is intentionally kept out of `.tsbuild/` so that `--clearCache` does not blow it away.
 
 ## Contributing
 
