@@ -105,7 +105,11 @@ export class TypeScriptProject implements Closable {
 		this.dependencyPaths = Files.read<JsonString<PackageJson>>(Paths.absolute(this.directory, 'package.json'))
 			.then((content) => {
 				const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
-				return [ ...new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]) ];
+				const dependencySet = new Set<string>();
+				for (const key of Object.keys(dependencies)) { dependencySet.add(key) }
+				for (const key of Object.keys(peerDependencies)) { dependencySet.add(key) }
+
+				return Array.from(dependencySet);
 			})
 			.catch(() => []);
 	}
@@ -425,8 +429,8 @@ export class TypeScriptProject implements Closable {
 			}
 
 			const writtenFiles = [];
-			for (const [ outputPath, { bytes } ] of Object.entries(outputs)) {
-				writtenFiles.push({ path: outputPath as RelativePath, size: bytes });
+			for (const outputPath in outputs) {
+				writtenFiles.push({ path: outputPath as RelativePath, size: outputs[outputPath].bytes });
 			}
 
 			if (iife) { writtenFiles.push(...iife.files) }
@@ -621,9 +625,14 @@ export class TypeScriptProject implements Closable {
 				// Auto-inject 'node' only on Node platform — browser/neutral builds shouldn't pay the
 				// cost of loading @types/node (~3 MB of declarations). Users can still opt in by
 				// listing 'node' explicitly in their tsconfig types array.
-				types: platform === Platform.NODE
-					? [ ...new Set([ 'node', ...(configResult.config.compilerOptions?.types ?? []), ...(typeScriptOptions.compilerOptions?.types ?? []) ]) ]
-					: [ ...new Set([ ...(configResult.config.compilerOptions?.types ?? []), ...(typeScriptOptions.compilerOptions?.types ?? []) ]) ]
+				types: (() => {
+					const typesSet = new Set<string>();
+					if (platform === Platform.NODE) { typesSet.add('node') }
+					for (const t of configResult.config.compilerOptions?.types ?? []) { typesSet.add(t) }
+					for (const t of typeScriptOptions.compilerOptions?.types ?? []) { typesSet.add(t) }
+
+					return Array.from(typesSet);
+				})()
 			}
 		};
 

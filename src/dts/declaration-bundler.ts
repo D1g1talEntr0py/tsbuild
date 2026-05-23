@@ -612,10 +612,20 @@ class DeclarationBundler {
 		}
 
 		// Value exports take precedence - remove any types that are also values
-		const finalValueExportsSet = new Set(valueExports.map(exportsMapper));
-		const finalTypeExports = [ ...new Set(typeExports.map(exportsMapper).filter((type) => !finalValueExportsSet.has(type))) ];
+		const finalValueExportsSet = new Set<string>();
+		for (const name of valueExports) {
+			finalValueExportsSet.add(exportsMapper(name));
+		}
 
-		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: [ ...finalValueExportsSet ] };
+		const finalTypeExports: string[] = [];
+		for (const type of typeExports) {
+			const mapped = exportsMapper(type);
+			if (!finalValueExportsSet.has(mapped)) {
+				finalTypeExports.push(mapped);
+			}
+		}
+
+		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: Array.from(finalValueExportsSet) };
 	}
 
 	/**
