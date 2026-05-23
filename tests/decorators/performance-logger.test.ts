@@ -11,12 +11,11 @@ vi.mock('src/logger', () => ({
 }));
 
 describe('logPerformance', () => {
-	let exitSpy: ReturnType<typeof vi.spyOn<typeof process, 'exit'>>;
 	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
 
 	beforeEach(async () => {
 		vi.resetModules();
-		exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+		vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 		performance.clearMarks();
 		performance.clearMeasures();
 		({ logPerformance } = await import('src/decorators/performance-logger'));

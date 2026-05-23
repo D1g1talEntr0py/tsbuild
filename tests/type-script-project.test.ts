@@ -3,10 +3,11 @@ import { TestHelper } from './scripts/test-helper';
 import { vol } from 'memfs';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../src/type-script-project';
+import { IncrementalBuildCache } from '../src/incremental-build-cache';
 import { Logger } from '../src/logger';
 import { bundleDeclarations } from '../src/dts/declaration-bundler';
 import { createIncrementalProgram } from 'typescript';
-import type { TypeScriptOptions } from '../src/@types';
+import type { AbsolutePath, RelativePath, TypeScriptOptions } from '../src/@types';
 
 vi.mock('node:fs', async () => {
 	const memfs: typeof import('memfs') = await vi.importActual('memfs');
@@ -141,7 +142,7 @@ describe('TypeScriptProject', () => {
 			...options,
 			tsbuild: {
 				...(options.tsbuild as Record<string, unknown>),
-				plugins: [TestHelper.createEsbuildPlugin(), ...((options.tsbuild as Record<string, unknown>)?.plugins as [] || [])]
+				plugins: [TestHelper.createEsbuildPlugin(), ...((options.tsbuild as Record<string, unknown>)?.['plugins'] as [] || [])]
 			}
 		});
 	};
@@ -534,7 +535,7 @@ describe('TypeScriptProject', () => {
 		});
 
 		it('expands process.env references in env values', async () => {
-			process.env.TEST_VAR_FOR_TSBUILD = 'expanded-value';
+			process.env['TEST_VAR_FOR_TSBUILD'] = 'expanded-value';
 			const projectPath = TestHelper.createTestProject({
 				tsconfig: { compilerOptions: { outDir: 'dist' } }
 			});
@@ -544,8 +545,9 @@ describe('TypeScriptProject', () => {
 
 			await (project as any).transpile();
 			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			expect(buildCall.define['import.meta.env.MY_VAR']).toBe('"expanded-value"');
-			delete process.env.TEST_VAR_FOR_TSBUILD;
+			expect(buildCall).toBeDefined();
+			expect(buildCall.define?.['import.meta.env.MY_VAR']).toBe('"expanded-value"');
+			delete process.env['TEST_VAR_FOR_TSBUILD'];
 		});
 
 		it('uses externalModulesPlugin when noExternal patterns exist', async () => {
@@ -559,8 +561,9 @@ describe('TypeScriptProject', () => {
 			await (project as any).transpile();
 			expect(esbuildMocks.buildMock).toHaveBeenCalled();
 			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
+			expect(buildCall).toBeDefined();
 			// Should have more than just outputPlugin due to externalModulesPlugin
-			expect(buildCall.plugins.length).toBeGreaterThanOrEqual(2);
+			expect(buildCall.plugins?.length).toBeGreaterThanOrEqual(2);
 		});
 
 		it('handles esbuild warnings', async () => {
@@ -572,9 +575,9 @@ describe('TypeScriptProject', () => {
 			esbuildMocks.buildMock.mockResolvedValueOnce({
 				warnings: [{ text: 'Some warning' }],
 				errors: [],
-				metafile: { outputs: {} }
-			});
-			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted warning']);
+				metafile: { inputs: {}, outputs: {} }
+			} as any);
+			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted warning'] as never[]);
 
 			await (project as any).transpile();
 			expect(esbuildMocks.formatMessagesMock).toHaveBeenCalled();
@@ -589,9 +592,9 @@ describe('TypeScriptProject', () => {
 			esbuildMocks.buildMock.mockResolvedValueOnce({
 				warnings: [],
 				errors: [{ text: 'Some error' }],
-				metafile: { outputs: {} }
-			});
-			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted error']);
+				metafile: { inputs: {}, outputs: {} }
+			} as any);
+			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted error'] as never[]);
 
 			const result = await (project as any).transpile();
 			expect(result).toEqual([]);
@@ -759,7 +762,7 @@ describe('TypeScriptProject', () => {
 				{ isDeclarationFile: true, fileName: join(projectPath, 'src/index.d.ts') }
 			]);
 			mocks.emitMock.mockReturnValueOnce({
-				diagnostics: [{ file: { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) }, messageText: 'Error', start: 0, length: 1, category: 1, code: 2322 }]
+				diagnostics: [{ file: { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) } as any, messageText: 'Error', start: 0, length: 1, category: 1, code: 2322 }]
 			});
 
 			await project.build();
@@ -883,7 +886,7 @@ describe('TypeScriptProject', () => {
 				}
 			});
 			const project = createProject(projectPath, {
-				tsbuild: { entryPoints: { src: './src' } }
+				tsbuild: { entryPoints: { src: './src' as RelativePath } }
 			});
 
 			const entryPoints = await (project as any).buildConfiguration.entryPoints;
@@ -909,8 +912,9 @@ describe('TypeScriptProject', () => {
 			await project.build();
 
 			// The plugin should have been loaded and passed to esbuild
-			const buildCall = esbuildMocks.buildMock.mock.calls[0][0];
-			const pluginNames = buildCall.plugins.map((p: { name: string }) => p.name);
+			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
+			expect(buildCall).toBeDefined();
+			const pluginNames = (buildCall.plugins as unknown as Array<{ name: string }>).map(p => p.name);
 			expect(pluginNames).toContain('esbuild:swc-decorator-metadata');
 		});
 	});

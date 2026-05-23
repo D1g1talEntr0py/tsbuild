@@ -11,12 +11,11 @@ vi.mock('src/logger', () => ({
 }));
 
 describe('closeOnExit', () => {
-	let exitSpy: ReturnType<typeof vi.spyOn>;
 	let processManager: Awaited<typeof import('src/process-manager')>['processManager'];
 
 	beforeEach(async () => {
 		vi.resetModules();
-		exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+		vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 		({ processManager } = await import('src/process-manager'));
 	});
 

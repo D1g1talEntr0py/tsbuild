@@ -37,7 +37,7 @@ describe('tsbuild CLI', () => {
 			throw new Error(`process.exit(${code})`);
 		});
 		originalArgv = process.argv;
-		originalNpmPackageVersion = process.env.npm_package_version;
+		originalNpmPackageVersion = process.env['npm_package_version'];
 		constructorMock.mockClear();
 		buildMock.mockClear();
 		vi.resetModules();
@@ -49,8 +49,8 @@ describe('tsbuild CLI', () => {
 		consoleLogSpy.mockRestore();
 		processExitSpy.mockRestore();
 		process.argv = originalArgv;
-		if (originalNpmPackageVersion === undefined) { delete process.env.npm_package_version; }
-		else { process.env.npm_package_version = originalNpmPackageVersion; }
+		if (originalNpmPackageVersion === undefined) { delete process.env['npm_package_version']; }
+		else { process.env['npm_package_version'] = originalNpmPackageVersion; }
 	});
 
 	describe('--help / -h', () => {
@@ -80,7 +80,7 @@ describe('tsbuild CLI', () => {
 		])('displays version with %s', async (flag) => {
 			process.argv = ['node', 'tsbuild', flag];
 			const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
-			process.env.npm_package_version = packageJson.version;
+			process.env['npm_package_version'] = packageJson.version;
 
 			// @ts-expect-error - temp module created at runtime for cache busting
 			try { await import('../src/tsbuild.temp'); }

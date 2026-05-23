@@ -117,14 +117,14 @@ export class TestHelper {
 				skipLibCheck: true,
 				outDir: './dist',
 				declaration: true,
-				...options.tsconfig?.compilerOptions,
+				...options.tsconfig?.['compilerOptions'],
 			},
 			tsbuild: {
 				entryPoints: { index: './src/index.ts' },
-				...options.tsconfig?.tsbuild,
+				...options.tsconfig?.['tsbuild'],
 			},
-			include: options.tsconfig?.include || ['src/**/*'],
-			exclude: options.tsconfig?.exclude || ['node_modules', 'dist'],
+			include: options.tsconfig?.['include'] || ['src/**/*'],
+			exclude: options.tsconfig?.['exclude'] || ['node_modules', 'dist'],
 			...options.tsconfig,
 		};
 

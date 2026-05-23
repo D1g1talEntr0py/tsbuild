@@ -56,8 +56,8 @@ describe('TypeScriptProject - Basic Builds', () => {
 		return new TypeScriptProject(directory as Path, {
 			...options,
 			tsbuild: {
-				...(options.tsbuild as Record<string, unknown>),
-				plugins: [TestHelper.createEsbuildPlugin(), ...((options.tsbuild as Record<string, unknown>)?.plugins as [] || [])]
+				...(options['tsbuild'] as Record<string, unknown>),
+				plugins: [TestHelper.createEsbuildPlugin(), ...((options['tsbuild'] as Record<string, unknown>)?.['plugins'] as [] || [])]
 			}
 		});
 	};

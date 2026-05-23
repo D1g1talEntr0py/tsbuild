@@ -50,7 +50,7 @@ const TOOL_VERSIONS = {
 
 // ─── ANSI helpers ──────────────────────────────────────────────────────────────
 
-const useColor = process.stdout.isTTY && process.env.NO_COLOR !== '1';
+const useColor = process.stdout.isTTY && process.env['NO_COLOR'] !== '1';
 const c = {
 	reset: useColor ? '\x1b[0m' : '',
 	dim: useColor ? '\x1b[2m' : '',
@@ -109,7 +109,6 @@ function dirSizeBytes(dir: string): number {
 
 function rmrf(path: string): void { rmSync(path, { recursive: true, force: true }); }
 
-function fmtMs(ms: number): string { return ms < 1000 ? `${ms.toFixed(0)} ms` : `${(ms / 1000).toFixed(2)} s`; }
 function fmtKb(bytes: number): string { return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 function fmtRss(kb: number): string { return kb === 0 ? '—' : `${(kb / 1024).toFixed(0)} MB`; }
 

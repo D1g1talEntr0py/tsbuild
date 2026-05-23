@@ -130,10 +130,11 @@ describe('debounce', () => {
 	describe('error handling', () => {
 		it('throws if wait is negative', () => {
 			expect(() => {
-				class Test {
+				class _Test {
 					@debounce(-10)
 					method() {}
 				}
+				void _Test;
 			}).toThrow('wait must be non-negative');
 		});
 

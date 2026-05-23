@@ -6,5 +6,5 @@
 		"isolatedDeclarations": false,
 		"paths": { "src/*": [ "../src/*" ] }
 	},
-	"include": [ "./**/*.ts" ]
+	"include": [ "./**/*.ts", "../src/@types/*.ts" ]
 }

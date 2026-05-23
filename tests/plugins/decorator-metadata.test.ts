@@ -6,7 +6,6 @@ vi.mock('@swc/core', () => ({
 	transformFile: vi.fn(),
 }));
 
-// @ts-expect-error - @swc/core is mocked above
 const swc = await import('@swc/core');
 const { swcDecoratorMetadataPlugin } = await import('src/plugins/decorator-metadata');
 
