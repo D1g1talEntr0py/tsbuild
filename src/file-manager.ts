@@ -3,7 +3,7 @@ import { Paths } from 'src/paths';
 import { defaultEntryPoint } from 'src/constants';
 import { DeclarationProcessor } from './dts/declaration-processor';
 import { createSourceFile, ScriptTarget } from 'typescript';
-import type { AbsolutePath, BuildCache, CachedDeclaration, Closable, WrittenFile } from 'src/@types';
+import type { AbsolutePath, BuildCacheManager, CachedDeclaration, Closable, WrittenFile } from 'src/@types';
 
 const localFileIdentifier = /\.[a-z]+$/i;
 const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
@@ -54,7 +54,7 @@ function rewriteRelativeSpecifiers(code: string): string {
 export class FileManager implements Closable {
 	private hasEmittedFiles: boolean = false;
 	private readonly declarationFiles = new Map<AbsolutePath, CachedDeclaration>();
-	private readonly cache: BuildCache | undefined;
+	private readonly cache: BuildCacheManager | undefined;
 	/** Raw declaration text captured during emit, pending pre-processing */
 	private readonly pendingFiles: { path: AbsolutePath; text: string }[] = [];
 	/** Buffered .tsbuildinfo content for async write (avoids sync I/O during emit) */
@@ -66,7 +66,7 @@ export class FileManager implements Closable {
 	 * Creates a new file manager.
 	 * @param buildCache - Optional build cache for incremental builds
 	 */
-	constructor(buildCache?: BuildCache) {
+	constructor(buildCache?: BuildCacheManager) {
 		this.cache = buildCache;
 	}
 
@@ -134,17 +134,17 @@ export class FileManager implements Closable {
 	/**
 	 * Persists the .tsbuildinfo file and the dts cache to disk in the background. Call this
 	 * AFTER the build's parallel phases (transpile + dts bundling) have completed so the writes
-	 * (and Brotli compression for the dts cache) don't compete with esbuild for libuv threadpool
-	 * slots.
+	 * (and Brotli compression for the dts cache) don't compete with esbuild for libuv threadpool slots.
+	 * @param minify Whether the current build is minified, for future cache compatibility checks
 	 */
-	persistCache(): void {
+	persistCache(minify: boolean): void {
 		const tasks: Promise<void>[] = [];
 		if (this.pendingBuildInfo) {
 			tasks.push(Files.write(this.pendingBuildInfo.path, this.pendingBuildInfo.text));
 			this.pendingBuildInfo = undefined;
 		}
 		if (this.cache !== undefined && this.hasEmittedFiles) {
-			tasks.push(this.cache.save(this.declarationFiles));
+			tasks.push(this.cache.save(this.declarationFiles, minify));
 		}
 		if (tasks.length === 0) { return }
 		const save = tasks.length === 1 ? tasks[0].then(() => {}, () => {}) : Promise.all(tasks).then(() => {}, () => {});

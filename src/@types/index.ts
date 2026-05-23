@@ -40,7 +40,7 @@ interface Closable { close: Callable };
 type ClosableConstructor = Constructor<any[], Closable>;
 
 type PerformanceSubStep = { name: string; duration: string; ms: number };
-type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[] };
+type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[], notes?: string[] };
 type DetailedPerformanceMeasureOptions<R> = Modify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
 type DetailedPerformanceEntry<D> = PerformanceEntry & { detail: PerformanceEntryDetail<D> };
 
@@ -188,14 +188,24 @@ type CachedDeclaration = {
 	fileReferences: ReadonlySet<string>;
 };
 
+/** Persistent cache payload stored in .tsbuild/dts_cache.v8.br */
+type BuildCache = {
+	/** Cache format version for compatibility checking */
+	version: number;
+	/** Cached declaration files: path -> pre-processed code with extracted references */
+	files: Map<string, CachedDeclaration>;
+	/** Minify mode of the last successful JS output generation */
+	minify?: boolean;
+};
+
 /** Interface for build cache operations */
-interface BuildCache {
+interface BuildCacheManager {
 	/** Invalidates the build cache */
 	invalidate(): void;
 	/** Restores cached declaration files into the provided map */
 	restore(target: Map<string, CachedDeclaration>): Promise<void>;
 	/** Saves declaration files to the cache */
-	save(source: ReadonlyMap<string, CachedDeclaration>): Promise<void>;
+	save(source: ReadonlyMap<string, CachedDeclaration>, minify: boolean): Promise<void>;
 	/** Checks if the cache is valid */
 	isValid(): boolean;
 	/** Checks if a file path is the TypeScript build info file */
@@ -208,6 +218,10 @@ interface BuildCache {
 	getPreviousOutputs(): readonly string[] | undefined;
 	/** Persists the project-relative output paths produced by the current build. Fire-and-forget. */
 	saveOutputs(outputs: readonly string[]): Promise<void>;
+	/** Checks whether current minify mode requires forcing a rebuild. */
+	requiresRebuild(minify: boolean): Promise<boolean>;
+	/** Persists minify mode metadata for future incremental-build compatibility checks. */
+	saveMinifyState(minify: boolean): Promise<void>;
 };
 
 type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
@@ -221,7 +235,7 @@ type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	/** Diagnostics encountered while parsing the config file */
 	configFileParsingDiagnostics: Diagnostic[];
 	/** Build cache instance for incremental builds */
-	buildCache: BuildCache | undefined;
+	buildCache: BuildCacheManager | undefined;
 	/** Module Specifiers in 'include', 'exclude', & 'files' */
 	include?: string[];
 	exclude?: string[];
@@ -290,6 +304,7 @@ export type {
 	ProjectBuildConfiguration,
 	BuildConfiguration,
 	BuildCache,
+	BuildCacheManager,
 	WrittenFile,
 	Pattern,
 	Closable,

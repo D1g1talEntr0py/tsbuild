@@ -138,7 +138,8 @@ export class TypeScriptProject implements Closable {
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];
 			const buildCache = this.configuration.buildCache;
-			const force = this.configuration.tsbuild.force;
+			const forcedForMinify = await (buildCache?.requiresRebuild(this.buildConfiguration.minify) ?? Promise.resolve(false));
+			const force = this.configuration.tsbuild.force || forcedForMinify;
 			const cleanEnabled = this.configuration.clean && !this.configuration.compilerOptions.noEmit;
 
 			// Manifest-driven output cleanup: when a manifest snapshot from a prior build is available,
@@ -185,12 +186,13 @@ export class TypeScriptProject implements Closable {
 
 			// Defer the dts cache Brotli compression until AFTER the parallel phases complete.
 			// Running it during transpile inflates esbuild's wall time by 50-70ms via libuv threadpool contention.
-			this.fileManager.persistCache();
+			this.fileManager.persistCache(this.buildConfiguration.minify);
 
 			// Stale-file cleanup + new manifest persistence — both fire-and-forget after the build
 			// has reported completion, so they never inflate the critical path.
 			if (buildCache !== undefined && newOutputs.length > 0) {
 				if (previousOutputs !== undefined) { this.cleanupStaleOutputs(previousOutputs, newOutputs) }
+				void buildCache.saveMinifyState(this.buildConfiguration.minify).catch(() => { /* best-effort build options persistence */ });
 				void buildCache.saveOutputs(newOutputs).catch(() => { /* best-effort manifest persistence */ });
 			}
 		} catch (error) {

@@ -467,6 +467,54 @@ describe('TypeScriptProject', () => {
 			expect(bundleDeclarations).toHaveBeenCalled();
 			expect(esbuildMocks.buildMock).toHaveBeenCalled();
 		});
+
+		it('forces full build when minify is enabled and previous build was not minified', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
+			});
+			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
+			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
+			await new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo').saveMinifyState(false);
+
+			const project = createProject(projectPath, { tsbuild: { minify: true } });
+			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
+
+			await project.build();
+			expect(bundleDeclarations).toHaveBeenCalled();
+			expect(esbuildMocks.buildMock).toHaveBeenCalled();
+		});
+
+		it('follows incremental path when minify is enabled and previous build was minified', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
+			});
+			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
+			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
+			await new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo').saveMinifyState(true);
+
+			const project = createProject(projectPath, { tsbuild: { minify: true } });
+			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
+
+			await project.build();
+			expect(bundleDeclarations).not.toHaveBeenCalled();
+			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
+		});
+
+		it('forces full build when minify is disabled and previous build was minified', async () => {
+			const projectPath = TestHelper.createTestProject({
+				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
+			});
+			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
+			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
+			await new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo').saveMinifyState(true);
+
+			const project = createProject(projectPath);
+			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
+
+			await project.build();
+			expect(bundleDeclarations).toHaveBeenCalled();
+			expect(esbuildMocks.buildMock).toHaveBeenCalled();
+		});
 	});
 
 	describe('transpile', () => {

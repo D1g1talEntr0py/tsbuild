@@ -71,14 +71,6 @@ type CodeTransformation = {
 	replacement?: string;
 };
 
-/** Versioned cache structure for upgrade safety */
-type VersionedCache = {
-	/** Cache format version for compatibility checking */
-	version: number;
-	/** Cached declaration files: path -> pre-processed code with extracted references */
-	files: Map<string, CachedDeclaration>;
-};
-
 /** Structured external import preserved during DTS bundling. Avoids re-parsing import text via regex. */
 type ExternalImport =
 	| { kind: 'named'; specifier: string; isType: boolean; names: string[] }
@@ -114,4 +106,4 @@ type BundledDeclaration = {
 	allDeclarations: Set<string>;
 };
 
-export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, VersionedCache, IdentifierMap, DeclarationCode, ExternalImport, ModuleDependencyGraph, BundledDeclaration };
+export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, DeclarationCode, ExternalImport, ModuleDependencyGraph, BundledDeclaration };
