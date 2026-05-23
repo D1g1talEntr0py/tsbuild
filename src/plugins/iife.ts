@@ -44,12 +44,13 @@ export function iifePlugin(options?: IifeOptions): IifePluginInstance {
 				build.initialOptions.write = false;
 
 				const sourcemap = build.initialOptions.sourcemap;
+				const minify = build.initialOptions.minify;
 				const entryPointNames = extractEntryNames(build.initialOptions.entryPoints);
 
 				build.onEnd(async ({ outputFiles }: BuildResult) => {
 					if (!outputFiles || outputFiles.length === 0 || entryPointNames.length === 0) { return }
 
-					files.push(...(await buildIife(outputFiles, entryPointNames, outdir, options?.globalName, sourcemap)));
+					files.push(...(await buildIife(outputFiles, entryPointNames, outdir, options?.globalName, sourcemap, minify)));
 				});
 			}
 		}
@@ -143,9 +144,10 @@ function wrapAsIife(text: string, globalName?: string) {
  * @param outdir The primary build's output directory
  * @param globalName Optional global variable name override; otherwise derived from each entry name
  * @param sourcemap The primary build's source map setting
+ * @param minify The primary build's minify setting
  * @returns An array of written IIFE output files
  */
-async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap']): Promise<WrittenFile[]> {
+async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap'], minify: BuildOptions['minify']): Promise<WrittenFile[]> {
 	const { build: esbuild } = await import('esbuild');
 	const fileContents = new Map<string, string>();
 	const primaryWrites: Promise<void>[] = [];
@@ -192,6 +194,7 @@ async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[]
 			splitting: false,
 			outdir: iifeOutdir,
 			sourcemap: sourcemapValue,
+			minify,
 			write: false,
 			logLevel: 'warning',
 			plugins

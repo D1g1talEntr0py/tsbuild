@@ -66,11 +66,12 @@ describe('iifePlugin', () => {
 	function setupPlugin(
 		options?: { globalName?: string },
 		sourcemap?: boolean | string,
-		entryPoints?: BuildOptions['entryPoints']
+		entryPoints?: BuildOptions['entryPoints'],
+		minify?: boolean
 	): void {
 		instance = iifePlugin(options);
 		const build: Partial<PluginBuild> = {
-			initialOptions: { outdir: outputDir, sourcemap, entryPoints: entryPoints ?? { index: './src/index.ts' } } as PluginBuild['initialOptions'],
+			initialOptions: { outdir: outputDir, sourcemap, minify, entryPoints: entryPoints ?? { index: './src/index.ts' } } as PluginBuild['initialOptions'],
 			onEnd: vi.fn((callback) => { onEndCallback = callback }),
 		};
 		instance.plugin.setup(build as PluginBuild);
@@ -180,6 +181,20 @@ describe('iifePlugin', () => {
 			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
 
 			expect(mockEsbuild.mock.calls[0]![0].sourcemap).toBe(false);
+		});
+
+		it('forwards minify:true to secondary esbuild build', async () => {
+			setupPlugin(undefined, undefined, undefined, true);
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+
+			expect(mockEsbuild.mock.calls[0]![0].minify).toBe(true);
+		});
+
+		it('forwards minify:false (or undefined) to secondary esbuild build', async () => {
+			setupPlugin();
+			await onEndCallback(makePrimaryResult({ [`${outputDir}/index.js`]: 'var x = 1;' }));
+
+			expect(mockEsbuild.mock.calls[0]![0].minify).toBeUndefined();
 		});
 	});
 
