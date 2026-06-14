@@ -62,6 +62,16 @@ describe('TypeScriptProject - Basic Builds', () => {
 		});
 	};
 
+	const waitForRemoval = async (path: string, timeoutMs = 1000): Promise<void> => {
+		const deadline = Date.now() + timeoutMs;
+		while (vol.existsSync(path)) {
+			if (Date.now() >= deadline) {
+				throw new Error(`Timed out waiting for cleanup of ${path}`);
+			}
+			await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+	};
+
 	it('builds a simple ESM project', async () => {
 		const projectPath = await TestHelper.createTestProject({
 			tsconfig: {
@@ -149,7 +159,7 @@ describe('TypeScriptProject - Basic Builds', () => {
 			tsbuild: { entryPoints: { keep: './src/keep.ts' }, clean: true }
 		});
 		await second.build();
-		await second.flushBackgroundCleanup();
+		await waitForRemoval(join(distDir, 'remove.js'));
 
 		expect(vol.existsSync(join(distDir, 'keep.js'))).toBe(true);
 		expect(vol.existsSync(join(distDir, 'remove.js'))).toBe(false);

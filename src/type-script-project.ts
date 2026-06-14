@@ -27,22 +27,14 @@ const globCharacters = /[*?\\[\]!].*$/;
 const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
 const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
 const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
+const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
+
 /**
  * Computes a deterministic fingerprint of the build configuration.
  * Fingerprint mismatch on the next build forces a full rebuild.
  * @param buildConfig - The resolved build configuration
  * @param compilerOptions - The resolved compiler options
  * @returns A deterministic JSON string representing the build configuration
- */
-/**
- * Serializes a Pattern so RegExp instances produce a stable, unique string.
- * @param p - The pattern to serialize.
- */
-const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
-
-/**
- * @param buildConfig - The project build configuration.
- * @param compilerOptions - The TypeScript compiler options.
  */
 function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOptions: CompilerOptions): string {
 	return JSON.stringify({
@@ -65,6 +57,7 @@ function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOption
 		env: buildConfig.env
 	});
 }
+
 /** Class representing a TypeScript project */
 @closeOnExit
 export class TypeScriptProject implements Closable {
@@ -158,14 +151,6 @@ export class TypeScriptProject implements Closable {
 			});
 
 		this.pendingStaleOutputsCleanup = cleanup;
-	}
-
-	/**
-	 * Waits for fire-and-forget stale-output cleanup to settle.
-	 * Useful for deterministic tests that need to assert post-cleanup filesystem state.
-	 */
-	async flushBackgroundCleanup(): Promise<void> {
-		await this.pendingStaleOutputsCleanup;
 	}
 
 	/**
@@ -353,7 +338,7 @@ export class TypeScriptProject implements Closable {
 		// When packages === 'bundle', we can just use esbuild's built-in packages option
 		if (this.buildConfiguration.noExternal.length > 0) {
 			// esbuild's `external` option doesn't support RegExp. So here we use a custom plugin to implement it
-			plugins.push(externalModulesPlugin({ dependencies: await this.getProjectDependencyPaths(), noExternal: this.buildConfiguration.noExternal }));
+			plugins.push(externalModulesPlugin({ dependencies: await this.dependencyPaths, noExternal: this.buildConfiguration.noExternal }));
 		}
 
 		// Lazy-load the SWC decorator metadata plugin only when needed for legacy decorator support. Not needed for stage 3 decorators
@@ -491,7 +476,6 @@ export class TypeScriptProject implements Closable {
 		// If not bundling, just write declaration files to disk
 		if (!this.buildConfiguration.bundle) { return this.fileManager.writeFiles(this.directory) }
 
-		// If bundling, use the files from the file manager
 		return bundleDeclarations({
 			currentDirectory: this.directory,
 			declarationFiles: this.fileManager.getDeclarationFiles(),
@@ -679,15 +663,6 @@ export class TypeScriptProject implements Closable {
 		}
 
 		return expandedEntryPoints;
-	}
-
-	/**
-	 * Gets the project dependency paths.
-	 * The promise is started in the constructor so it overlaps with TS Program creation.
-	 * @returns A promise that resolves to an array of project dependency paths.
-	 */
-	private getProjectDependencyPaths() {
-		return this.dependencyPaths!;
 	}
 
 	/**

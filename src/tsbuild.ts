@@ -29,23 +29,21 @@ if (help) {
 	}
 
 	console.log();
-	process.exit(0);
-}
-
-// Handle version option
-if (version) {
+	process.exitCode = 0;
+} else if (version) {
+	// Handle version option
 	console.log(import.meta.env?.tsbuild_version ?? process.env['npm_package_version']);
-	process.exit(0);
-}
+	process.exitCode = 0;
+} else {
+	const typeScriptOptions = {
+		clearCache: args.clearCache,
+		compilerOptions: { noEmit: args.noEmit },
+		tsbuild: { force: args.force, minify: args.minify, watch: { enabled: args.watch } }
+	} satisfies TypeScriptOptions;
 
-const typeScriptOptions = {
-	clearCache: args.clearCache,
-	compilerOptions: { noEmit: args.noEmit },
-	tsbuild: { force: args.force, minify: args.minify, watch: { enabled: args.watch } }
-} satisfies TypeScriptOptions;
-
-try {
-	await new TypeScriptProject(args.project, typeScriptOptions).build();
-} catch (error) {
-	process.exitCode = error instanceof BuildError ? error.code : 1;
+	try {
+		await new TypeScriptProject(args.project, typeScriptOptions).build();
+	} catch (error) {
+		process.exitCode = error instanceof BuildError ? error.code : 1;
+	}
 }
