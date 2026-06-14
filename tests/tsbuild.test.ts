@@ -20,6 +20,7 @@ describe('tsbuild CLI', () => {
 	let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 	let processExitSpy: ReturnType<typeof vi.spyOn>;
 	let originalArgv: string[];
+	let originalExitCode: number | undefined;
 	let originalNpmPackageVersion: string | undefined;
 
 	beforeAll(() => {
@@ -37,6 +38,7 @@ describe('tsbuild CLI', () => {
 			throw new Error(`process.exit(${code})`);
 		});
 		originalArgv = process.argv;
+		originalExitCode = process.exitCode;
 		originalNpmPackageVersion = process.env['npm_package_version'];
 		constructorMock.mockClear();
 		buildMock.mockClear();
@@ -49,6 +51,7 @@ describe('tsbuild CLI', () => {
 		consoleLogSpy.mockRestore();
 		processExitSpy.mockRestore();
 		process.argv = originalArgv;
+		process.exitCode = originalExitCode;
 		if (originalNpmPackageVersion === undefined) { delete process.env['npm_package_version']; }
 		else { process.env['npm_package_version'] = originalNpmPackageVersion; }
 	});
@@ -59,16 +62,17 @@ describe('tsbuild CLI', () => {
 			['-h'],
 		])('displays help message with %s', async (flag) => {
 			process.argv = ['node', 'tsbuild', flag];
+			process.exitCode = undefined;
 
 			// @ts-expect-error - temp module created at runtime for cache busting
-			try { await import('../src/tsbuild.temp'); }
-			catch (error) { expect((error as Error).message).toBe('process.exit(0)'); }
+			await import('../src/tsbuild.temp');
 
 			expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('tsbuild - TypeScript build tool'));
 			expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Usage: tsbuild [options]'));
 			expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('-h, --help'));
 			expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('-v, --version'));
-			expect(processExitSpy).toHaveBeenCalledWith(0);
+			expect(process.exitCode).toBe(0);
+			expect(processExitSpy).not.toHaveBeenCalled();
 			expect(constructorMock).not.toHaveBeenCalled();
 		});
 	});
@@ -79,15 +83,16 @@ describe('tsbuild CLI', () => {
 			['-v'],
 		])('displays version with %s', async (flag) => {
 			process.argv = ['node', 'tsbuild', flag];
+			process.exitCode = undefined;
 			const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
 			process.env['npm_package_version'] = packageJson.version;
 
 			// @ts-expect-error - temp module created at runtime for cache busting
-			try { await import('../src/tsbuild.temp'); }
-			catch (error) { expect((error as Error).message).toBe('process.exit(0)'); }
+			await import('../src/tsbuild.temp');
 
 			expect(consoleLogSpy).toHaveBeenCalledWith(packageJson.version);
-			expect(processExitSpy).toHaveBeenCalledWith(0);
+			expect(process.exitCode).toBe(0);
+			expect(processExitSpy).not.toHaveBeenCalled();
 			expect(constructorMock).not.toHaveBeenCalled();
 		});
 	});
