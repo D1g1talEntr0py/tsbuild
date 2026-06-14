@@ -2,7 +2,7 @@
 
 **For:** tsbuild development team
 **Purpose:** Quick checks for performance regressions
-**Last Updated:** 2026-04-12
+**Last Updated:** 2026-06-13
 
 ---
 
@@ -50,6 +50,17 @@ echo "// Change" >> src/type-script-project.ts
 # Expected: ~300-500ms until "Completed in Xms"
 git checkout src/type-script-project.ts
 ```
+
+---
+
+## Default Strategy
+
+Use a low-overhead, trigger-based approach by default:
+
+- Do not add broad new metrics or instrumentation when baseline checks are healthy.
+- Keep existing cold/incremental checks as the standard guardrail.
+- Add targeted measurements only when a trigger is observed (for example, >20% phase slowdown, repeated developer-reported slowness, or missed build-time expectations).
+- If you add any metric, document maintenance cost and expected diagnostic value first.
 
 ---
 
