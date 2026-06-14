@@ -20,8 +20,7 @@
  *
  * After mitata runs we also print:
  *   - tsbuild self-reported phase breakdown (the inner cost of the full build)
- *   - cold-build artifact metadata: peak RSS (Linux only, via /usr/bin/time)
- *     and output byte count per tool
+ *   - cold-build artifact metadata: output byte count and file metrics per tool
  *
  * Usage:
  *   pnpm bench
@@ -39,7 +38,6 @@ const SYNTHETIC_FILE_COUNT = 100;
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const tsbuildBin = join(root, 'dist/tsbuild.js');
 const ansiPattern = /\x1b\[[0-9;]*m/g;
-const hasGnuTime = process.platform === 'linux';
 
 /** Pinned versions for comparison tools (fetched on-demand via pnpm dlx). */
 const TOOL_VERSIONS = {
@@ -67,26 +65,21 @@ const c = {
 /** Synchronously run a command, throwing with full stderr on non-zero exit. */
 function exec(cmd: string, args: string[], cwd: string): { stdout: string; stderr: string } {
 	const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NO_COLOR: '1' } });
-	if (r.status !== 0) {
-		throw new Error(`${cmd} exited with ${r.status}\nargs: ${args.join(' ')}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+	if (r.status !== 0 || r.signal !== null) {
+		const exitInfo = r.signal ? `signal ${r.signal}` : `exit ${r.status}`;
+		throw new Error(`${cmd} exited with ${exitInfo}\nargs: ${args.join(' ')}\nstdout:\n${r.stdout ?? ''}\nstderr:\n${r.stderr ?? ''}`);
 	}
-	return { stdout: r.stdout, stderr: r.stderr };
+	return { stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
-/** Wrap a command with `/usr/bin/time -f 'MAXRSS:%M'` (Linux only). Returns peak RSS in KB or 0. */
-function execWithRss(cmd: string, args: string[], cwd: string): { stdout: string; stderr: string; rssKb: number } {
-	if (!hasGnuTime) {
-		const r = exec(cmd, args, cwd);
-		return { ...r, rssKb: 0 };
+/** Run a command and capture stdout/stderr for later parsing and artifact measurement. */
+function execWithOutput(cmd: string, args: string[], cwd: string): { stdout: string; stderr: string } {
+	const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NO_COLOR: '1' } });
+	if (r.status !== 0 || r.signal !== null) {
+		const exitInfo = r.signal ? `signal ${r.signal}` : `exit ${r.status}`;
+		throw new Error(`command exited with ${exitInfo}\ncommand: ${[cmd, ...args].join(' ')}\nstdout:\n${r.stdout ?? ''}\nstderr:\n${r.stderr ?? ''}`);
 	}
-	const r = spawnSync('/usr/bin/time', [ '-f', 'MAXRSS:%M', cmd, ...args ], { cwd, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NO_COLOR: '1' } });
-	if (r.status !== 0) {
-		throw new Error(`${cmd} exited with ${r.status}\nargs: ${args.join(' ')}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
-	}
-	const match = r.stderr.match(/MAXRSS:(\d+)/);
-	const rssKb = match ? parseInt(match[1], 10) : 0;
-	const stderr = r.stderr.replace(/MAXRSS:\d+\n?/, '');
-	return { stdout: r.stdout, stderr, rssKb };
+	return { stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
 /** Recursively sum byte sizes of all files under dir; returns 0 if missing. */
@@ -110,7 +103,6 @@ function dirSizeBytes(dir: string): number {
 function rmrf(path: string): void { rmSync(path, { recursive: true, force: true }); }
 
 function fmtKb(bytes: number): string { return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
-function fmtRss(kb: number): string { return kb === 0 ? '—' : `${(kb / 1024).toFixed(0)} MB`; }
 
 // ─── Synthetic project ─────────────────────────────────────────────────────────
 
@@ -200,14 +192,17 @@ export function transform${id}<T>(values: ReadonlyArray<T>, mapper: (v: T) => T)
 interface Tool {
 	id: string;
 	outDir: string;
+	dtsEnabled?: boolean;
 	/** Build the command line. Returns [cmd, args]. */
 	command: (dir: string) => [ string, string[] ];
 }
 
-function tsbuildTool(): Tool {
+function tsbuildTool(opts: { dts?: boolean } = {}): Tool {
+	const outDir = opts.dts === false ? 'dist-tsbuild-nodts' : 'dist';
 	return {
-		id: 'tsbuild',
-		outDir: 'dist',
+		id: opts.dts === false ? 'tsbuild (compilerOptions.declaration=false)' : 'tsbuild',
+		outDir,
+		dtsEnabled: opts.dts !== false,
 		command: dir => [ process.execPath, [ tsbuildBin, '-p', dir ] ],
 	};
 }
@@ -271,9 +266,18 @@ function tsdownTool(opts: { dts: boolean }): Tool {
 
 // ─── Reset helpers ─────────────────────────────────────────────────────────────
 
+function setSyntheticDeclarationOption(dir: string, enabled: boolean): void {
+	const path = join(dir, 'tsconfig.json');
+	const tsconfig = JSON.parse(readFileSync(path, 'utf8')) as { compilerOptions?: { declaration?: boolean } };
+	if (tsconfig.compilerOptions === undefined) { tsconfig.compilerOptions = {}; }
+	tsconfig.compilerOptions.declaration = enabled;
+	writeFileSync(path, JSON.stringify(tsconfig, null, 2));
+}
+
 function resetForTool(dir: string, tool: Tool): void {
+	if (tool.id.startsWith('tsbuild')) { setSyntheticDeclarationOption(dir, tool.dtsEnabled !== false); }
 	rmrf(join(dir, tool.outDir));
-	if (tool.id === 'tsbuild') rmrf(join(dir, '.tsbuild'));
+	if (tool.id.startsWith('tsbuild')) rmrf(join(dir, '.tsbuild'));
 }
 
 // ─── Pre-warm pnpm dlx cache ───────────────────────────────────────────────────
@@ -323,7 +327,6 @@ function parseTsbuildPhases(combinedOutput: string): Phases | undefined {
 interface Artifact {
 	id: string;
 	wallMs: number;
-	rssKb: number;
 	outputBytes: number;
 	phases?: Phases;
 }
@@ -332,11 +335,11 @@ function measureArtifact(dir: string, tool: Tool): Artifact {
 	resetForTool(dir, tool);
 	const [ cmd, args ] = tool.command(dir);
 	const start = performance.now();
-	const r = execWithRss(cmd, args, dir);
+	const r = execWithOutput(cmd, args, dir);
 	const wallMs = performance.now() - start;
 	const outputBytes = dirSizeBytes(join(dir, tool.outDir));
 	const phases = tool.id === 'tsbuild' ? parseTsbuildPhases(r.stdout + r.stderr) : undefined;
-	return { id: tool.id, wallMs, rssKb: r.rssKb, outputBytes, phases };
+	return { id: tool.id, wallMs, outputBytes, phases };
 }
 
 // ─── Custom rendering ──────────────────────────────────────────────────────────
@@ -345,11 +348,11 @@ function renderArtifactTable(title: string, artifacts: Artifact[]): void {
 	const sorted = artifacts.slice().sort((a, b) => a.outputBytes - b.outputBytes);
 	const longestId = sorted.reduce((m, a) => Math.max(m, a.id.length), 0);
 	console.log(`\n${c.bold}${c.cyan}┌─ ${title}${c.reset}`);
-	console.log(`${c.dim}│  one cold build per tool · peak RSS · output size${c.reset}`);
+	console.log(`${c.dim}│  one cold build per tool · output size${c.reset}`);
 	console.log(`${c.dim}│${c.reset}`);
 	for (let i = 0; i < sorted.length; i++) {
 		const a = sorted[i];
-		console.log(`${c.dim}│${c.reset}  ${c.cyan}${a.id.padEnd(longestId)}${c.reset}  ${c.dim}rss${c.reset} ${fmtRss(a.rssKb).padStart(7)}  ${c.dim}out${c.reset} ${fmtKb(a.outputBytes).padStart(8)}`);
+		console.log(`${c.dim}│${c.reset}  ${c.cyan}${a.id.padEnd(longestId)}${c.reset}  ${c.dim}out${c.reset} ${fmtKb(a.outputBytes).padStart(8)}`);
 	}
 	console.log(`${c.dim}└─${c.reset}`);
 }
@@ -389,8 +392,8 @@ generateSyntheticProject(dir, SYNTHETIC_FILE_COUNT);
 prewarm();
 
 // Define tools per mode.
-const fullTools: Tool[] = [ tsbuildTool(), tsupTool({ dts: true }), tsdownTool({ dts: true }) ];
-const noDtsTools: Tool[] = [ tsbuildTool(), tsupTool({ dts: false }), tsdownTool({ dts: false }) ];
+const fullTools: Tool[] = [ tsbuildTool({ dts: true }), tsupTool({ dts: true }), tsdownTool({ dts: true }) ];
+const noDtsTools: Tool[] = [ tsbuildTool({ dts: false }), tsupTool({ dts: false }), tsdownTool({ dts: false }) ];
 
 // Mitata runs — measure pure wall-time across many samples.
 console.log(`\n${c.bold}Running mitata bench (adaptive sampling — slower benches get fewer samples)…${c.reset}\n`);
@@ -412,10 +415,10 @@ barplot(() => {
 
 barplot(() => {
 	summary(() => {
-		group('No dts · bundle only (tsbuild always does full build — annotated)', () => {
+		group('No dts · bundle only', () => {
 			for (let i = 0; i < noDtsTools.length; i++) {
 				const tool = noDtsTools[i];
-				bench(tool.id === 'tsbuild' ? 'tsbuild (full *)' : tool.id, function* () {
+				bench(tool.id, function* () {
 					resetForTool(dir, tool);
 					const [ cmd, args ] = tool.command(dir);
 					yield () => { exec(cmd, args, dir); };
@@ -427,15 +430,15 @@ barplot(() => {
 
 await mitataRun({ colors: useColor });
 
-// Per-tool single-shot cold build for artifact size + RSS + phase breakdown.
-console.log(`\n${c.dim}Capturing cold-build artifact metadata (RSS + output size) — separate from timing.${c.reset}`);
+// Per-tool single-shot cold build for artifact size + phase breakdown.
+console.log(`\n${c.dim}Capturing cold-build artifact metadata (output size) — separate from timing.${c.reset}`);
 const fullArtifacts: Artifact[] = [];
 for (let i = 0; i < fullTools.length; i++) {
 	process.stdout.write(`  ${fullTools[i].id.padEnd(16)} `);
 	try {
 		const a = measureArtifact(dir, fullTools[i]);
 		fullArtifacts.push(a);
-		console.log(`${c.green}✓${c.reset} ${fmtRss(a.rssKb)} · ${fmtKb(a.outputBytes)}`);
+		console.log(`${c.green}✓${c.reset} ${fmtKb(a.outputBytes)}`);
 	} catch (err) {
 		console.log(`${c.red}✗ ${(err as Error).message}${c.reset}`);
 	}
@@ -444,19 +447,18 @@ for (let i = 0; i < fullTools.length; i++) {
 const noDtsArtifacts: Artifact[] = [];
 for (let i = 0; i < noDtsTools.length; i++) {
 	const tool = noDtsTools[i];
-	const label = tool.id === 'tsbuild' ? 'tsbuild (full *)' : tool.id;
-	process.stdout.write(`  ${label.padEnd(16)} `);
+	process.stdout.write(`  ${tool.id.padEnd(16)} `);
 	try {
 		const a = measureArtifact(dir, tool);
-		noDtsArtifacts.push({ ...a, id: label });
-		console.log(`${c.green}✓${c.reset} ${fmtRss(a.rssKb)} · ${fmtKb(a.outputBytes)}`);
+		noDtsArtifacts.push(a);
+		console.log(`${c.green}✓${c.reset} ${fmtKb(a.outputBytes)}`);
 	} catch (err) {
 		console.log(`${c.red}✗ ${(err as Error).message}${c.reset}`);
 	}
 }
 
 renderArtifactTable('Full build artifacts · type-check + bundle + dts', fullArtifacts);
-renderArtifactTable('No-dts build artifacts  (* tsbuild always does full)', noDtsArtifacts);
+renderArtifactTable('No-dts build artifacts', noDtsArtifacts);
 
 // Phase breakdown for tsbuild (from the full artifact measurement).
 const tsbuildArtifact = fullArtifacts.find(a => a.id === 'tsbuild');
@@ -469,8 +471,8 @@ const record = {
 	node: process.version,
 	platform: process.platform,
 	synthetic_file_count: SYNTHETIC_FILE_COUNT,
-	full: fullArtifacts.map(a => ({ tool: a.id, wall_ms: Math.round(a.wallMs), peak_rss_mb: a.rssKb / 1024, output_kb: a.outputBytes / 1024 })),
-	no_dts: noDtsArtifacts.map(a => ({ tool: a.id, wall_ms: Math.round(a.wallMs), peak_rss_mb: a.rssKb / 1024, output_kb: a.outputBytes / 1024 })),
+	full: fullArtifacts.map(a => ({ tool: a.id, wall_ms: Math.round(a.wallMs), peak_rss_mb: null, output_kb: a.outputBytes / 1024 })),
+	no_dts: noDtsArtifacts.map(a => ({ tool: a.id, wall_ms: Math.round(a.wallMs), peak_rss_mb: null, output_kb: a.outputBytes / 1024 })),
 	tsbuild_phases: tsbuildArtifact?.phases ?? null,
 };
 try {
