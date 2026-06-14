@@ -1,3 +1,45 @@
+## [1.9.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.0...v1.9.1) (2026-06-14)
+
+### Performance Improvements
+
+* **loader:** improve loader caching key uniqueness and safety (319eb4f938458aa69ccdc71783a8116934769e6a)
+- Add file inode and configuration status metrics to the transformation cache keys
+- Migrate from async block writes to safe, synchronous filesystem writes
+- Recover on-the-fly from zero-byte or corrupt cached module assets
+
+
+### Code Refactoring
+
+* **tsbuild:** remove test-only flush methods and standardize process exit (bebbc91a1516dff7560fd373358496d170f15e60)
+- Avoid direct process.exit calls and handle exit state through process.exitCode
+- Remove the flushBackgroundCleanup project hook, refactoring test suites to poll for output removal instead
+- Simplify dependency path resolution by referencing internal promises directly
+
+
+### Documentation
+
+* refine project guidelines and update copilot instructions (3b7d6bed70d84968be88793897bfa5580931d098)
+- Clean up githooks file permissions and mode headers
+- Condense Copilot instructions into a unified, high-density reference snapshot
+- Document target values and criteria for performance optimization checks
+
+
+### Miscellaneous Chores
+
+* **bench:** remove platform-specific details and introduce non-dts benchmarks (5887e241de3d4c22967030815f3ff548ac445276)
+- Remove platform-specific MAXRSS memory measurements to ensure portable benchmark execution
+- Introduce comparative benchmarks testing tsbuild with decoration emitting disabled
+- Improve child process crash diagnostics and print cleaner terminal result layouts
+
+
+### Build System
+
+* **deps:** upgrade Node engine, package manager, and dependencies (a695f4e2e1a7af8b2036e8ed1f2c766cdcaeb21f)
+- Raise Node.js requirement to >=22.6.0 and pnpm package manager to 11.6.0
+- Upgrade esbuild production dependency to 0.28.1
+- Update multiple devDependencies including ESLint, typescript-eslint, memory-fs, and Vitest
+- Regenerate the lockfile to align with package version bumps
+
 ## [1.9.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.8.10...v1.9.0) (2026-05-23)
 
 ### Features
