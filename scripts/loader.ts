@@ -1,6 +1,5 @@
 import { transformSync, version as esbuildVersion } from 'esbuild';
-import { writeFile } from 'node:fs/promises';
-import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -24,7 +23,7 @@ const cachedEntries = new Set<string>(readdirSync(cacheDir));
 // upgrading either automatically invalidates stale transforms.
 const cacheVersion = `${process.versions.node}-${esbuildVersion}`;
 
-type StatInfo = { mtimeMs: number; size: number };
+type StatInfo = { mtimeMs: number; ctimeMs: number; ino: number; size: number };
 
 const resolveCache = new Map<string, ReturnType<ResolveHookSync>>();
 // Only positive results are cached. Negative results would go stale in long-running watch processes when new files appear.
@@ -52,10 +51,24 @@ function hashPath(path: string): string {
 }
 
 /**
+ * Best-effort cache write. Transform cache failures must not break module loading.
+ * @param path Absolute cache file path.
+ * @param source Transformed JavaScript source to persist.
+ */
+function writeCacheFile(path: string, source: string): void {
+	try {
+		writeFileSync(path, source);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		process.stderr.write(`[tsbuild-loader] Failed to write cache file ${path}: ${reason}\n`);
+	}
+}
+
+/**
  * Returns cached stat info for a regular file, or undefined when the path is missing or not a file.
  * Cached so resolve() and load() share a single statSync() per file.
  * @param path Absolute filesystem path.
- * @returns Stat info (mtimeMs + size) or undefined.
+ * @returns Stat info used by cache key generation or undefined.
  */
 function getStat(path: string): StatInfo | undefined {
 	const cached = statCache.get(path);
@@ -64,7 +77,7 @@ function getStat(path: string): StatInfo | undefined {
 	const stat = statSync(path, { throwIfNoEntry: false });
 	if (stat === undefined || !stat.isFile()) { return undefined }
 
-	const info: StatInfo = { mtimeMs: stat.mtimeMs, size: stat.size };
+	const info: StatInfo = { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, size: stat.size };
 	statCache.set(path, info);
 
 	return info;
@@ -156,7 +169,7 @@ const hooks = {
 		const info = getStat(path);
 		if (info === undefined) { return nextLoad(url, context) }
 
-		const cacheFileName = hashPath(path) + '-' + info.mtimeMs + '-' + info.size + '-' + cacheVersion + '.js';
+		const cacheFileName = hashPath(path) + '-' + info.mtimeMs + '-' + info.ctimeMs + '-' + info.ino + '-' + info.size + '-' + cacheVersion + '.js';
 		const cachePath = resolvePath(cacheDir, cacheFileName);
 
 		// Source must be a string: Node's --experimental-strip-types re-processes Buffer sources
@@ -164,6 +177,10 @@ const hooks = {
 		let source: string;
 		if (cachedEntries.has(cacheFileName)) {
 			source = readFileSync(cachePath, 'utf8');
+			if (source.length === 0) {
+				source = transformSync(readFileSync(path), { loader: 'ts', format: 'esm', target: `node${process.versions.node}`, sourcefile: path, platform: 'node', supported: { decorators: false }, minifyWhitespace: true, keepNames: true }).code;
+				writeCacheFile(cachePath, source);
+			}
 		} else {
 			// Target the exact running Node version so esbuild only down-levels what's needed.
 			// minifyWhitespace reduces cache file size for faster warm reads (minifySyntax and
@@ -172,12 +189,8 @@ const hooks = {
 			// renaming variables even when minification is off. supported.decorators=false forces
 			// decorator transformation because Node's --experimental-strip-types skips it.
 			source = transformSync(readFileSync(path), { loader: 'ts', format: 'esm', target: `node${process.versions.node}`, sourcefile: path, platform: 'node', supported: { decorators: false }, minifyWhitespace: true, keepNames: true }).code;
+			writeCacheFile(cachePath, source);
 			cachedEntries.add(cacheFileName);
-			// Fire-and-forget: the in-memory `source` is already returned to Node; the disk write
-			// only matters for future runs, so we don't block the loader on it.
-			writeFile(cachePath, source).catch((err: unknown) => {
-				process.stderr.write(`[tsbuild-loader] cache write failed for ${cacheFileName}: ${err instanceof Error ? err.message : String(err)}\n`);
-			});
 		}
 
 		return { format: 'module', source, shortCircuit: true };
