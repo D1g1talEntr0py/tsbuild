@@ -198,7 +198,7 @@ interface Tool {
 }
 
 function tsbuildTool(opts: { dts?: boolean } = {}): Tool {
-	const outDir = opts.dts === false ? 'dist-tsbuild-nodts' : 'dist';
+	const outDir = 'dist';
 	return {
 		id: opts.dts === false ? 'tsbuild (compilerOptions.declaration=false)' : 'tsbuild',
 		outDir,
