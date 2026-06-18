@@ -3,10 +3,12 @@
 ## One-Screen Rules
 - Prioritize correctness, clarity, and performance; choose the simplest solution that works.
 - Strict ESM only (no CommonJS).
+- Cycle; Change/implement, check for type errors or linting errors, test. Repeat until done.
 - No `any`, no unnecessary line wrapping, preserve existing formatting.
 - Use branded types and JSDoc on exported APIs.
 - Ask clarifying questions until requirements/constraints are unambiguous.
 - Do not commit unless explicitly instructed.
+- When using the terminal, NEVER prefix the cd command when you are already in the correct directory.
 
 ## Project Snapshot
 - `tsbuild` = TypeScript type-check + `.d.ts` emit, esbuild bundling, optional SWC decorator metadata.
