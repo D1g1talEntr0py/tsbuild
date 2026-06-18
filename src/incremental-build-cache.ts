@@ -11,22 +11,22 @@ import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration } f
  * the cache asynchronously during construction to overlap I/O with other initialization.
  */
 export class IncrementalBuildCache implements BuildCacheManager {
-	private readonly buildInfoPath: AbsolutePath;
-	private readonly cacheDirectoryPath: AbsolutePath;
-	private readonly cacheFilePath: AbsolutePath;
-	private readonly outputsManifestPath: AbsolutePath;
+	readonly #buildInfoPath: AbsolutePath;
+	readonly #cacheDirectoryPath: AbsolutePath;
+	readonly #cacheFilePath: AbsolutePath;
+	readonly #outputsManifestPath: AbsolutePath;
 	/** Pre-loading promise started in constructor for async cache restoration */
-	private readonly cacheLoaded: Promise<BuildCache | undefined>;
+	readonly #cacheLoaded: Promise<BuildCache | undefined>;
 	/**
 	 * Manifest snapshot captured synchronously at construction. Held in memory so it survives
 	 * `invalidate()` (which deletes the on-disk manifest as part of clearing `.tsbuild`) and so
 	 * subsequent in-process reads are race-free.
 	 */
-	private outputsSnapshot: readonly string[] | undefined;
+	#outputsSnapshot: readonly string[] | undefined;
 	/** Set to true when invalidate() is called to prevent stale cache from being restored */
-	private invalidated = false;
+	#invalidated = false;
 	/** Updated synchronously in save() so fingerprintMatches() sees fresh data without re-reading from disk. */
-	private savedFingerprint: string | undefined;
+	#savedFingerprint: string | undefined;
 
 	/**
 	 * Creates a new build cache instance and begins pre-loading the cache asynchronously.
@@ -34,24 +34,24 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @param tsBuildInfoFile - Path to the TypeScript build info file
 	 */
 	constructor(projectRoot: AbsolutePath, tsBuildInfoFile: string) {
-		this.buildInfoPath = Paths.join(projectRoot, tsBuildInfoFile);
-		this.cacheDirectoryPath = Paths.join(projectRoot, cacheDirectory);
-		this.cacheFilePath = Paths.join(this.cacheDirectoryPath, dtsCacheFile);
-		this.outputsManifestPath = Paths.join(this.cacheDirectoryPath, outputManifestFile);
+		this.#buildInfoPath = Paths.join(projectRoot, tsBuildInfoFile);
+		this.#cacheDirectoryPath = Paths.join(projectRoot, cacheDirectory);
+		this.#cacheFilePath = Paths.join(this.#cacheDirectoryPath, dtsCacheFile);
+		this.#outputsManifestPath = Paths.join(this.#cacheDirectoryPath, outputManifestFile);
 		// Start pre-loading the cache immediately - this runs in parallel with TypeScript program creation
-		this.cacheLoaded = this.loadCache();
+		this.#cacheLoaded = this.#loadCache();
 		// Capture the manifest synchronously so it survives invalidate() and downstream code can
 		// read it without awaiting. The file is small (a JSON array of paths) so sync I/O is fine.
-		this.outputsSnapshot = IncrementalBuildCache.loadOutputsSync(this.outputsManifestPath);
+		this.#outputsSnapshot = IncrementalBuildCache.#loadOutputsSync(this.#outputsManifestPath);
 	}
 
 	/**
 	 * Loads the cache file asynchronously using V8 deserialization.
 	 * @returns The cache or undefined if cache doesn't exist, is corrupted, or has incompatible version.
 	 */
-	private async loadCache() {
+	async #loadCache() {
 		try {
-			const cache = await Files.readCompressed<BuildCache>(this.cacheFilePath);
+			const cache = await Files.readCompressed<BuildCache>(this.#cacheFilePath);
 
 			// Validate cache version - silently ignore incompatible caches
 			if (cache.version !== version) { return undefined }
@@ -71,9 +71,9 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	async restore(target: Map<string, CachedDeclaration>): Promise<void> {
 		// If the cache was invalidated, skip restoration even if the pre-load completed before invalidation
-		if (this.invalidated) { return }
+		if (this.#invalidated) { return }
 
-		const cache = await this.cacheLoaded;
+		const cache = await this.#cacheLoaded;
 
 		if (cache === undefined) { return }
 
@@ -89,8 +89,8 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @param fingerprint - Deterministic hash of build configuration for cache invalidation on config change
 	 */
 	async save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void> {
-		this.savedFingerprint = fingerprint; // set before await so fingerprintMatches() sees it immediately
-		await Files.writeCompressed(this.cacheFilePath, { version, files: source, fingerprint });
+		this.#savedFingerprint = fingerprint; // set before await so fingerprintMatches() sees it immediately
+		await Files.writeCompressed(this.#cacheFilePath, { version, files: source, fingerprint });
 	}
 
 	/**
@@ -100,12 +100,12 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns True if the cached configuration matches the current configuration
 	 */
 	async fingerprintMatches(currentFingerprint: string): Promise<boolean> {
-		if (this.invalidated) { return false }
+		if (this.#invalidated) { return false }
 		if (!this.hasPersistedState()) { return false }
 
-		if (this.savedFingerprint !== undefined) { return this.savedFingerprint === currentFingerprint }
+		if (this.#savedFingerprint !== undefined) { return this.#savedFingerprint === currentFingerprint }
 
-		const cache = await this.cacheLoaded;
+		const cache = await this.#cacheLoaded;
 		return cache?.fingerprint === currentFingerprint;
 	}
 
@@ -114,7 +114,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @param manifestPath - Absolute path to the manifest file
 	 * @returns The recorded outputs, or undefined when missing/unreadable/malformed.
 	 */
-	private static loadOutputsSync(manifestPath: AbsolutePath): readonly string[] | undefined {
+	static #loadOutputsSync(manifestPath: AbsolutePath): readonly string[] | undefined {
 		try {
 			const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
 			return Array.isArray(parsed) ? parsed as string[] : undefined;
@@ -129,7 +129,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns The recorded outputs from the prior build, or undefined when unavailable.
 	 */
 	getPreviousOutputs(): readonly string[] | undefined {
-		return this.outputsSnapshot;
+		return this.#outputsSnapshot;
 	}
 
 	/**
@@ -139,9 +139,9 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @param outputs - Project-relative output paths
 	 */
 	async saveOutputs(outputs: readonly string[]): Promise<void> {
-		this.outputsSnapshot = outputs.slice();
-		await mkdir(this.cacheDirectoryPath, defaultDirOptions);
-		await writeFile(this.outputsManifestPath, JSON.stringify(this.outputsSnapshot), 'utf8');
+		this.#outputsSnapshot = outputs.slice();
+		await mkdir(this.#cacheDirectoryPath, defaultDirOptions);
+		await writeFile(this.#outputsManifestPath, JSON.stringify(this.#outputsSnapshot), 'utf8');
 	}
 
 	/**
@@ -149,13 +149,13 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns True if the cache is valid, false if it has been invalidated
 	 */
 	isValid(): boolean {
-		return !this.invalidated;
+		return !this.#invalidated;
 	}
 
 	/** Invalidates the build cache by removing the cache directory. */
 	invalidate(): void {
-		this.invalidated = true;
-		try { rmSync(this.cacheDirectoryPath, defaultCleanOptions) } catch { /* Ignore */ }
+		this.#invalidated = true;
+		try { rmSync(this.#cacheDirectoryPath, defaultCleanOptions) } catch { /* Ignore */ }
 		// Note: outputsSnapshot is intentionally preserved. The manifest describes outputs in
 		// `outDir` (not under `.tsbuild`) and is needed to remove stale outputs after this build,
 		// keeping clean() off the critical path on --clearCache / --force runs.
@@ -167,7 +167,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns True if the path matches the build info file
 	 */
 	isBuildInfoFile(filePath: AbsolutePath): boolean {
-		return filePath === this.buildInfoPath;
+		return filePath === this.#buildInfoPath;
 	}
 
 	/**
@@ -177,7 +177,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns True when the .tsbuildinfo file is present and the cache hasn't been invalidated.
 	 */
 	hasPersistedState(): boolean {
-		return !this.invalidated && existsSync(this.buildInfoPath);
+		return !this.#invalidated && existsSync(this.#buildInfoPath);
 	}
 
 	/**
@@ -187,7 +187,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns True when an output manifest snapshot is held in memory.
 	 */
 	hasPersistedManifest(): boolean {
-		return this.outputsSnapshot !== undefined;
+		return this.#outputsSnapshot !== undefined;
 	}
 
 	/**

@@ -10,22 +10,22 @@ const pendingSteps: PerformanceSubStep[] = [];
 /** A class that logs the performance of methods using the Performance API */
 @closeOnExit
 class PerformanceLogger implements Closable {
-	private readonly performanceObserver: PerformanceObserver;
+	readonly #performanceObserver: PerformanceObserver;
 
 	constructor() {
-		this.performanceObserver = new PerformanceObserver((list) => {
+		this.#performanceObserver = new PerformanceObserver((list) => {
 			// Reverse the list to display the most recent entries first
 			for (const { name, duration, detail: { message, result = [], steps } } of list.getEntriesByType(type).reverse() as DetailedPerformanceEntry<WrittenFile[]>[]) {
 				// Special formatting for top-level "Build" step ⚡
 				if (message === 'Build') {
 					Logger.separator();
 					if (process.exitCode) {
-						Logger.error(`✗ Build failed in ${TextFormat.cyan(PerformanceLogger.formatDuration(duration))}\n`);
+						Logger.error(`✗ Build failed in ${TextFormat.cyan(PerformanceLogger.#formatDuration(duration))}\n`);
 					} else {
-						Logger.step(`Completed in ${TextFormat.cyan(PerformanceLogger.formatDuration(duration))}\n`);
+						Logger.step(`Completed in ${TextFormat.cyan(PerformanceLogger.#formatDuration(duration))}\n`);
 					}
 				} else {
-					Logger.step(`${message} ${TextFormat.dim(`(${PerformanceLogger.formatDuration(duration)})`)}`);
+					Logger.step(`${message} ${TextFormat.dim(`(${PerformanceLogger.#formatDuration(duration)})`)}`);
 					if (steps?.length) { Logger.subSteps(steps) }
 
 					// If there are result files, log them with tree formatting
@@ -36,7 +36,7 @@ class PerformanceLogger implements Closable {
 			}
 		});
 
-		this.performanceObserver.observe({ type });
+		this.#performanceObserver.observe({ type });
 	}
 
 	/**
@@ -78,7 +78,7 @@ class PerformanceLogger implements Closable {
 	 * Closes the performance logger.
 	 */
 	close(): void {
-		this.performanceObserver.disconnect();
+		this.#performanceObserver.disconnect();
 	}
 
 	/**
@@ -86,7 +86,7 @@ class PerformanceLogger implements Closable {
 	 * @param duration - The duration to format.
 	 * @returns The formatted duration string.
 	 */
-	private static formatDuration(duration: number) {
+	static #formatDuration(duration: number) {
 		const minutes = ~~(duration / 60000) % 60;
 		const seconds = ~~(duration / 1000) % 60;
 		const ms = ~~duration % 1000;

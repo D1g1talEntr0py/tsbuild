@@ -9,13 +9,13 @@ const ProcessEvent = {
 
 /** Manages process events and allows registering closeable classes to be closed on exit */
 class ProcessManager implements Closable {
-	private hasHandledExit = false;
-	private readonly closeableClasses: Closable[] = [];
+	#hasHandledExit = false;
+	readonly #closeableClasses: Closable[] = [];
 
 	constructor() {
-		process.addListener(ProcessEvent.exit, this.handleExit);
-		process.addListener(ProcessEvent.sigint, this.consoleExit);
-		process.addListener(ProcessEvent.uncaughtException, this.handleUncaughtException);
+		process.addListener(ProcessEvent.exit, this.#handleExit);
+		process.addListener(ProcessEvent.sigint, this.#consoleExit);
+		process.addListener(ProcessEvent.uncaughtException, this.#handleUncaughtException);
 	}
 
 	/**
@@ -23,34 +23,34 @@ class ProcessManager implements Closable {
 	 * @param closeable The closeable class to add.
 	 */
 	addCloseable(closeable: Closable): void {
-		this.closeableClasses.push(closeable);
+		this.#closeableClasses.push(closeable);
 	}
 
 	/** Closes the process manager and removes all listeners */
 	close(): void {
-		this.closeableClasses.length = 0;
-		process.removeListener(ProcessEvent.exit, this.handleExit);
-		process.removeListener(ProcessEvent.sigint, this.consoleExit);
-		process.removeListener(ProcessEvent.uncaughtException, this.handleUncaughtException);
+		this.#closeableClasses.length = 0;
+		process.removeListener(ProcessEvent.exit, this.#handleExit);
+		process.removeListener(ProcessEvent.sigint, this.#consoleExit);
+		process.removeListener(ProcessEvent.uncaughtException, this.#handleUncaughtException);
 	}
 
 	/** Handles normal process exit */
-	private handleExit = () => {
-		if (this.hasHandledExit) { return }
+	#handleExit = () => {
+		if (this.#hasHandledExit) { return }
 
 		// Perform cleanup for all registered closeable classes
-		for (const closeable of this.closeableClasses) { closeable.close() }
+		for (const closeable of this.#closeableClasses) { closeable.close() }
 
 		this.close();
 	};
 
 	/** Handles SIGINT (ctrl+c) */
-	private consoleExit = () => {
+	#consoleExit = () => {
 		Logger.warn('\nProcess terminated by user');
-		this.hasHandledExit = true;
+		this.#hasHandledExit = true;
 
 		// Perform cleanup immediately
-		for (const closeable of this.closeableClasses) { closeable.close() }
+		for (const closeable of this.#closeableClasses) { closeable.close() }
 
 		this.close();
 
@@ -63,7 +63,7 @@ class ProcessManager implements Closable {
 	 * Handles uncaught exceptions and exits the process.
 	 * @param e The error that was uncaught.
 	 */
-	private handleUncaughtException = (e: Error) => {
+	#handleUncaughtException = (e: Error) => {
 		Logger.error('Uncaught Exception...', e.stack);
 		process.exit(99);
 	};

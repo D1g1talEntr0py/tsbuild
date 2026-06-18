@@ -314,9 +314,9 @@ export class DeclarationProcessor {
 					declaredNames.add(name);
 
 					// collect the exported name, maybe as `default`.
-					if (DeclarationProcessor.matchesModifier(node, ModifierFlags.ExportDefault)) {
+					if (DeclarationProcessor.#matchesModifier(node, ModifierFlags.ExportDefault)) {
 						defaultExport = name;
-					} else if (DeclarationProcessor.matchesModifier(node, ModifierFlags.Export)) {
+					} else if (DeclarationProcessor.#matchesModifier(node, ModifierFlags.Export)) {
 						exportedNames.add(name);
 					}
 
@@ -468,7 +468,7 @@ export class DeclarationProcessor {
 	 * @param flags - The modifier flags to check for
 	 * @returns True if the node has all the specified flags
 	 */
-	private static matchesModifier = (node: Declaration, flags: ModifierFlags): boolean => (getCombinedModifierFlags(node) & flags) === flags;
+	static #matchesModifier = (node: Declaration, flags: ModifierFlags): boolean => (getCombinedModifierFlags(node) & flags) === flags;
 
 	/**
 	 * Post-processes a bundled declaration file to clean up bundling artifacts.

@@ -92,42 +92,42 @@ function mergeImports(imports: ExternalImport[]): string[] {
  */
 class DeclarationBundler {
 	/** Project declaration files from in-memory FileManager */
-	private readonly declarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
+	readonly #declarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
 	/** External declaration files resolved from disk (node_modules) when resolve is enabled */
-	private readonly externalDeclarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
+	readonly #externalDeclarationFiles: Map<AbsolutePath, CachedDeclaration> = new Map();
 	/** d.ts Bundle Options */
-	private readonly options: DtsBundleOptions;
+	readonly #options: DtsBundleOptions;
 	/** WeakMap cache for identifier collection to avoid re-parsing same source files */
-	private readonly identifierCache = new WeakMap<SourceFile, IdentifierMap>();
+	readonly #identifierCache = new WeakMap<SourceFile, IdentifierMap>();
 	/** SourceFile cache keyed by path — survives across multiple bundle() calls (entry points) */
-	private readonly sourceFileCache = new Map<AbsolutePath, SourceFile>();
+	readonly #sourceFileCache = new Map<AbsolutePath, SourceFile>();
 	/** Module resolution cache for this bundler instance */
-	private readonly moduleResolutionCache = new Map<string, AbsolutePath>();
+	readonly #moduleResolutionCache = new Map<string, AbsolutePath>();
 	/** Pre-computed set of directory prefixes from declaration file paths for O(1) directoryExists lookups */
-	private readonly declarationDirs: Set<string> = new Set();
+	readonly #declarationDirs: Set<string> = new Set();
 	/** Pre-built matcher for external patterns — O(1) string lookups + cached regex tests */
-	private readonly matchExternal: (id: string) => boolean;
+	readonly #matchExternal: (id: string) => boolean;
 	/** Pre-built matcher for noExternal patterns — O(1) string lookups + cached regex tests */
-	private readonly matchNoExternal: (id: string) => boolean;
+	readonly #matchNoExternal: (id: string) => boolean;
 	// Create a proper module resolution host that supports both in-memory files and disk files
-	private readonly moduleResolutionHost: ModuleResolutionHost = {
+	readonly #moduleResolutionHost: ModuleResolutionHost = {
 		fileExists: (fileName: AbsolutePath) => {
 			// Check in-memory declarations first (both project and external), then disk when resolve is enabled
-			return this.declarationFiles.has(fileName) || this.externalDeclarationFiles.has(fileName) || this.options.resolve && sys.fileExists(fileName);
+			return this.#declarationFiles.has(fileName) || this.#externalDeclarationFiles.has(fileName) || this.#options.resolve && sys.fileExists(fileName);
 		},
 		readFile: (fileName: AbsolutePath): string | undefined => {
-			const cached = this.declarationFiles.get(fileName) ?? this.externalDeclarationFiles.get(fileName);
+			const cached = this.#declarationFiles.get(fileName) ?? this.#externalDeclarationFiles.get(fileName);
 			// Return the code from the CachedDeclaration
 			if (cached) { return cached.code }
 
-			if (!this.options.resolve) { return undefined }
+			if (!this.#options.resolve) { return undefined }
 
 			// When resolve is enabled, read from disk and pre-process into the external map
 			const rawContent = sys.readFile(fileName, Encoding.utf8);
 			if (rawContent !== undefined) {
 				// Pre-process external files loaded from disk
 				const preProcessOutput = DeclarationProcessor.preProcess(createSourceFile(fileName, rawContent, ScriptTarget.Latest, true));
-				this.externalDeclarationFiles.set(fileName, preProcessOutput);
+				this.#externalDeclarationFiles.set(fileName, preProcessOutput);
 
 				return preProcessOutput.code;
 			}
@@ -138,9 +138,9 @@ class DeclarationBundler {
 		directoryExists: (dirName: AbsolutePath) => {
 			// O(1) Set lookup using pre-computed directory prefixes
 			const normalizedDir = dirName.endsWith('/') ? dirName.slice(0, -1) : dirName;
-			return this.declarationDirs.has(normalizedDir) || (this.options.resolve ? sys.directoryExists(dirName) : false);
+			return this.#declarationDirs.has(normalizedDir) || (this.#options.resolve ? sys.directoryExists(dirName) : false);
 		},
-		getCurrentDirectory: () => this.options.currentDirectory,
+		getCurrentDirectory: () => this.#options.currentDirectory,
 		/* v8 ignore next */
 		getDirectories: () => [],
 	};
@@ -153,23 +153,23 @@ class DeclarationBundler {
 		// Normalize all declaration file paths to ensure consistent lookups
 		// This handles cases where paths may be relative or use different separators
 		for (const [ filePath, cachedDecl ] of dtsBundleOptions.declarationFiles) {
-			this.declarationFiles.set(sys.resolvePath(filePath) as AbsolutePath, cachedDecl);
+			this.#declarationFiles.set(sys.resolvePath(filePath) as AbsolutePath, cachedDecl);
 		}
 
 		// Pre-compute all ancestor directory prefixes for O(1) directoryExists lookups
-		for (const filePath of this.declarationFiles.keys()) {
+		for (const filePath of this.#declarationFiles.keys()) {
 			let dir = filePath.lastIndexOf('/') !== -1 ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
 			while (dir.length > 0) {
-				if (this.declarationDirs.has(dir)) { break }
-				this.declarationDirs.add(dir);
+				if (this.#declarationDirs.has(dir)) { break }
+				this.#declarationDirs.add(dir);
 				const nextSlash = dir.lastIndexOf('/');
 				dir = nextSlash !== -1 ? dir.slice(0, nextSlash) : '';
 			}
 		}
 
-		this.options = dtsBundleOptions;
-		this.matchExternal = DeclarationBundler.buildMatcher(dtsBundleOptions.external);
-		this.matchNoExternal = DeclarationBundler.buildMatcher(dtsBundleOptions.noExternal);
+		this.#options = dtsBundleOptions;
+		this.#matchExternal = DeclarationBundler.#buildMatcher(dtsBundleOptions.external);
+		this.#matchNoExternal = DeclarationBundler.#buildMatcher(dtsBundleOptions.noExternal);
 	}
 
 	/**
@@ -177,9 +177,9 @@ class DeclarationBundler {
 	 * Called after all entry points have been bundled.
 	 */
 	clearExternalFiles() {
-		this.externalDeclarationFiles.clear();
-		this.moduleResolutionCache.clear();
-		this.sourceFileCache.clear();
+		this.#externalDeclarationFiles.clear();
+		this.#moduleResolutionCache.clear();
+		this.#sourceFileCache.clear();
 	}
 
 	/**
@@ -187,8 +187,8 @@ class DeclarationBundler {
 	 * @param sourcePath - Absolute path to a source file (.ts, .tsx)
 	 * @returns The corresponding .d.ts path, or undefined if not found
 	 */
-	private sourceToDeclarationPath(sourcePath: AbsolutePath): AbsolutePath {
-		const { outDir, rootDir } = this.options.compilerOptions;
+	#sourceToDeclarationPath(sourcePath: AbsolutePath): AbsolutePath {
+		const { outDir, rootDir } = this.#options.compilerOptions;
 		const sourceWithoutExt = sourcePath.substring(0, sourcePath.lastIndexOf('.') || sourcePath.length);
 
 		if (rootDir) {
@@ -196,7 +196,7 @@ class DeclarationBundler {
 			// posix.normalize is required because TypeScript internally uses POSIX-style forward slashes
 			// for module resolution paths regardless of the host platform
 			const dtsPath = posix.normalize(Paths.join(outDir, Paths.relative(rootDir, sourceWithoutExt) + FileExtension.DTS)) as AbsolutePath;
-			return this.declarationFiles.has(dtsPath) ? dtsPath : sourcePath;
+			return this.#declarationFiles.has(dtsPath) ? dtsPath : sourcePath;
 		}
 
 		// Without rootDir, find .d.ts file by stripping outDir and matching the suffix
@@ -209,7 +209,7 @@ class DeclarationBundler {
 		let bestMatch: AbsolutePath | undefined;
 		let bestRelativeLength = Infinity;
 
-		for (const dtsPath of this.declarationFiles.keys()) {
+		for (const dtsPath of this.#declarationFiles.keys()) {
 			if (!dtsPath.endsWith(FileExtension.DTS)) { continue }
 
 			// Strip outDir prefix from declaration path: /path/to/project/dist/foo/bar.d.ts -> foo/bar.d.ts
@@ -235,7 +235,7 @@ class DeclarationBundler {
 	 * @param patterns - The array of string and RegExp patterns to match against module specifiers
 	 * @returns A function that takes a module specifier and returns true if it matches any of the patterns
 	 */
-	private static buildMatcher(patterns: readonly Pattern[]): (id: string) => boolean {
+	static #buildMatcher(patterns: readonly Pattern[]): (id: string) => boolean {
 		const exact = new Set<string>();
 		const prefixes: string[] = [];
 		const regexps: RegExp[] = [];
@@ -258,14 +258,14 @@ class DeclarationBundler {
 	 * @param containingFile - The file containing the import
 	 * @returns Resolved file path or undefined
 	 */
-	private resolveModule(importPath: string, containingFile: string): AbsolutePath | undefined {
+	#resolveModule(importPath: string, containingFile: string): AbsolutePath | undefined {
 		// Create cache key (resolve option is constant for bundler lifetime)
 		const cacheKey = `${importPath}|${containingFile}`;
 
 		// Check cache
-		if (this.moduleResolutionCache.has(cacheKey)) { return this.moduleResolutionCache.get(cacheKey) }
+		if (this.#moduleResolutionCache.has(cacheKey)) { return this.#moduleResolutionCache.get(cacheKey) }
 
-		const { resolvedModule } = resolveModuleName(importPath, containingFile, this.options.compilerOptions, this.moduleResolutionHost);
+		const { resolvedModule } = resolveModuleName(importPath, containingFile, this.#options.compilerOptions, this.#moduleResolutionHost);
 
 		if (resolvedModule === undefined) { return }
 
@@ -273,12 +273,12 @@ class DeclarationBundler {
 
 		// If TypeScript resolved to a source file (.ts/.tsx), convert to the corresponding .d.ts file
 		// This handles cases where tsconfig paths point to source files instead of declarations
-		if (this.options.compilerOptions.paths && resolvedFileName.match(sourceScriptExtensionExpression)) {
-			resolvedFileName = this.sourceToDeclarationPath(resolvedFileName);
+		if (this.#options.compilerOptions.paths && resolvedFileName.match(sourceScriptExtensionExpression)) {
+			resolvedFileName = this.#sourceToDeclarationPath(resolvedFileName);
 		}
 
 		// Cache the result
-		this.moduleResolutionCache.set(cacheKey, resolvedFileName);
+		this.#moduleResolutionCache.set(cacheKey, resolvedFileName);
 
 		return resolvedFileName;
 	}
@@ -288,7 +288,7 @@ class DeclarationBundler {
 	 * @param entryPoint - The entry point file path
 	 * @returns Map of file paths to module information with bundled specifiers tracked
 	 */
-	private buildModuleGraph(entryPoint: AbsolutePath): ModuleDependencyGraph {
+	#buildModuleGraph(entryPoint: AbsolutePath): ModuleDependencyGraph {
 		const modules = new Map<string, ModuleInfo>();
 		const visited: Set<string> = new Set();
 		const bundledSpecifiers = new Map<string, Set<string>>(); // Maps module path to bundled import specifiers
@@ -305,7 +305,7 @@ class DeclarationBundler {
 
 			visited.add(path);
 
-			const cached = this.declarationFiles.get(path) ?? this.externalDeclarationFiles.get(path);
+			const cached = this.#declarationFiles.get(path) ?? this.#externalDeclarationFiles.get(path);
 
 			// File not in our declaration map - it's external
 			if (cached === undefined) { return }
@@ -314,14 +314,14 @@ class DeclarationBundler {
 			const { code, typeReferences, fileReferences } = cached;
 
 			// Reuse parsed SourceFile across entry points to avoid redundant parsing of shared modules
-			let sourceFile = this.sourceFileCache.get(path);
+			let sourceFile = this.#sourceFileCache.get(path);
 			if (sourceFile === undefined) {
 				sourceFile = createSourceFile(path, code, ScriptTarget.Latest, true);
-				this.sourceFileCache.set(path, sourceFile);
+				this.#sourceFileCache.set(path, sourceFile);
 			}
 
 			// Cache identifiers from source (since that's what we'll use)
-			const identifiers = this.collectIdentifiers(sourceFile.statements, sourceFile);
+			const identifiers = this.#collectIdentifiers(sourceFile.statements, sourceFile);
 
 			// Create module info - note: code is already pre-processed, typeReferences/fileReferences come from cache
 			const module: ModuleInfo = { path, code, imports: new Set(), typeReferences: new Set(typeReferences), fileReferences: new Set(fileReferences), sourceFile, identifiers };
@@ -333,14 +333,14 @@ class DeclarationBundler {
 					const specifier = (statement.moduleSpecifier as StringLiteral).text;
 
 					// Skip explicit external modules
-					if (this.matchExternal(specifier)) { continue }
+					if (this.#matchExternal(specifier)) { continue }
 
-					const resolvedPath = this.resolveModule(specifier, path);
+					const resolvedPath = this.#resolveModule(specifier, path);
 
 					// Skip node_modules packages unless they're in noExternal list
-					if (resolvedPath?.includes(nodeModules) && !this.matchNoExternal(specifier)) { continue }
+					if (resolvedPath?.includes(nodeModules) && !this.#matchNoExternal(specifier)) { continue }
 
-					if (resolvedPath && (this.declarationFiles.has(resolvedPath) || this.externalDeclarationFiles.has(resolvedPath))) {
+					if (resolvedPath && (this.#declarationFiles.has(resolvedPath) || this.#externalDeclarationFiles.has(resolvedPath))) {
 						module.imports.add(resolvedPath);
 						// Track the original specifier
 						bundledSpecs.add(specifier);
@@ -365,7 +365,7 @@ class DeclarationBundler {
 	 * @param entryPoint - Starting point for sorting
 	 * @returns Array of modules in dependency order
 	 */
-	private sortModules(modules: ReadonlyMap<string, ModuleInfo>, entryPoint: string) {
+	#sortModules(modules: ReadonlyMap<string, ModuleInfo>, entryPoint: string) {
 		const sorted: ModuleInfo[] = [];
 		const visited = new Set<string>();
 		const visiting = new Set<string>();
@@ -379,7 +379,7 @@ class DeclarationBundler {
 			if (visited.has(path)) { return }
 
 			if (visiting.has(path)) {
-				const cyclePath = [ ...visitStack.slice(visitStack.indexOf(path)), path ].map((p) => Paths.relative(this.options.currentDirectory, p)).join(' -> ');
+				const cyclePath = [ ...visitStack.slice(visitStack.indexOf(path)), path ].map((p) => Paths.relative(this.#options.currentDirectory, p)).join(' -> ');
 				Logger.warn(`Circular dependency detected: ${cyclePath}`);
 				visited.add(path);
 				return;
@@ -416,12 +416,12 @@ class DeclarationBundler {
 	 * @param sourceFile - Optional source file for caching results
 	 * @returns Sets of type and value identifiers
 	 */
-	private collectIdentifiers<const S extends Iterable<Node>>(statements: S, sourceFile?: SourceFile) {
+	#collectIdentifiers<const S extends Iterable<Node>>(statements: S, sourceFile?: SourceFile) {
 		let result: IdentifierMap | undefined;
 
 		// Check cache if we have the source file
 		if (sourceFile) {
-			result = this.identifierCache.get(sourceFile);
+			result = this.#identifierCache.get(sourceFile);
 			if (result) { return result }
 		}
 
@@ -429,7 +429,7 @@ class DeclarationBundler {
 		const values = new Set<string>();
 
 		const collectNestedIdentifiers = (subStatements: Iterable<Node>) => {
-			const { types: subTypes, values: subValues } = this.collectIdentifiers(subStatements);
+			const { types: subTypes, values: subValues } = this.#collectIdentifiers(subStatements);
 			for (const type of subTypes) { types.add(type) }
 			for (const value of subValues) { values.add(value) }
 		};
@@ -466,7 +466,7 @@ class DeclarationBundler {
 		result = { types, values };
 
 		// Cache if we have the source file
-		if (sourceFile) { this.identifierCache.set(sourceFile, result) }
+		if (sourceFile) { this.#identifierCache.set(sourceFile, result) }
 
 		return result;
 	}
@@ -482,7 +482,7 @@ class DeclarationBundler {
 	 * @param modulePath - Path of current module for looking up renames
 	 * @returns Object with processed code, collected external imports, and exported names (separated by type/value)
 	 */
-	private stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string): DeclarationCode {
+	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string): DeclarationCode {
 		const externalImports: ExternalImport[] = [];
 		const typeExports: string[] = [];
 		const valueExports: string[] = [];
@@ -518,7 +518,7 @@ class DeclarationBundler {
 				// 2. It's NOT in the bundled specifiers (meaning it didn't get bundled in module graph)
 				// Bundled specifiers are those that were successfully resolved and added to the module graph
 				// Keep as external import if it's explicitly external OR wasn't bundled
-				if (this.matchExternal(moduleSpecifier) || !bundledImportPaths.has(moduleSpecifier)) {
+				if (this.#matchExternal(moduleSpecifier) || !bundledImportPaths.has(moduleSpecifier)) {
 					// Extract structured metadata from the AST instead of round-tripping through text+regex
 					const importClause = statement.importClause;
 					const isTypeOnly = importClause?.isTypeOnly === true;
@@ -634,7 +634,7 @@ class DeclarationBundler {
 	 * @param bundledSpecifiers - Map of module paths to their bundled import specifiers
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
-	private combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): BundledDeclaration {
+	#combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): BundledDeclaration {
 		// Use Sets directly to deduplicate as we collect — avoids intermediate arrays + later `new Set(array)` round-trips
 		const typeReferencesSet = new Set<string>();
 		const fileReferencesSet = new Set<string>();
@@ -690,7 +690,7 @@ class DeclarationBundler {
 			// Strip import/export statements, preserving external imports.
 			// Use cached identifiers and sourceFile (both always present after buildModuleGraph).
 			const bundledForThisModule = bundledSpecifiers.get(path) ?? emptySet;
-			const { code: strippedCode, externalImports, typeExports, valueExports } = this.stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path);
+			const { code: strippedCode, externalImports, typeExports, valueExports } = this.#stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path);
 
 			// Collect external imports from all modules (merged later by mergeImports)
 			for (const imp of externalImports) { allExternalImports.push(imp) }
@@ -786,16 +786,16 @@ class DeclarationBundler {
 	 */
 	bundle(entryPoint: AbsolutePath) {
 		// Convert source path to declaration path
-		const dtsEntryPoint = this.resolveEntryPoint(entryPoint, this.options.compilerOptions);
+		const dtsEntryPoint = this.#resolveEntryPoint(entryPoint, this.#options.compilerOptions);
 
 		// Entry points with no declaration file were never stored (empty d.ts from TypeScript)
 		if (dtsEntryPoint === undefined) { return '' }
 
 		// Build the module dependency graph
-		const { modules, bundledSpecifiers } = this.buildModuleGraph(dtsEntryPoint);
+		const { modules, bundledSpecifiers } = this.#buildModuleGraph(dtsEntryPoint);
 
 		// Combine modules and collect exports and all declarations
-		const { code } = this.combineModules(this.sortModules(modules, dtsEntryPoint), bundledSpecifiers);
+		const { code } = this.#combineModules(this.#sortModules(modules, dtsEntryPoint), bundledSpecifiers);
 
 		// Post-process combined modules to fix any issues
 		// Tree-shaking is now done during combineModules
@@ -808,17 +808,17 @@ class DeclarationBundler {
 	 * @param compilerOptions - Minimal compiler options with outDir and rootDir
 	 * @returns Resolved declaration entry point path
 	 */
-	private resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions): AbsolutePath | undefined {
+	#resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions): AbsolutePath | undefined {
 		// Convert source path to declaration path and normalize to POSIX format (TypeScript expects forward slashes)
-		const dtsEntryPoint = sys.resolvePath(entryPoint.endsWith(FileExtension.DTS) ? entryPoint : this.sourceToDeclarationPath(entryPoint)) as AbsolutePath;
+		const dtsEntryPoint = sys.resolvePath(entryPoint.endsWith(FileExtension.DTS) ? entryPoint : this.#sourceToDeclarationPath(entryPoint)) as AbsolutePath;
 
-		if (this.declarationFiles.has(dtsEntryPoint)) { return dtsEntryPoint }
+		if (this.#declarationFiles.has(dtsEntryPoint)) { return dtsEntryPoint }
 
 		// Source entry points with no declaration file have no exportable API (e.g. CLI scripts)
 		if (!entryPoint.endsWith(FileExtension.DTS)) { return undefined }
 
 		// A .d.ts was passed directly but not found — this is a real error
-		const availableFiles = Array.from(this.declarationFiles.keys());
+		const availableFiles = Array.from(this.#declarationFiles.keys());
 		const entryPointFilename = basename(entryPoint);
 		const similarFiles = availableFiles.filter((filePath) => filePath.includes(entryPointFilename));
 

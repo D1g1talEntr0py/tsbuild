@@ -7,7 +7,7 @@ import type { Fn, Closable, MethodFunction, OptionalReturn, InferredFunction } f
  */
 @closeOnExit
 class DebounceManager implements Closable {
-	private static readonly timers = new Set<NodeJS.Timeout>();
+	static readonly #timers = new Set<NodeJS.Timeout>();
 
 	/**
 	 * Creates a debounced version of a function.
@@ -24,7 +24,7 @@ class DebounceManager implements Closable {
 				// Clear previous timer
 				if (timeoutId) {
 					clearTimeout(timeoutId);
-					DebounceManager.timers.delete(timeoutId);
+					DebounceManager.#timers.delete(timeoutId);
 				}
 
 				// Cancel previous promise immediately
@@ -33,7 +33,7 @@ class DebounceManager implements Closable {
 				pendingResolve = resolve;
 
 				timeoutId = setTimeout(() => {
-					if (timeoutId) { DebounceManager.timers.delete(timeoutId) }
+					if (timeoutId) { DebounceManager.#timers.delete(timeoutId) }
 
 					try {
 						resolve(func.apply(this, args));
@@ -47,15 +47,15 @@ class DebounceManager implements Closable {
 					}
 				}, wait);
 
-				DebounceManager.timers.add(timeoutId);
+				DebounceManager.#timers.add(timeoutId);
 			});
 		};
 	}
 
 	/** Closes the manager by clearing all active timers. */
 	close() {
-		for (const timer of DebounceManager.timers) { clearTimeout(timer) }
-		DebounceManager.timers.clear();
+		for (const timer of DebounceManager.#timers) { clearTimeout(timer) }
+		DebounceManager.#timers.clear();
 	}
 }
 

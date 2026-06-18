@@ -176,7 +176,7 @@ export class Logger {
 				if (message) {
 					console.log(colorize(type, message, true));
 				}
-				Logger.files(data);
+				Logger.#files(data);
 			} else {
 				console.log(colorize(type, message, true), ...data);
 			}
@@ -190,7 +190,7 @@ export class Logger {
 	 * @param files - The array of WrittenFile objects to log.
 	 * @internal
 	 */
-	private static files(files: WrittenFile[]): void {
+	static #files(files: WrittenFile[]): void {
 		let maxPathLength = 0;
 		let maxValueLength = 0;
 		let maxUnitLength = 0;
