@@ -1,3 +1,30 @@
+## [1.9.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.1...v1.9.2) (2026-06-18)
+
+### Code Refactoring
+
+* migrate class private fields to standard ES private names (de28ee0ab09d685b845dd6a45d179a7551afbe7a)
+
+### Documentation
+
+* update copilot instructions for step-loop cycle and terminal usage (e3288cd97ce5f5810c3b4b97c50332336746794b)
+Adds guidelines for the development change-test loop cycle and enforces a rule to avoid prefixing commands in the terminal with redundant directory changes.
+
+
+### Miscellaneous Chores
+
+* **benchmark:** simplify benchmark tool output directory configuration (4a2ed917460159c922e1cb0e0cf0e37966beeb8a)
+Consolidates the benchmark task build destination directory to use a single unified path name for output files.
+
+* **githooks:** make commit-msg hook executable (40e886425642873d96e2395474ac37d933f76336)
+* upgrade dependencies and package manager version (cd5a295ac7e5efd5f18aa4d609d77265a86f211c)
+Updates the pnpm package manager to 11.7.0 and bumps several development dependencies, including typescript-eslint, vitest, and eslint-plugin-jsdoc, to their latest patch versions.
+
+
+### Continuous Integration
+
+* **tests:** defer importing type-script-project.ts until it is needed (26856454610061a1adecad72fe9012c618963dc9)
+* **tests:** fix failing compatibility checks (591c4bb6eafe1562a96932f4d00554d89993697d)
+
 ## [1.9.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.0...v1.9.1) (2026-06-14)
 
 ### Performance Improvements
