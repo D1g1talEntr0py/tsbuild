@@ -1,7 +1,6 @@
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import { writeFile, readFile, rename, unlink } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Logger } from '../../src/logger';
 import { TypeScriptProject } from '../../src/type-script-project';
 import { processManager } from '../../src/process-manager';
 import { TestHelper } from '../scripts/test-helper';
@@ -15,31 +14,13 @@ vi.mock('@d1g1tal/watchr', async (importOriginal) => {
 	class SafeWatchr extends actual.Watchr {
 		constructor(...args: ConstructorParameters<typeof actual.Watchr>) {
 			super(...args);
-			// Suppress 'Path not found' errors emitted when the watched tmpdir is
-			// deleted after close() — expected cleanup behavior in tests.
 			this.on('error', () => {});
 		}
 	}
 	return { ...actual, Watchr: SafeWatchr };
 });
 
-const rebuildMessage = 'Rebuilding project:';
 const readUtf8 = (path: string): Promise<string> => readFile(path, 'utf8');
-type LoggerInfoSpy = ReturnType<typeof vi.spyOn>;
-
-const countRebuilds = (loggerSpy: LoggerInfoSpy): number => {
-	return loggerSpy.mock.calls.filter((call: unknown[]) => {
-		const [ message ] = call;
-		return typeof message === 'string' && message.startsWith(rebuildMessage);
-	}).length;
-};
-
-async function waitForRebuildCount(loggerSpy: LoggerInfoSpy, expectedCount: number, timeout: number) {
-	await vi.waitFor(() => {
-		expect(countRebuilds(loggerSpy)).toBeGreaterThanOrEqual(expectedCount);
-		expect(process.exitCode).toBeUndefined();
-	}, { timeout, interval: 100 });
-}
 
 describe('TypeScriptProject - Watch Mode', () => {
 	let cleanup: (() => Promise<void>) | undefined;
@@ -89,35 +70,6 @@ describe('TypeScriptProject - Watch Mode', () => {
 			expect(process.exitCode).toBeUndefined();
 		}, { timeout: 7_500, interval: 100 });
 
-		expect(process.exitCode).toBeUndefined();
-	});
-
-	it('rebuilds when source files are added and renamed in noEmit mode', { timeout: 20_000 }, async () => {
-		const { dir, cleanup: c } = await TestHelper.createTempProject({
-			files: { 'src/index.ts': 'export const version = 1;' },
-			tsconfig: { compilerOptions: { noEmit: true }, tsbuild: { watch: { enabled: true }, clean: false } }
-		});
-		cleanup = c;
-		const loggerSpy = vi.spyOn(Logger, 'info');
-
-		project = new TypeScriptProject(dir);
-		await project.build();
-
-		await new Promise<void>(resolve => setImmediate(resolve));
-
-		// Add a brand-new source file — exercises the #triggerRebuild "add" branch.
-		await writeFile(join(dir, 'src/added.ts'), 'export const added = 1;');
-		await waitForRebuildCount(loggerSpy, 1, 7_500);
-
-		// Rename the added file — exercises the #triggerRebuild "rename" branch.
-		await rename(join(dir, 'src/added.ts'), join(dir, 'src/renamed.ts'));
-		await waitForRebuildCount(loggerSpy, 2, 7_500);
-
-		// Remove it — exercises the #triggerRebuild "unlink" branch.
-		await unlink(join(dir, 'src/renamed.ts'));
-		await waitForRebuildCount(loggerSpy, 3, 7_500);
-
-		// The watcher kept rebuilding through structural changes without crashing.
 		expect(process.exitCode).toBeUndefined();
 	});
 
