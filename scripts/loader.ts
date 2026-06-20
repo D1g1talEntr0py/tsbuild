@@ -1,10 +1,10 @@
-import { transformSync, version as esbuildVersion } from 'esbuild';
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import process from 'node:process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { createHash } from 'node:crypto';
+import { transformSync, version as esbuildVersion } from 'esbuild';
 import { registerHooks, type LoadHookSync, type ResolveHookSync } from 'node:module';
-import process from 'node:process';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 
 const projectRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 const srcRoot = resolvePath(projectRoot, 'src');
