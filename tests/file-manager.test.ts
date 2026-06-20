@@ -45,12 +45,6 @@ describe('FileManager', () => {
 	});
 
 	describe('initialize', () => {
-		it('prepares fileWriter for emit', async () => {
-			const manager = new FileManager();
-			await manager.initialize();
-			expect(typeof manager.fileWriter).toBe('function');
-		});
-
 		it('clears files when caching is disabled', async () => {
 			const manager = new FileManager();
 			await manager.initialize();

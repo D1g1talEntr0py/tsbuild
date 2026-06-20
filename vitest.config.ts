@@ -9,9 +9,9 @@ function esbuildDecorators(): Plugin {
     async transform(code, id): Promise<TransformResult | undefined> {
       if (!id.endsWith('.ts') || !code.includes('@')) { return }
 
-      ({ code } = await transform(code, { loader: 'ts', target: 'es2024', sourcefile: id }));
+      const result = await transform(code, { loader: 'ts', target: 'es2024', sourcefile: id, sourcemap: true });
 
-      return { code, map: '', warnings: [], mangleCache: {}, legalComments: 'none' };
+      return { code: result.code, map: result.map, warnings: [], mangleCache: {}, legalComments: 'none' };
     }
   };
 }
@@ -31,7 +31,10 @@ export default defineConfig({
       reporter: [ 'text', 'json' ],
 			reportsDirectory: 'tests/coverage',
       include: [ 'src/**/*.ts' ],
-			exclude: [ 'src/index.ts', 'src/tsbuild.ts', 'src/dts/index.ts', 'src/dts/@types', 'src/@types' ]
+      // src/tsbuild.ts is tested (see tests/tsbuild.test.ts) but excluded because
+      // Rolldown (coverage-v8 source-map pass) cannot parse TypeScript's `import type` syntax.
+      // src/plugins/decorator-metadata.ts: SWC/legacy decorator removal is pending; no test until then.
+      exclude: [ 'src/index.ts', 'src/tsbuild.ts', 'src/dts/index.ts', 'src/dts/@types', 'src/@types', 'src/plugins/decorator-metadata.ts' ]
     }
   }
 });

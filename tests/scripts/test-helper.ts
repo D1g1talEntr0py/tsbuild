@@ -291,6 +291,67 @@ export class TestHelper {
 	}
 
 	/**
+	 * Creates a project in a real temp directory on disk.
+	 * Symlinks the project node_modules so TypeScript and esbuild can resolve packages.
+	 * Use for end-to-end tests that exercise real TypeScript compilation and real esbuild.
+	 * @returns Project directory path and an async cleanup function.
+	 */
+	static async createTempProject(options: {
+		files?: Record<string, string>;
+		tsconfig?: Record<string, unknown>;
+		packageJson?: Record<string, unknown>;
+	} = {}): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+		const { mkdtemp, mkdir, writeFile, rm, symlink } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+		const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os');
+		const { join: pathJoin, dirname: pathDirname } = await vi.importActual<typeof import('node:path')>('node:path');
+
+		const dir = await mkdtemp(pathJoin(tmpdir(), 'tsbuild-test-'));
+
+		// Symlink real node_modules so TypeScript finds @types/node and esbuild finds packages
+		await symlink(pathJoin(process.cwd(), 'node_modules'), pathJoin(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : undefined);
+
+		const defaultTsConfig = {
+			compilerOptions: {
+				target: 'ES2022',
+				module: 'ESNext',
+				moduleResolution: 'bundler',
+				strict: true,
+				outDir: './dist',
+				declaration: true,
+				...(options.tsconfig?.['compilerOptions'] as Record<string, unknown> ?? {})
+			},
+			tsbuild: {
+				entryPoints: { index: './src/index.ts' },
+				clean: false,
+				...(options.tsconfig?.['tsbuild'] as Record<string, unknown> ?? {})
+			},
+			include: (options.tsconfig?.['include'] as string[]) ?? ['src/**/*']
+		};
+
+		const defaultPackageJson = {
+			name: 'test-project',
+			version: '1.0.0',
+			type: 'module',
+			...(options.packageJson ?? {})
+		};
+
+		const defaultFiles = {
+			'src/index.ts': 'export const hello = "world";',
+			...(options.files ?? {})
+		};
+
+		await writeFile(pathJoin(dir, 'tsconfig.json'), JSON.stringify(defaultTsConfig, null, 2));
+		await writeFile(pathJoin(dir, 'package.json'), JSON.stringify(defaultPackageJson, null, 2));
+
+		for (const [filePath, content] of Object.entries(defaultFiles)) {
+			await mkdir(pathJoin(dir, pathDirname(filePath)), { recursive: true });
+			await writeFile(pathJoin(dir, filePath), content);
+		}
+
+		return { dir, cleanup: () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
+	}
+
+	/**
 	 * Patches ts.sys to use memfs.
 	 */
 	static async patchTsSys() {
@@ -394,7 +455,7 @@ export class TestHelper {
 				const shouldFallback = (path: string) => {
 					if (memfs.existsSync(path)) return false;
 					const relativePath = path.startsWith(process.cwd()) ? path.slice(process.cwd().length + 1) : path;
-					if (!path.startsWith('/') && !path.startsWith('.')) {
+					if (!isAbsolute(path) && !path.startsWith('.')) {
 						if (path.startsWith('node_modules')) return true;
 						return false;
 					}

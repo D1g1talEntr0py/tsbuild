@@ -58,6 +58,24 @@ describe('Files', () => {
 		it('does nothing if directory does not exist', async () => {
 			await expect(Files.empty('/non-existent' as Path)).resolves.toBeUndefined();
 		});
+
+		it('creates the directory when it does not exist', async () => {
+			await Files.empty('/fresh-dir' as Path);
+			expect(vol.existsSync('/fresh-dir')).toBe(true);
+		});
+
+		it('returns early for an already empty directory', async () => {
+			vol.mkdirSync('/empty-dir', { recursive: true });
+			await expect(Files.empty('/empty-dir' as Path)).resolves.toBeUndefined();
+			expect(vol.existsSync('/empty-dir')).toBe(true);
+		});
+
+		it('re-throws non-ENOENT errors from readdir', async () => {
+			const fsp = await import('node:fs/promises');
+			const readdirSpy = vi.spyOn(fsp, 'readdir').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+			await expect(Files.empty('/any' as Path)).rejects.toThrow('EACCES');
+			readdirSpy.mockRestore();
+		});
 	});
 
 	describe('write', () => {
@@ -101,6 +119,14 @@ describe('Files', () => {
 
 		it('returns file:// URIs as-is', () => {
 			expect(Files.normalizePath('file:///absolute/path' as Path)).toBe('file:///absolute/path');
+		});
+
+		it('resolves the pathname of a non-file URL', () => {
+			expect(Files.normalizePath('https://example.com/some/path' as Path)).toBe('/some/path');
+		});
+
+		it('throws a TypeError for relative non-URL paths', () => {
+			expect(() => Files.normalizePath('relative/path' as Path)).toThrow(TypeError);
 		});
 	});
 
