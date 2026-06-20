@@ -1,3 +1,4 @@
+import { FileExtension } from './constants.js';
 import type { EntryPoints, RelativePath } from './@types/index.js';
 
 /** Conditional export keys tried in priority order */
@@ -16,9 +17,9 @@ function stemOf(filePath: string) {
 
 /** Output → source file extension mapping */
 const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
-	['.js', '.ts'],
-	['.jsx', '.tsx'],
-	['.d.ts', '.ts'],
+	[ FileExtension.JS, FileExtension.TS ],
+	[ FileExtension.JSX, FileExtension.TSX ],
+	[ FileExtension.DTS, FileExtension.TS ],
 ]);
 
 interface PackageJsonConditionalExport { [key: string]: string | PackageJsonConditionalExport | undefined }

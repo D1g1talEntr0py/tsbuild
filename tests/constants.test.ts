@@ -166,7 +166,7 @@ describe('constants', () => {
 			expect(defaultEntryFile).toBe('src/index.ts');
 			expect(cacheDirectory).toBe('.tsbuild');
 			expect(buildInfoFile).toBe('tsconfig.tsbuildinfo');
-			expect(dtsCacheFile).toBe('dts_cache.v8.br');
+			expect(dtsCacheFile).toBe('dts_cache.v4.br');
 			expect(dtsCacheVersion).toBe(4);
 			expect(format).toBe('esm');
 			expect(newLine).toBe('\n');

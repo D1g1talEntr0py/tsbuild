@@ -66,6 +66,9 @@ const toEsTarget: (target: ScriptTarget) => EsTarget = (target: ScriptTarget) =>
 const toJsxRenderingMode: (jsxEmit?: JsxEmit) => JsxRenderingMode | undefined = (jsxEmit?: JsxEmit) => jsxEmit !== undefined ? jsxEmitMap[jsxEmit] : undefined;
 
 const FileExtension = {
+	TS: '.ts',
+	TSX: '.tsx',
+	JSX: '.jsx',
 	JS: '.js',
 	DTS: '.d.ts',
 	CSS: '.css',
@@ -87,10 +90,12 @@ const defaultSourceDirectory = './src' as RelativePath;
 const defaultEntryFile = 'src/index.ts' as RelativePath;
 const cacheDirectory = '.tsbuild' as RelativePath;
 const buildInfoFile = 'tsconfig.tsbuildinfo';
-const dtsCacheFile = 'dts_cache.v8.br';
-const outputManifestFile = 'outputs.manifest.json';
 /** Cache format version - increment when cache structure changes (v4: V8 serialization + Map-based file storage) */
 const dtsCacheVersion = 4;
+// Version-stamped so the filename alone proves structural compatibility: a present file is always
+// the current version, letting the .tsbuildinfo/cache consistency guard use a plain existence check.
+const dtsCacheFile: string = `dts_cache.v${dtsCacheVersion}.br`;
+const outputManifestFile = 'outputs.manifest.json';
 const format = 'esm';
 const newLine = '\n';
 const typeMatcher: RegExp = /\btype\b/;
