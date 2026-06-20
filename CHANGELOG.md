@@ -1,3 +1,41 @@
+## [1.9.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.2...v1.9.3) (2026-06-20)
+
+### Bug Fixes
+
+* **cache:** enforce cache consistency and versioned filenames (f53caf43eae6df7e3cc73c48768756633585a4f4)
+* Version-stamp declaration caches to reflect schema compatibility
+* Add an integrity guard to remove stale build-info records when caches are missing
+* Sync cache identification names in configuration guides
+
+
+### Code Refactoring
+
+* **core:** introduce file extension constants (a7886b4a1566d9fc3288771b84e312dc7e7e00f6)
+* Group common file extensions into a centralized registry
+* Replace magic string extension matches with strongly-typed values
+* Set cache filename dynamically from the format version index
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade package manager and node types (276bb236e6e2a4becd90091cb695d1bdc06b926c)
+* Upgrade pnpm to version 11.8.0
+* Update node types to compile using version 26.0.0
+* Reorder import statements inside scripts/loader.ts
+
+
+### Tests
+
+* **helpers:** introduce disk-based helper and expand unit tests (45be45187098ac3d0d0e7242df4d75125219c8d5)
+* Create a real temp project builder in test helpers
+* Add robust tests matching edge cases for core path and directory functions
+* Remove unused test configurations to prevent duplicate coverage logs
+
+* **integration:** run builds against temporary directories on disk (2d68b6a2850edfeca1141a7893287d9de5687b19)
+* Migrate watch and CLI test cases from memory-mocks to actual file blocks
+* Clean up unused virtual-loader and mock plugins
+* Assert on-disk bundle characteristics and source maps directly
+
 ## [1.9.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.1...v1.9.2) (2026-06-18)
 
 ### Code Refactoring
