@@ -178,7 +178,7 @@ type CachedDeclaration = {
 	fileReferences: ReadonlySet<string>;
 };
 
-/** Persistent cache payload stored in .tsbuild/dts_cache.v8.br */
+/** Persistent cache payload stored in the version-stamped .tsbuild/dts_cache.v{N}.br */
 type BuildCache = {
 	/** Cache format version for compatibility checking */
 	version: number;

@@ -242,7 +242,7 @@ tsbuild --minify  # or -m
 # Force a full rebuild, bypassing incremental compilation.
 tsbuild --force  # or -f
 
-# Clear the incremental build cache (.tsbuild/dts_cache.v8.br) before building.
+# Clear the incremental build cache (.tsbuild/dts_cache.v4.br) before building.
 tsbuild --clearCache  # or -c
 
 # Build with watch mode
@@ -297,7 +297,7 @@ With incremental enabled, each build maintains two caches inside a `.tsbuild/` d
 | Cache | File | What it stores |
 |-------|------|----------------|
 | TypeScript | `.tsbuild/.tsbuildinfo` | Which source files changed and their type information |
-| DTS cache | `.tsbuild/dts_cache.v8.br` | Pre-processed declaration files (Brotli-compressed) |
+| DTS cache | `.tsbuild/dts_cache.v4.br` | Pre-processed declaration files (Brotli-compressed) |
 
 On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
 
@@ -516,7 +516,7 @@ These are used internally but can be leveraged when extending tsbuild.
 
 **TypeScriptProject** (`src/type-script-project.ts`) - Central orchestrator that manages the build lifecycle
 **FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage with optional caching support
-**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v8.br`
+**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v4.br`
 **ProcessManager** (`src/process-manager.ts`) - Global cleanup coordinator for graceful shutdowns
 
 ### Plugin System

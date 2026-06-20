@@ -38,6 +38,30 @@ describe('IncrementalBuildCache', () => {
 		});
 	});
 
+	describe('incremental consistency', () => {
+		it('removes an orphaned .tsbuildinfo when the dts cache is missing', () => {
+			// Build-info present without a matching dts cache: the incremental program would skip
+			// emit while no cached declarations exist, producing broken bundles. The guard drops it.
+			vol.writeFileSync(join(projectRoot, buildInfoFile), '{"version":"5.0"}');
+			new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(vol.existsSync(join(projectRoot, buildInfoFile))).toBe(false);
+		});
+
+		it('keeps .tsbuildinfo when a matching dts cache exists', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			await cache.save(new Map<string, CachedDeclaration>(), false);
+			vol.writeFileSync(join(projectRoot, buildInfoFile), '{"version":"5.0"}');
+			// Both files present → consistent state, leave the incremental build-info intact.
+			new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(vol.existsSync(join(projectRoot, buildInfoFile))).toBe(true);
+		});
+
+		it('leaves a cold build with no .tsbuildinfo untouched', () => {
+			expect(() => new IncrementalBuildCache(projectRoot, buildInfoFile)).not.toThrow();
+			expect(vol.existsSync(join(projectRoot, buildInfoFile))).toBe(false);
+		});
+	});
+
 	describe('restore', () => {
 		it('restores cached declarations from saved cache', async () => {
 			const cache1 = new IncrementalBuildCache(projectRoot, buildInfoFile);
@@ -65,7 +89,7 @@ describe('IncrementalBuildCache', () => {
 		it('handles corrupt cache file gracefully', async () => {
 			const cacheDir = join(projectRoot, '.tsbuild');
 			vol.mkdirSync(cacheDir, { recursive: true });
-			vol.writeFileSync(join(cacheDir, 'dts_cache.v8.br'), 'not valid brotli data');
+			vol.writeFileSync(join(cacheDir, 'dts_cache.v4.br'), 'not valid brotli data');
 
 			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			const target = new Map<string, CachedDeclaration>();
@@ -95,7 +119,7 @@ describe('IncrementalBuildCache', () => {
 				['/project/src/a.d.ts', { code: 'declare const a: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 			]);
 			await cache.save(source, false);
-			const cacheFile = join(projectRoot, '.tsbuild', 'dts_cache.v8.br');
+			const cacheFile = join(projectRoot, '.tsbuild', 'dts_cache.v4.br');
 			expect(vol.existsSync(cacheFile)).toBe(true);
 		});
 

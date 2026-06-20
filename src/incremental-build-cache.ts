@@ -38,6 +38,10 @@ export class IncrementalBuildCache implements BuildCacheManager {
 		this.#cacheDirectoryPath = Paths.join(projectRoot, cacheDirectory);
 		this.#cacheFilePath = Paths.join(this.#cacheDirectoryPath, dtsCacheFile);
 		this.#outputsManifestPath = Paths.join(this.#cacheDirectoryPath, outputManifestFile);
+		// Enforce consistency BEFORE the TypeScript program reads .tsbuildinfo. An orphaned
+		// build-info (present without a matching dts cache) would let the incremental program
+		// skip emit while no cached declarations exist, producing broken bundles.
+		this.#enforceIncrementalConsistency();
 		// Start pre-loading the cache immediately - this runs in parallel with TypeScript program creation
 		this.#cacheLoaded = this.#loadCache();
 		// Capture the manifest synchronously so it survives invalidate() and downstream code can
@@ -47,15 +51,13 @@ export class IncrementalBuildCache implements BuildCacheManager {
 
 	/**
 	 * Loads the cache file asynchronously using V8 deserialization.
-	 * @returns The cache or undefined if cache doesn't exist, is corrupted, or has incompatible version.
+	 * The cache filename is version-stamped, so a present file is always structurally compatible —
+	 * a stale cache from an older format simply has a different filename and is never read.
+	 * @returns The cache, or undefined if the cache doesn't exist or couldn't be read.
 	 */
 	async #loadCache() {
 		try {
-			const cache = await Files.readCompressed<BuildCache>(this.#cacheFilePath);
-
-			// Validate cache version - silently ignore incompatible caches
-			if (cache.version !== version) { return undefined }
-			return cache;
+			return await Files.readCompressed<BuildCache>(this.#cacheFilePath);
 		} catch {
 			// Cache doesn't exist or couldn't be read - this is fine for first build
 			return undefined;
@@ -150,6 +152,25 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	isValid(): boolean {
 		return !this.#invalidated;
+	}
+
+	/**
+	 * Enforces consistency between TypeScript's incremental state (`.tsbuildinfo`) and the
+	 * versioned declaration cache. Both must be valid together: when the build-info file
+	 * exists but the matching dts cache is absent — manually deleted, partially cleared, or
+	 * left behind after a cache-version bump (the versioned filename no longer matches) — the
+	 * incremental program would skip emit while no cached declarations exist, yielding broken
+	 * bundles with unresolved internal imports. Removing the orphaned build-info forces the
+	 * next program to perform a full emit, restoring a consistent state.
+	 */
+	#enforceIncrementalConsistency(): void {
+		// Cold build: no incremental state to couple.
+		if (!existsSync(this.#buildInfoPath)) { return }
+		// Versioned cache present: the filename encodes the structure version, so existence
+		// implies a compatible cache. State is consistent — keep the incremental build-info.
+		if (existsSync(this.#cacheFilePath)) { return }
+		// Orphaned build-info without a matching declaration cache — drop it to force a full emit.
+		try { rmSync(this.#buildInfoPath) } catch { /* best-effort: a failed unlink only risks a redundant rebuild */ }
 	}
 
 	/** Invalidates the build cache by removing the cache directory. */

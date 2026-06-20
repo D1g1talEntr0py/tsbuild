@@ -18,7 +18,7 @@
 ## Core Architecture
 - `TypeScriptProject`: build orchestrator; decorators `@closeOnExit`, `@logPerformance`, `@debounce`; incremental via `.tsbuildinfo`.
 - `FileManager`: in-memory `.d.ts` store + write callback; declaration pre-processing.
-- `IncrementalBuildCache`: persistent Brotli declaration cache at `.tsbuild/dts_cache.v8.br`.
+- `IncrementalBuildCache`: persistent Brotli declaration cache at `.tsbuild/dts_cache.v<version>.br` (filename version-stamped; kept consistent with `.tsbuildinfo`).
 - DTS bundler (`src/dts/`): TypeScript AST + `magic-string` (not Rollup/ESTree), dependency graph + topo sort, import/export stripping, identifier collision handling, per-instance resolution cache, `collectIdentifiers` WeakMap cache.
 - Plugins (`src/plugins/`):
   - `external-modules.ts`: bare specifiers external by default; `noExternal` forces bundling.
