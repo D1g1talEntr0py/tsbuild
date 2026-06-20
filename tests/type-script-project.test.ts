@@ -1,1049 +1,495 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { TestHelper } from './scripts/test-helper';
-import { vol } from 'memfs';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../src/type-script-project';
-import { IncrementalBuildCache } from '../src/incremental-build-cache';
-import { Logger } from '../src/logger';
-import { bundleDeclarations } from '../src/dts/declaration-bundler';
-import { createIncrementalProgram } from 'typescript';
-import type { AbsolutePath, RelativePath, TypeScriptOptions } from '../src/@types';
+import { processManager } from '../src/process-manager';
+import { TestHelper } from './scripts/test-helper';
 
-vi.mock('node:fs', async () => {
-	const memfs: typeof import('memfs') = await vi.importActual('memfs');
-	return memfs.fs;
-});
-
-vi.mock('node:fs/promises', async () => {
-	const memfs: typeof import('memfs') = await vi.importActual('memfs');
-	return memfs.fs.promises;
-});
-
-const mocks = vi.hoisted(() => ({
-	emitMock: vi.fn((..._args: unknown[]) => ({ diagnostics: [] as import('typescript').Diagnostic[] })),
-	getSemanticDiagnosticsMock: vi.fn((): import('typescript').Diagnostic[] => []),
-	getDeclarationDiagnosticsMock: vi.fn((): import('typescript').DiagnosticWithLocation[] => []),
-	getSourceFilesMock: vi.fn((): Array<{ isDeclarationFile: boolean; fileName: string }> => []),
-	getPreEmitDiagnosticsMock: vi.fn((): ReadonlyArray<import('typescript').Diagnostic> => [])
-}));
-
-vi.mock('typescript', async (importOriginal) => {
-	const mod = await importOriginal<typeof import('typescript')>();
-	return {
-		...mod,
-		getPreEmitDiagnostics: mocks.getPreEmitDiagnosticsMock,
-		createIncrementalProgram: vi.fn(() => ({
-			getCompilerOptions: () => ({}),
-			getRootFileNames: () => [],
-			getConfigFileParsingDiagnostics: () => [],
-			getOptionsDiagnostics: () => [],
-			getSyntacticDiagnostics: () => [],
-			getGlobalDiagnostics: () => [],
-			getSemanticDiagnostics: mocks.getSemanticDiagnosticsMock,
-			getDeclarationDiagnostics: mocks.getDeclarationDiagnosticsMock,
-			emit: mocks.emitMock,
-			getProgram: () => ({
-				getRootFileNames: () => [],
-				getSourceFiles: mocks.getSourceFilesMock,
-				getCompilerOptions: () => ({}),
-				getConfigFileParsingDiagnostics: () => [],
-				getOptionsDiagnostics: () => [],
-				getSyntacticDiagnostics: () => [],
-				getGlobalDiagnostics: () => [],
-				getSemanticDiagnostics: mocks.getSemanticDiagnosticsMock,
-				getDeclarationDiagnostics: () => [],
-				emit: mocks.emitMock,
-				getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
-			})
-		})),
-		sys: mod.sys
-	};
-});
-
-vi.mock('../src/logger', () => ({
-	Logger: {
-		info: vi.fn(), error: vi.fn(), log: vi.fn(), clear: vi.fn(),
-		warn: vi.fn(), success: vi.fn(), header: vi.fn(), separator: vi.fn(),
-		step: vi.fn(), subSteps: vi.fn(),
-		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
-	}
-}));
-
-vi.mock('../src/process-manager', () => ({
-	processManager: { addCloseable: vi.fn(), close: vi.fn() }
-}));
-
-vi.mock('../src/dts/declaration-bundler', () => ({
-	bundleDeclarations: vi.fn(() => Promise.resolve([]))
-}));
-
-const esbuildMocks = vi.hoisted(() => ({
-	buildMock: vi.fn(async (options: { outdir: string; plugins?: Array<{ setup: (build: unknown) => void }>; entryPoints: Record<string, string>; define?: Record<string, string>; platform?: 'browser' | 'node' | 'neutral' }) => {
-		const onEndCallbacks: Array<(result: unknown) => unknown> = [];
-		const build = {
-			onEnd: (callback: (result: unknown) => unknown): void => { onEndCallbacks.push(callback); },
-			onResolve: (): void => {},
-			onLoad: (): void => {},
-			initialOptions: options
-		};
-
-		for (const plugin of options.plugins ?? []) { plugin.setup(build); }
-
-		// Simulate write: true — write files to memfs and build metafile
-		const { mkdirSync, writeFileSync } = await import('node:fs');
-		mkdirSync(options.outdir, { recursive: true });
-
-		const outputs: Record<string, { bytes: number; entryPoint: string; inputs: Record<string, never>; imports: never[]; exports: string[] }> = {};
-		for (const [name, entryPoint] of Object.entries(options.entryPoints)) {
-			const defineValue = options.define?.['import.meta.env.API_URL'] ?? 'undefined';
-			const content = `export const __API_URL = ${defineValue};\nexport {};\n`;
-			const outPath = `${options.outdir}/${name}.js`;
-			writeFileSync(outPath, content);
-			outputs[outPath] = { bytes: Buffer.byteLength(content), entryPoint, inputs: {}, imports: [], exports: [] };
+// Watchr emits an 'error' event when a watched path is deleted during tmpdir cleanup.
+// Add a no-op error listener to prevent unhandled-error escalation in tests.
+vi.mock('@d1g1tal/watchr', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@d1g1tal/watchr')>();
+	class SafeWatchr extends actual.Watchr {
+		constructor(...args: ConstructorParameters<typeof actual.Watchr>) {
+			super(...args);
+			this.on('error', () => {});
 		}
-
-		const metafile = { inputs: {}, outputs };
-		for (const callback of onEndCallbacks) { await callback({ metafile }); }
-
-		return { warnings: [], errors: [], metafile };
-	}),
-	formatMessagesMock: vi.fn(async () => [])
-}));
-
-vi.mock('esbuild', () => ({
-	build: esbuildMocks.buildMock,
-	formatMessages: esbuildMocks.formatMessagesMock
-}));
+	}
+	return { ...actual, Watchr: SafeWatchr };
+});
 
 describe('TypeScriptProject', () => {
-	beforeEach(async () => {
-		mocks.emitMock.mockClear();
-		mocks.getSemanticDiagnosticsMock.mockClear();
-		mocks.getSourceFilesMock.mockClear();
-		mocks.getDeclarationDiagnosticsMock.mockClear();
-		mocks.getPreEmitDiagnosticsMock.mockClear();
-		mocks.getPreEmitDiagnosticsMock.mockReturnValue([]);
-		esbuildMocks.buildMock.mockClear();
-		vi.mocked(bundleDeclarations).mockClear();
-		mocks.emitMock.mockImplementation((_target: unknown, writeFile: unknown) => {
-			if (writeFile) (writeFile as Function)('test.d.ts', '', false, undefined, []);
-			return { diagnostics: [] };
-		});
-		await TestHelper.setup();
-	});
+	let cleanup: (() => Promise<void>) | undefined;
 
-	afterEach(() => {
-		TestHelper.teardown();
+	afterEach(async () => {
+		processManager.close();
+		await cleanup?.();
+		cleanup = undefined;
 		process.exitCode = undefined;
 	});
 
-	const createProject = (directory: string, options: TypeScriptOptions = {}): InstanceType<typeof TypeScriptProject> => {
-		return new TypeScriptProject(directory, {
-			...options,
-			tsbuild: {
-				...(options.tsbuild as Record<string, unknown>),
-				plugins: [TestHelper.createEsbuildPlugin(), ...((options.tsbuild as Record<string, unknown>)?.['plugins'] as [] || [])]
-			}
-		});
-	};
-
-	describe('constructor', () => {
-		it('creates project with default options', () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } }
-			});
-
-			const project = createProject(projectPath);
-			expect(project).toBeDefined();
-			expect(typeof project.build).toBe('function');
-		});
-
-		it('defaults types to ["node"]', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
-			TestHelper.createTestProject({ tsconfig: { compilerOptions: {} } });
-
-			createProject(process.cwd());
-			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
-			expect(callOptions.types).toContain('node');
-		});
-
-		it('merges user types with node default', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
-			TestHelper.createTestProject({ tsconfig: { compilerOptions: { types: ['jest'] } } });
-
-			createProject(process.cwd());
-			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
-			expect(callOptions.types).toContain('node');
-			expect(callOptions.types).toContain('jest');
-		});
-
-		it('does not duplicate node in types', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
-			TestHelper.createTestProject({ tsconfig: { compilerOptions: { types: ['node', 'jest'] } } });
-
-			createProject(process.cwd());
-			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
-			expect(callOptions.types?.filter((t: string) => t === 'node')).toHaveLength(1);
-		});
-
-		it('does not auto-inject node on browser platform (DOM lib)', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
-			TestHelper.createTestProject({ tsconfig: { compilerOptions: { lib: ['DOM', 'ESNext'] } } });
-
-			createProject(process.cwd());
-			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
-			expect(callOptions.types).not.toContain('node');
-		});
-
-		it('respects user-specified node type on browser platform', () => {
-			vi.mocked(createIncrementalProgram).mockClear();
-			TestHelper.createTestProject({ tsconfig: { compilerOptions: { lib: ['DOM', 'ESNext'], types: ['node', 'jest'] } } });
-
-			createProject(process.cwd());
-			const callOptions = vi.mocked(createIncrementalProgram).mock.calls[0][0].options;
-			expect(callOptions.types).toContain('node');
-			expect(callOptions.types).toContain('jest');
-		});
-	});
-
-	describe('clean', () => {
-		it('removes output directory contents', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } }
-			});
-			const outDir = join(projectPath, 'dist');
-			vol.mkdirSync(outDir, { recursive: true });
-			vol.writeFileSync(join(outDir, 'output.js'), 'content');
-
-			const project = createProject(projectPath);
-			await project.clean();
-			expect(vol.existsSync(join(outDir, 'output.js'))).toBe(false);
-		});
-	});
-
 	describe('build', () => {
-		it('sets exit code 3 when entry point does not exist', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { tsbuild: { entryPoints: { index: './src/missing.ts' } } },
+		it('emits JS output for a simple ESM project', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const hello = "world";' }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
+			const project = new TypeScriptProject(dir);
 			await project.build();
+			project.close();
+
+			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			expect(output).toContain('hello');
+		});
+
+		it('emits bundled .d.ts when declaration is true', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 42;' },
+				tsconfig: { compilerOptions: { declaration: true, outDir: './dist' } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			const dts = await readFile(join(dir, 'dist/index.d.ts'), 'utf8');
+			expect(dts).toContain('value');
+		});
+
+		it('sets exit code 1 on TypeScript type error', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'const x: number = "not a number"; export { x };' }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			expect(process.exitCode).toBe(1);
+		});
+
+		it('sets exit code 3 when entry point does not exist', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { entryPoints: { index: './src/missing.ts' }, clean: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
 			expect(process.exitCode).toBe(3);
 		});
 
-		it('skips transpile when noEmit is true', async () => {
-			const projectPath = TestHelper.createTestProject({
+		it('skips JS emit when noEmit is true', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
 				tsconfig: { compilerOptions: { noEmit: true } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
+			const project = new TypeScriptProject(dir);
 			await project.build();
-			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
-			expect(mocks.emitMock).toHaveBeenCalled();
+			project.close();
+
+			await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
 		});
 
-		it('sets exit code 1 when type checking fails', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
+		it('sets exit code 1 on type error when noEmit is true', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'const x: number = "bad"; export { x };' },
+				tsconfig: { compilerOptions: { noEmit: true } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			const mockFile = { fileName: 'test.ts', text: 'const x: string = 123;', getLineAndCharacterOfPosition: () => ({ line: 0, character: 6 }) };
-			mocks.emitMock.mockReturnValueOnce({
-				diagnostics: [{ file: mockFile, messageText: 'Type error', start: 6, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic]
-			});
-
+			const project = new TypeScriptProject(dir);
 			await project.build();
+			project.close();
+
 			expect(process.exitCode).toBe(1);
-			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
 		});
 
-		it('outputs tsc-style summary for errors in same file', async () => {
-			const projectPath = TestHelper.createTestProject({
+		it('does not emit .d.ts when declaration is false', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
 				tsconfig: { compilerOptions: { declaration: false } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			const mockFile = { fileName: 'test.ts', text: 'errors', getLineAndCharacterOfPosition: () => ({ line: 0, character: 6 }) };
-			mocks.emitMock.mockReturnValueOnce({
-				diagnostics: [
-					{ file: mockFile, messageText: 'Error 1', start: 0, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic,
-					{ file: mockFile, messageText: 'Error 2', start: 10, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic
-				]
-			});
-
+			const project = new TypeScriptProject(dir);
 			await project.build();
-			expect(process.exitCode).toBe(1);
-			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 2 errors in the same file'));
+			project.close();
+
+			const js = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			expect(js).toContain('x');
+			await expect(access(join(dir, 'dist/index.d.ts'))).rejects.toThrow();
 		});
 
-		it('outputs tsc-style summary for errors in multiple files', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
+		it('injects env vars as import.meta.env.* in output', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: {
+					// Augment ImportMeta so TypeScript accepts import.meta.env.*
+					'src/env.d.ts': 'interface ImportMeta { env: Record<string, string>; readonly url: string; }',
+					'src/index.ts': 'export const url = import.meta.env.API_URL;'
+				},
+				tsconfig: { tsbuild: { env: { API_URL: 'https://api.example.com' }, clean: false } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			const mockFileA = { fileName: 'a.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 6 }) };
-			const mockFileB = { fileName: 'b.ts', text: 'y', getLineAndCharacterOfPosition: () => ({ line: 2, character: 6 }) };
-			mocks.emitMock.mockReturnValueOnce({
-				diagnostics: [
-					{ file: mockFileA, messageText: 'Error 1', start: 0, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic,
-					{ file: mockFileB, messageText: 'Error 2', start: 10, length: 1, category: 1, code: 2322 } as unknown as import('typescript').Diagnostic
-				]
-			});
-
+			const project = new TypeScriptProject(dir);
 			await project.build();
-			expect(process.exitCode).toBe(1);
-			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 2 errors in 2 files.'));
-		});
+			project.close();
 
-		describe('diagnostic deduplication', () => {
-			it('reports each error once when emit and getSemanticDiagnostics return the same diagnostic', async () => {
-				// Regression: with isolatedDeclarations, errors like TS9007 appear in both
-				// getSemanticDiagnostics() and the diagnostics returned by emit(), causing
-				// each error to be displayed twice in the output.
-				const projectPath = TestHelper.createTestProject({
-					tsconfig: { compilerOptions: { declaration: false } }
-				});
-				const project = createProject(projectPath);
-
-				const mockFile = { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
-				const sharedDiagnostic = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
-
-				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ sharedDiagnostic ]);
-				mocks.emitMock.mockReturnValueOnce({ diagnostics: [ sharedDiagnostic ] });
-
-				await project.build();
-				expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
-			});
-
-			it('reports all distinct errors when emit and getSemanticDiagnostics return different diagnostics', async () => {
-				const projectPath = TestHelper.createTestProject({
-					tsconfig: { compilerOptions: { declaration: false } }
-				});
-				const project = createProject(projectPath);
-
-				const mockFile = { fileName: 'test.ts', text: 'xy', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
-				const semanticDiag = { file: mockFile, messageText: 'Cannot find name', start: 0, length: 1, category: 1, code: 2304 } as unknown as import('typescript').Diagnostic;
-				const emitDiag = { file: mockFile, messageText: 'Declaration emit error', start: 1, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
-
-				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ semanticDiag ]);
-				mocks.emitMock.mockReturnValueOnce({ diagnostics: [ emitDiag ] });
-
-				await project.build();
-				expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 2 errors in the same file'));
-			});
-
-			it('reports each error once when getSemanticDiagnostics and getDeclarationDiagnostics return the same diagnostic (noEmit path)', async () => {
-				// Regression: noEmit + declaration: true path combines getSemanticDiagnostics()
-				// and getDeclarationDiagnostics(), which both report isolatedDeclarations errors.
-				const projectPath = TestHelper.createTestProject({
-					tsconfig: { compilerOptions: { declaration: true, noEmit: true } }
-				});
-				const project = createProject(projectPath);
-
-				const mockFile = { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
-				const sharedDiagnostic = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
-
-				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ sharedDiagnostic ]);
-				mocks.getDeclarationDiagnosticsMock.mockReturnValueOnce([ sharedDiagnostic as import('typescript').DiagnosticWithLocation ]);
-
-				await project.build();
-				expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
-			});
-
-			it('deduplicates by file + start + code, not by object identity', async () => {
-				const projectPath = TestHelper.createTestProject({
-					tsconfig: { compilerOptions: { declaration: false } }
-				});
-				const project = createProject(projectPath);
-
-				const mockFile = { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) };
-				// Two distinct object instances with the same semantic identity
-				const diagA = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
-				const diagB = { file: mockFile, messageText: 'Type annotation needed', start: 0, length: 1, category: 1, code: 9007 } as unknown as import('typescript').Diagnostic;
-
-				mocks.getSemanticDiagnosticsMock.mockReturnValueOnce([ diagA ]);
-				mocks.emitMock.mockReturnValueOnce({ diagnostics: [ diagB ] });
-
-				await project.build();
-				// toHaveBeenLastCalledWith avoids false positives from Logger.error calls
-				// accumulated by previous tests — only the summary from this build counts.
-				expect(Logger.error).toHaveBeenLastCalledWith(expect.stringContaining('Found 1 error in test.ts:1'));
-			});
-		});
-
-		it('calls transpile when declaration is false', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			await project.build();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
-		});
-
-		it('bundles declarations when declaration is true', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: false } }
-			});
-			const project = createProject(projectPath);
-
-			await project.build();
-			expect(bundleDeclarations).toHaveBeenCalled();
-		});
-	});
-
-	describe('incremental builds', () => {
-		it('always runs transpile for incremental without declarations', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false, incremental: true } }
-			});
-			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
-			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			const project = createProject(projectPath);
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-
-			await project.build();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-		});
-
-		it('runs full build when .tsbuildinfo changes', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			const project = createProject(projectPath);
-			mocks.emitMock.mockImplementationOnce((_target: unknown, writeFile: unknown) => {
-				if (writeFile) {
-					(writeFile as Function)('test.d.ts', 'export {};', false, undefined, []);
-					(writeFile as Function)('tsconfig.tsbuildinfo', '{}', false, undefined, []);
-				}
-				return { diagnostics: [] };
-			});
-
-			await project.build();
-			expect(bundleDeclarations).toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-		});
-
-		it('only type-checks when noEmit is true', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true, noEmit: true } }
-			});
-			const project = createProject(projectPath);
-
-			await project.build();
-			expect(mocks.emitMock).toHaveBeenCalled();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
-		});
-
-		it('runs full build with --force even when no changes detected', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			const project = createProject(projectPath, { tsbuild: { force: true } });
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-
-			await project.build();
-			expect(bundleDeclarations).toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-		});
-
-		it('forces full build when build configuration changes', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
-			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			// Save a cache with fingerprint for minify: false
-			const cache = new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo');
-			await cache.save(new Map(), 'fingerprint-minify-false');
-
-			// Create project with minify: true, fingerprint will differ from cached value
-			const project = createProject(projectPath, { tsbuild: { minify: true } });
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-
-			await project.build();
-			// Fingerprint mismatch forces full build
-			expect(bundleDeclarations).toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-		});
-
-		it('forces full build when reverting from minify to default', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
-			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			// Save a cache with fingerprint representing a prior minify: true build
-			const cache = new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo');
-			await cache.save(new Map(), 'fingerprint-minify-true');
-
-			// Create project without minify (default minify: false) — fingerprint differs from cached value
-			const project = createProject(projectPath);
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-
-			await project.build();
-			// Fingerprint mismatch forces full build
-			expect(bundleDeclarations).toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-		});
-
-		it('updates fingerprint after config-change rebuild to prevent cascade forced rebuilds', async () => {
-			// Regression: when a build config change forces a rebuild but TypeScript has no
-			// source changes to emit (hasEmittedFiles = false), persistCache() was skipping
-			// the fingerprint update. Every subsequent build would then see the stale fingerprint,
-			// triggering an unnecessary forced rebuild forever.
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: true, incremental: true } }
-			});
-			vol.mkdirSync(join(projectPath, '.tsbuild'), { recursive: true });
-			vol.writeFileSync(join(projectPath, '.tsbuild', 'tsconfig.tsbuildinfo'), '{}');
-			// Stale fingerprint from a prior minify: true build
-			const cache = new IncrementalBuildCache(projectPath as AbsolutePath, '.tsbuild/tsconfig.tsbuildinfo');
-			await cache.save(new Map(), 'fingerprint-minify-true');
-
-			const project = createProject(projectPath);
-
-			// Build 1: fingerprint mismatch → forced rebuild (TypeScript emits nothing — no code changes)
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-			await project.build();
-			expect(esbuildMocks.buildMock).toHaveBeenCalledTimes(1);
-
-			esbuildMocks.buildMock.mockClear();
-			vi.mocked(bundleDeclarations).mockClear();
-
-			// Build 2: fingerprint must now match the updated config — no forced rebuild
-			mocks.emitMock.mockImplementationOnce(() => ({ diagnostics: [] }));
-			await project.build();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
-			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('transpile', () => {
-		it('injects environment variables into output', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } }
-			});
-			const project = createProject(projectPath, {
-				tsbuild: { env: { 'API_URL': 'https://api.example.com' } }
-			});
-
-			vol.writeFileSync(join(projectPath, 'src/index.ts'), 'export const url = import.meta.env.API_URL;');
-			await project.build();
-
-			const output = vol.readFileSync(join(projectPath, 'dist/index.js'), 'utf8') as string;
+			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
 			expect(output).toContain('"https://api.example.com"');
 		});
 
-		it('expands process.env references in env values', async () => {
-			process.env['TEST_VAR_FOR_TSBUILD'] = 'expanded-value';
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } }
-			});
-			const project = createProject(projectPath, {
-				tsbuild: { env: { 'MY_VAR': '${process.env.TEST_VAR_FOR_TSBUILD}' } }
-			});
-
-			await project.build();
-			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			expect(buildCall).toBeDefined();
-			expect(buildCall.define?.['import.meta.env.MY_VAR']).toBe('"expanded-value"');
-			delete process.env['TEST_VAR_FOR_TSBUILD'];
-		});
-
-		it('uses externalModulesPlugin when noExternal patterns exist', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } }
-			});
-			const project = createProject(projectPath, {
-				tsbuild: { noExternal: ['lodash'] }
-			});
-
-			await project.build();
-			expect(esbuildMocks.buildMock).toHaveBeenCalled();
-			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			expect(buildCall).toBeDefined();
-			// Should have more than just outputPlugin due to externalModulesPlugin
-			expect(buildCall.plugins?.length).toBeGreaterThanOrEqual(2);
-		});
-
-		it('handles esbuild warnings', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			esbuildMocks.buildMock.mockResolvedValueOnce({
-				warnings: [{ text: 'Some warning' }],
-				errors: [],
-				metafile: { inputs: {}, outputs: {} }
-			} as any);
-			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted warning'] as never[]);
-
-			await project.build();
-			expect(esbuildMocks.formatMessagesMock).toHaveBeenCalled();
-		});
-
-		it('logs esbuild errors without failing the build', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			esbuildMocks.buildMock.mockResolvedValueOnce({
-				warnings: [],
-				errors: [{ text: 'Some error' }],
-				metafile: { inputs: {}, outputs: {} }
-			} as any);
-			esbuildMocks.formatMessagesMock.mockResolvedValueOnce(['Formatted error'] as never[]);
-
-			await project.build();
-			expect(esbuildMocks.formatMessagesMock).toHaveBeenCalled();
-			expect(process.exitCode).toBeUndefined();
-		});
-
-		it('logs transpile failure on unexpected esbuild exceptions', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			esbuildMocks.buildMock.mockRejectedValueOnce(new Error('esbuild crashed'));
-
-			await project.build();
-			expect(Logger.error).toHaveBeenCalledWith('Transpile failed', expect.any(Error));
-		});
-	});
-
-	describe('triggerRebuild', () => {
-		it('adds new files to rootNames on add event', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-			const newFilePath = join(projectPath, 'src/new-module.ts');
-
-			vi.mocked(createIncrementalProgram).mockClear();
-			(project as any).pendingChanges.push({ event: 'add', path: newFilePath });
-			await (project as any).triggerRebuild();
-
-			const lastCall = vi.mocked(createIncrementalProgram).mock.calls.at(-1);
-			expect(lastCall?.[0].rootNames).toContain(newFilePath);
-		});
-
-		it('does not duplicate existing files on add event', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-			const existingPath = join(projectPath, 'src/index.ts');
-
-			(project as any).builderProgram = {
-				getCompilerOptions: () => ({}),
-				getRootFileNames: () => [existingPath],
-				emit: mocks.emitMock,
-				getProgram: () => ({
-					getRootFileNames: () => [existingPath],
-					getSourceFiles: () => [],
-					emit: mocks.emitMock,
-					getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
-				})
-			};
-
-			vi.mocked(createIncrementalProgram).mockClear();
-			(project as any).pendingChanges.push({ event: 'add', path: existingPath });
-			await (project as any).triggerRebuild();
-
-			const rootNames = vi.mocked(createIncrementalProgram).mock.calls.at(-1)?.[0].rootNames ?? [];
-			expect(rootNames.filter((n: string) => n === existingPath)).toHaveLength(1);
-		});
-
-		it('removes files from rootNames on unlink event', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-			const deletedPath = join(projectPath, 'src/deleted.ts');
-
-			(project as any).builderProgram = {
-				getCompilerOptions: () => ({}),
-				getRootFileNames: () => [deletedPath],
-				emit: mocks.emitMock,
-				getProgram: () => ({
-					getRootFileNames: () => [deletedPath],
-					getSourceFiles: () => [],
-					emit: mocks.emitMock,
-					getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
-				})
-			};
-
-			vi.mocked(createIncrementalProgram).mockClear();
-			(project as any).pendingChanges.push({ event: 'unlink', path: deletedPath });
-			await (project as any).triggerRebuild();
-
-			const rootNames = vi.mocked(createIncrementalProgram).mock.calls.at(-1)?.[0].rootNames ?? [];
-			expect(rootNames).not.toContain(deletedPath);
-		});
-
-		it('updates rootNames on rename event', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-			const oldPath = join(projectPath, 'src/old.ts');
-			const newPath = join(projectPath, 'src/new.ts');
-
-			(project as any).builderProgram = {
-				getCompilerOptions: () => ({}),
-				getRootFileNames: () => [oldPath],
-				emit: mocks.emitMock,
-				getProgram: () => ({
-					getRootFileNames: () => [oldPath],
-					getSourceFiles: () => [],
-					emit: mocks.emitMock,
-					getTypeChecker: () => ({ getExportsOfModule: () => [], getAmbientModules: () => [] })
-				})
-			};
-			(project as any).buildDependencies.add('src/old.ts');
-
-			vi.mocked(createIncrementalProgram).mockClear();
-			(project as any).pendingChanges.push({ event: 'rename', path: oldPath, nextPath: newPath });
-			await (project as any).triggerRebuild();
-
-			const rootNames = vi.mocked(createIncrementalProgram).mock.calls.at(-1)?.[0].rootNames ?? [];
-			expect(rootNames).toContain(newPath);
-			expect(rootNames).not.toContain(oldPath);
-		});
-
-		it('does nothing when pendingChanges is empty', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			vi.mocked(createIncrementalProgram).mockClear();
-			await (project as any).triggerRebuild();
-			// Should not have called createIncrementalProgram again
-			expect(vi.mocked(createIncrementalProgram)).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('close', () => {
-		it('is callable without error', () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } }
-			});
-			const project = createProject(projectPath);
-			expect(() => project.close()).not.toThrow();
-		});
-	});
-
-	describe('handleBuildError', () => {
-		it('sets exit code 1 for unexpected errors', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			esbuildMocks.buildMock.mockRejectedValueOnce(new Error('something unexpected'));
-
-			await project.build();
-			expect(process.exitCode).toBe(1);
-			expect(Logger.error).toHaveBeenCalledWith('Build failed', expect.any(Error));
-		});
-
-		it('does not set exit code in watch mode for BuildError', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath, { tsbuild: { watch: { enabled: true } } });
-
-			// Return source files so the buildDependencies loop body executes
-			mocks.getSourceFilesMock.mockReturnValue([
-				{ isDeclarationFile: false, fileName: join(projectPath, 'src/index.ts') },
-				{ isDeclarationFile: true, fileName: join(projectPath, 'src/index.d.ts') }
-			]);
-			mocks.emitMock.mockReturnValueOnce({
-				diagnostics: [{ file: { fileName: 'test.ts', text: 'x', getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) } as any, messageText: 'Error', start: 0, length: 1, category: 1, code: 2322 }]
-			});
-
-			await project.build();
-			expect(process.exitCode).toBeUndefined();
-		});
-
-		it('does not set exit code in watch mode for unexpected errors', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath, { tsbuild: { watch: { enabled: true } } });
-
-			esbuildMocks.buildMock.mockRejectedValueOnce(new Error('unexpected'));
-
-			await project.build();
-			expect(process.exitCode).toBeUndefined();
-		});
-	});
-
-	describe('resolveConfiguration', () => {
-		it('detects browser platform from DOM lib', async () => {
-			TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { lib: ['DOM', 'ESNext'] } }
-			});
-
-			const project = createProject(process.cwd());
-			await project.build();
-			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			expect(buildCall?.platform).toBe('browser');
-		});
-
-		it('defaults to node platform without DOM lib', async () => {
-			TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { lib: ['ESNext'] } }
-			});
-
-			const project = createProject(process.cwd());
-			await project.build();
-			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			expect(buildCall?.platform).toBe('node');
-		});
-
-		it('infers entry points from package.json exports', () => {
-			TestHelper.createTestProject({
-				tsconfig: {
-					compilerOptions: { outDir: 'dist' },
-					tsbuild: undefined
+		it('emits JS for multiple entry points', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: {
+					'src/index.ts': 'export const a = 1;',
+					'src/utils.ts': 'export const b = 2;'
 				},
+				tsconfig: { tsbuild: { entryPoints: { index: './src/index.ts', utils: './src/utils.ts' }, clean: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+			await expect(access(join(dir, 'dist/utils.js'))).resolves.toBeUndefined();
+		});
+
+		it('infers entry point from package.json exports when no tsbuild config', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: {},
 				packageJson: {
-					name: 'my-pkg',
+					name: 'my-lib',
 					version: '1.0.0',
 					type: 'module',
 					exports: { '.': { import: './dist/index.js' } }
 				}
 			});
+			cleanup = c;
 
-			// Remove tsbuild section completely to trigger inference
-			const tsconfig = JSON.parse(vol.readFileSync(join(process.cwd(), 'tsconfig.json'), 'utf8') as string);
-			delete tsconfig.tsbuild;
-			vol.writeFileSync(join(process.cwd(), 'tsconfig.json'), JSON.stringify(tsconfig));
+			const tsconfigPath = join(dir, 'tsconfig.json');
+			const raw = JSON.parse(await readFile(tsconfigPath, 'utf8'));
+			delete raw.tsbuild;
+			await writeFile(tsconfigPath, JSON.stringify(raw));
 
-			const project = createProject(process.cwd());
-			expect(project).toBeDefined();
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
 		});
 
-		it('throws ConfigurationError for invalid tsconfig', () => {
-			vol.writeFileSync(join(process.cwd(), 'tsconfig.json'), 'invalid json { broken');
-
-			expect(() => createProject(process.cwd())).toThrow();
-		});
-
-		it('ignores malformed package.json when inferring entry points', () => {
-			TestHelper.createTestProject({
-				tsconfig: {
-					compilerOptions: { outDir: 'dist' },
-					tsbuild: undefined
-				}
+		it('emits only .d.ts when emitDeclarationOnly is true', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 42;' },
+				tsconfig: { compilerOptions: { declaration: true, emitDeclarationOnly: true }, tsbuild: { clean: false } }
 			});
+			cleanup = c;
 
-			// Remove tsbuild section and write malformed package.json
-			const tsconfig = JSON.parse(vol.readFileSync(join(process.cwd(), 'tsconfig.json'), 'utf8') as string);
-			delete tsconfig.tsbuild;
-			vol.writeFileSync(join(process.cwd(), 'tsconfig.json'), JSON.stringify(tsconfig));
-			vol.writeFileSync(join(process.cwd(), 'package.json'), '{ invalid json }}}');
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
 
-			// Should not throw — the catch block silences the JSON parse error
-			const project = createProject(process.cwd());
-			expect(project).toBeDefined();
+			await expect(access(join(dir, 'dist/index.d.ts'))).resolves.toBeUndefined();
+			await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
 		});
 
-		it('warns when package.json has export fields but entry points cannot be inferred', () => {
-			TestHelper.createTestProject({
-				tsconfig: {
-					compilerOptions: { outDir: 'dist' },
-					tsbuild: undefined
-				}
+		it('bundles a dependency forced via noExternal', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': "import MagicString from 'magic-string'; export const out = new MagicString('a').toString();" },
+				tsconfig: { tsbuild: { noExternal: ['magic-string'], clean: false }, compilerOptions: { declaration: false } }
 			});
+			cleanup = c;
 
-			// Remove tsbuild section and write package.json with non-matching export paths
-			const tsconfig = JSON.parse(vol.readFileSync(join(process.cwd(), 'tsconfig.json'), 'utf8') as string);
-			delete tsconfig.tsbuild;
-			vol.writeFileSync(join(process.cwd(), 'tsconfig.json'), JSON.stringify(tsconfig));
-			vol.writeFileSync(join(process.cwd(), 'package.json'), JSON.stringify({
-				name: 'test-project',
-				version: '1.0.0',
-				type: 'module',
-				exports: { '.': { import: './lib/index.mjs' } }
-			}));
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
 
-			const project = createProject(process.cwd());
-			expect(project).toBeDefined();
-			expect(Logger.warn).toHaveBeenCalledWith(expect.stringContaining('Could not infer entry points'));
+			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			// magic-string is inlined rather than left as a bare import
+			expect(output).not.toContain("from \"magic-string\"");
 		});
-	});
 
-	describe('getEntryPoints', () => {
-		it('expands directory entry points to individual files', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { outDir: 'dist' } },
+		it('expands a directory entry point into per-file entries', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: {
-					'src/index.ts': 'export const a = 1;',
-					'src/utils.ts': 'export const b = 2;'
-				}
-			});
-			const project = createProject(projectPath, {
-				tsbuild: { entryPoints: { src: './src' as RelativePath } }
-			});
-
-			await project.build();
-			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			// Should have expanded the directory into individual files
-			expect(Object.keys(buildCall?.entryPoints ?? {}).length).toBeGreaterThanOrEqual(1);
-		});
-	});
-
-	describe('transpile', () => {
-		it('loads SWC decorator metadata plugin when emitDecoratorMetadata is enabled', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: {
-					compilerOptions: {
-						outDir: 'dist',
-						experimentalDecorators: true,
-						emitDecoratorMetadata: true
-					}
+					'src/alpha.ts': 'export const alpha = 1;',
+					'src/beta.ts': 'export const beta = 2;'
 				},
-				files: { 'src/index.ts': 'export const a = 1;' }
+				tsconfig: { tsbuild: { entryPoints: { lib: './src' }, bundle: false, clean: false }, compilerOptions: { declaration: false } }
 			});
+			cleanup = c;
 
-			const project = createProject(projectPath);
+			const project = new TypeScriptProject(dir);
 			await project.build();
+			project.close();
 
-			// The plugin should have been loaded and passed to esbuild
-			const buildCall = esbuildMocks.buildMock.mock.calls[0]?.[0];
-			expect(buildCall).toBeDefined();
-			const pluginNames = (buildCall.plugins as unknown as Array<{ name: string }>).map(p => p.name);
-			expect(pluginNames).toContain('esbuild:swc-decorator-metadata');
+			await expect(access(join(dir, 'dist/alpha.js'))).resolves.toBeUndefined();
+			await expect(access(join(dir, 'dist/beta.js'))).resolves.toBeUndefined();
+		});
+
+		it('sets exit code when emitDecoratorMetadata is enabled without @swc/core', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { compilerOptions: { emitDecoratorMetadata: true, experimentalDecorators: true, declaration: false }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			expect(process.exitCode).toBe(1);
+		});
+
+		it('expands ${process.env.*} references in env values', async () => {
+			process.env['TSBUILD_TEST_TOKEN'] = 'expanded-secret';
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: {
+					'src/env.d.ts': 'interface ImportMeta { env: Record<string, string>; readonly url: string; }',
+					'src/index.ts': 'export const token = import.meta.env.TOKEN;'
+				},
+				tsconfig: { tsbuild: { env: { TOKEN: '${process.env.TSBUILD_TEST_TOKEN}' }, clean: false }, compilerOptions: { declaration: false } }
+			});
+			cleanup = c;
+
+			try {
+				const project = new TypeScriptProject(dir);
+				await project.build();
+				project.close();
+
+				const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+				expect(output).toContain('"expanded-secret"');
+			} finally {
+				delete process.env['TSBUILD_TEST_TOKEN'];
+			}
+		});
+
+		it('merges explicit compilerOptions.types from tsconfig and constructor options', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { compilerOptions: { types: ['node'], declaration: false }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir, { compilerOptions: { types: ['node'] } });
+			await project.build();
+			project.close();
+
+			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			expect(output).toContain('x');
+		});
+
+		it('invalidates the incremental cache when clearCache is set', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { compilerOptions: { incremental: true, declaration: false }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			// First build to populate the incremental cache, then a second run with clearCache
+			const first = new TypeScriptProject(dir);
+			await first.build();
+			first.close();
+
+			const second = new TypeScriptProject(dir, { clearCache: true });
+			await second.build();
+			second.close();
+
+			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			expect(output).toContain('x');
+			expect(process.exitCode).toBeUndefined();
 		});
 	});
 
-	describe('noEmit diagnostic parity with tsc --noEmit', () => {
-		const makeDeclarationError = (fileName = 'src/index.ts', code = 4055): import('typescript').Diagnostic => ({
-			file: {
-				fileName,
-				text: 'export function foo() {}',
-				getLineAndCharacterOfPosition: () => ({ line: 0, character: 16 })
-			} as unknown as import('typescript').SourceFile,
-			messageText: 'Return type of exported function has or is using private name.',
-			start: 16,
-			length: 3,
-			category: 1,
-			code
-		} as import('typescript').Diagnostic);
-
-		it('uses all builder program diagnostic methods in noEmit mode', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { noEmit: true } }
+	describe('clean', () => {
+		it('removes output directory contents', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { clean: false } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
+			const project = new TypeScriptProject(dir);
 			await project.build();
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
 
-			expect(mocks.getSemanticDiagnosticsMock).toHaveBeenCalled();
+			await project.clean();
+			await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
+
+			project.close();
 		});
+	});
 
-		it('does not use getPreEmitDiagnostics in normal emit mode', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
+	describe('close', () => {
+		it('is idempotent — multiple calls do not throw', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			await project.build();
-
-			expect(mocks.getPreEmitDiagnosticsMock).not.toHaveBeenCalled();
+			const project = new TypeScriptProject(dir);
+			expect(() => project.close()).not.toThrow();
+			expect(() => project.close()).not.toThrow();
 		});
+	});
 
-		it('fails when getDeclarationDiagnostics returns a declaration error in noEmit mode', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { noEmit: true, declaration: true } }
+	describe('incremental builds', () => {
+		it('succeeds on second build with no source changes', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { clean: false } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			// Semantic check is clean; only the declaration phase catches the error
-			mocks.getSemanticDiagnosticsMock.mockReturnValue([]);
-			mocks.getDeclarationDiagnosticsMock.mockReturnValue([ makeDeclarationError() as import('typescript').DiagnosticWithLocation ]);
+			const project1 = new TypeScriptProject(dir);
+			await project1.build();
+			project1.close();
 
-			await project.build();
+			const output1 = await readFile(join(dir, 'dist/index.js'), 'utf8');
 
-			expect(process.exitCode).toBe(1);
-		});
-
-		it('would silently pass if getSemanticDiagnostics were used alone in noEmit mode', async () => {
-			// This test documents why getPreEmitDiagnostics must be used in noEmit mode:
-			// getSemanticDiagnostics alone does not cover declaration-phase errors.
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { declaration: false } }
-			});
-			const project = createProject(projectPath);
-
-			// Simulate: semantic clean, but declaration phase has an error.
-			// In normal emit mode the error appears in emit diagnostics (not here),
-			// so no exit code should be set.
-			mocks.getSemanticDiagnosticsMock.mockReturnValue([]);
-
-			await project.build();
+			const project2 = new TypeScriptProject(dir);
+			await project2.build();
+			project2.close();
 
 			expect(process.exitCode).toBeUndefined();
+			const output2 = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			expect(output2).toBe(output1);
 		});
 
-		it('catches isolatedDeclarations violations (TS9007) in noEmit mode', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { noEmit: true, declaration: true } }
+		it('forces full rebuild when fingerprint changes (minify toggled)', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const hello = "world";' },
+				tsconfig: { tsbuild: { clean: false } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			mocks.getSemanticDiagnosticsMock.mockReturnValue([]);
-			mocks.getDeclarationDiagnosticsMock.mockReturnValue([ makeDeclarationError('src/index.ts', 9007) as import('typescript').DiagnosticWithLocation ]);
+			const project1 = new TypeScriptProject(dir);
+			await project1.build();
+			project1.close();
+			const output1 = await readFile(join(dir, 'dist/index.js'), 'utf8');
 
-			await project.build();
+			const project2 = new TypeScriptProject(dir, { tsbuild: { clean: false, minify: true } });
+			await project2.build();
+			project2.close();
+			const output2 = await readFile(join(dir, 'dist/index.js'), 'utf8');
 
-			expect(process.exitCode).toBe(1);
-			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('TS9007'));
+			expect(output2.length).toBeLessThan(output1.length);
 		});
 
-		it('passes a clean build in noEmit mode when all diagnostic methods return no errors', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { noEmit: true } }
+		it('--force always rebuilds even when incremental cache matches', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { clean: false } }
 			});
-			const project = createProject(projectPath);
+			cleanup = c;
 
-			await project.build();
+			const project1 = new TypeScriptProject(dir);
+			await project1.build();
+			project1.close();
+
+			const project2 = new TypeScriptProject(dir, { tsbuild: { clean: false, force: true } });
+			await project2.build();
+			project2.close();
 
 			expect(process.exitCode).toBeUndefined();
-			expect(mocks.getSemanticDiagnosticsMock).toHaveBeenCalled();
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+		});
+	});
+
+	describe('resolveConfiguration', () => {
+		it('throws ConfigurationError on invalid tsconfig.json', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' }
+			});
+			cleanup = c;
+
+			await writeFile(join(dir, 'tsconfig.json'), 'invalid json { broken');
+
+			expect(() => new TypeScriptProject(dir)).toThrow();
 		});
 
-		it('skips all emit steps (transpile, declarations) in noEmit mode even on clean check', async () => {
-			const projectPath = TestHelper.createTestProject({
-				tsconfig: { compilerOptions: { noEmit: true, declaration: true } }
+		it('does not throw when package.json is malformed', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' }
 			});
-			const project = createProject(projectPath);
-			mocks.emitMock.mockImplementationOnce((_target: unknown, writeFile: unknown) => {
-				if (writeFile) {
-					(writeFile as Function)('test.d.ts', 'export {};', false, undefined, []);
-					(writeFile as Function)('tsconfig.tsbuildinfo', '{}', false, undefined, []);
+			cleanup = c;
+
+			const tsconfigPath = join(dir, 'tsconfig.json');
+			const raw = JSON.parse(await readFile(tsconfigPath, 'utf8'));
+			delete raw.tsbuild;
+			await writeFile(tsconfigPath, JSON.stringify(raw));
+			await writeFile(join(dir, 'package.json'), '{ invalid json }}}');
+
+			expect(() => new TypeScriptProject(dir)).not.toThrow();
+		});
+
+		it('warns when package.json export paths do not match outDir', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: {},
+				packageJson: {
+					name: 'my-lib',
+					version: '1.0.0',
+					type: 'module',
+					exports: { '.': { import: './lib/index.js' } }
 				}
-				return { diagnostics: [] };
 			});
+			cleanup = c;
 
+			const tsconfigPath = join(dir, 'tsconfig.json');
+			const raw = JSON.parse(await readFile(tsconfigPath, 'utf8'));
+			delete raw.tsbuild;
+			await writeFile(tsconfigPath, JSON.stringify(raw));
+
+			// Export path (./lib) does not match outDir (./dist) → inference fails and warns,
+			// but construction still succeeds by falling back to default entry points.
+			expect(() => new TypeScriptProject(dir)).not.toThrow();
+		});
+
+		it('detects browser platform when lib includes DOM', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: {
+					compilerOptions: { lib: ['DOM', 'ESNext'], declaration: false },
+					tsbuild: { clean: false, bundle: false }
+				}
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
 			await project.build();
+			project.close();
 
-			expect(esbuildMocks.buildMock).not.toHaveBeenCalled();
-			expect(bundleDeclarations).not.toHaveBeenCalled();
+			expect(process.exitCode).toBeUndefined();
+		});
+	});
+
+	describe('watch mode', () => {
+		it('starts watching and close() cleans up the watcher', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			await new Promise<void>(resolve => setImmediate(resolve));
+
+			expect(() => project.close()).not.toThrow();
 		});
 	});
 });

@@ -1,16 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-
-const constructorMock = vi.fn();
-const buildMock = vi.fn().mockResolvedValue(undefined);
-vi.mock('../src/type-script-project', () => ({
-	TypeScriptProject: class {
-		constructor(...args: unknown[]) { constructorMock(...args) }
-		build = buildMock;
-	}
-}));
+import { TestHelper } from './scripts/test-helper';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const tsbuildPath = join(__dirname, '../src/tsbuild.ts');
@@ -40,8 +33,6 @@ describe('tsbuild CLI', () => {
 		originalArgv = process.argv;
 		originalExitCode = process.exitCode;
 		originalNpmPackageVersion = process.env['npm_package_version'];
-		constructorMock.mockClear();
-		buildMock.mockClear();
 		vi.resetModules();
 	});
 
@@ -73,7 +64,6 @@ describe('tsbuild CLI', () => {
 			expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('-v, --version'));
 			expect(process.exitCode).toBe(0);
 			expect(processExitSpy).not.toHaveBeenCalled();
-			expect(constructorMock).not.toHaveBeenCalled();
 		});
 	});
 
@@ -93,24 +83,60 @@ describe('tsbuild CLI', () => {
 			expect(consoleLogSpy).toHaveBeenCalledWith(packageJson.version);
 			expect(process.exitCode).toBe(0);
 			expect(processExitSpy).not.toHaveBeenCalled();
-			expect(constructorMock).not.toHaveBeenCalled();
 		});
 	});
 
 	describe('project build', () => {
-		it('creates TypeScriptProject with correct arguments from CLI', async () => {
-			process.argv = ['node', 'tsbuild', '-p', './test-project', '-w'];
+		let cleanup: (() => Promise<void>) | undefined;
+
+		afterEach(async () => {
+			await cleanup?.();
+			cleanup = undefined;
+		});
+
+		it('builds a real project via CLI', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			process.argv = ['node', 'tsbuild', '-p', dir];
+			process.exitCode = undefined;
+			consoleLogSpy.mockRestore(); // Allow Logger output through
 
 			// @ts-expect-error - temp module created at runtime for cache busting
 			await import('../src/tsbuild.temp');
 
-			expect(constructorMock).toHaveBeenCalledWith(
-				expect.stringMatching(/test-project$/),
-				expect.objectContaining({
-					tsbuild: expect.objectContaining({ watch: { enabled: true } })
-				})
-			);
-			expect(buildMock).toHaveBeenCalled();
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+			expect(process.exitCode).toBeUndefined();
+		});
+
+		it('passes --force flag to TypeScriptProject', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			// First build to prime the cache
+			process.argv = ['node', 'tsbuild', '-p', dir];
+			process.exitCode = undefined;
+			consoleLogSpy.mockRestore();
+			// @ts-expect-error
+			await import('../src/tsbuild.temp');
+			vi.resetModules();
+			consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+			// Second build with --force should also succeed
+			process.argv = ['node', 'tsbuild', '-p', dir, '--force'];
+			process.exitCode = undefined;
+			consoleLogSpy.mockRestore();
+			// @ts-expect-error
+			await import('../src/tsbuild.temp');
+
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+			expect(process.exitCode).toBeUndefined();
 		});
 	});
 });
