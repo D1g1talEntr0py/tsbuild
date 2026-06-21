@@ -1,3 +1,21 @@
+## [2.0.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.0.0...v2.0.1) (2026-06-21)
+
+### Code Refactoring
+
+* **build:** simplify build scripts and migrate linter configuration (939634a44d47302ef0b43098ab5c728fcbaaaf7f)
+Replaces the custom, maintenance-heavy TS loader implementation with a standard, off-the-shelf runner. This reduces codebase complexity and aligns script running with modern tools.
+
+* Deletes the custom runtime module loader and its dedicated configuration
+* Updates project tasks to use the new lightweight dependency for TS compilation and execution
+* Configures the watch runner and workspace properties for smooth development flows
+* Migrates the linting configuration to native TypeScript to leverage modern type-safe setup rules
+
+* **deps:** upgrade memfs and lockfile dependencies (4688b35d32e1e8ef671ebb85e96acb607bbaeb57)
+Upgrades the virtual filesystem and its associated subdependencies along with common utility packages to their modern patch releases.
+
+* Updates virtual filesystem package to pull in upstream reliability enhancements
+* Synchronizes transitive helper packages and serialisation utilities in the lockfile
+
 ## [2.0.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.3...v2.0.0) (2026-06-21)
 
 ### ⚠ BREAKING CHANGES
