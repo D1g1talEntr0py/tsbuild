@@ -132,8 +132,6 @@ type BuildOptions = {
 	env?: Record<string, string>;
 	dts?: DtsOptions;
 	watch?: WatchOptions;
-	/** Emit decorator metadata (requires `@swc/core` as optional dependency) */
-	decoratorMetadata?: boolean;
 	/** Produce additional IIFE output alongside ESM. Set to `true` for default IIFE or provide options. */
 	iife?: boolean | IifeOptions;
 	/** Custom esbuild plugins (Plugin objects via programmatic API, or string/tuple references via config) */

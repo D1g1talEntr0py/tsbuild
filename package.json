@@ -3,7 +3,7 @@
   "author": "D1g1talEntr0py",
   "version": "1.9.3",
   "license": "MIT",
-  "description": "A fast, ESM-only TypeScript build tool combining the TypeScript API for type checking and declaration generation, esbuild for bundling, and SWC for decorator metadata.",
+  "description": "A fast, ESM-only TypeScript build tool combining the TypeScript API for type checking and declaration generation with esbuild for bundling. Built for modern ESM-only projects on Node.js 22+.",
   "homepage": "https://github.com/D1g1talEntr0py/tsbuild#readme",
   "repository": {
     "type": "git",

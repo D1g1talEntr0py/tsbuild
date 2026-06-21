@@ -403,8 +403,6 @@ export default CFoo;
 					noEmit: false,
 					sourceMap: false,
 					emitDeclarationOnly: false,
-					emitDecoratorMetadata: false,
-					experimentalDecorators: false,
 					alwaysStrict: true,
 					strict: true,
 					useDefineForClassFields: true,

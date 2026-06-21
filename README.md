@@ -8,9 +8,9 @@
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript->=5.6.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-A TypeScript build tool that combines three tools into one workflow: **TypeScript's type system** for correctness, **esbuild** for speed, and **SWC** for legacy decorator metadata (optional, not installed by default). Built for modern ESM-only projects on Node.js 22+.
+A TypeScript build tool that combines two tools into one workflow: **TypeScript's type system** for correctness and **esbuild** for speed. Built for modern ESM-only projects on Node.js 22+.
 
-TC39 standard decorators are supported natively — no additional dependencies needed. SWC is only required if you are still using `experimentalDecorators` with `emitDecoratorMetadata`.
+TC39 standard decorators are supported natively — no additional dependencies needed.
 
 > **Note:** This is a personal project I built for my own use and decided to share. It works well for me, but it's not battle-hardened for every setup. If you need something production-proven, [tsup](https://tsup.egoist.dev/) is excellent, or take a look at the newer [tsdown](https://tsdown.dev/) by [void(0)](https://voidzero.dev/).
 
@@ -22,7 +22,6 @@ TC39 standard decorators are supported natively — no additional dependencies n
 - ⚡ **Incremental Builds** - Intelligent caching with `.tsbuildinfo` for fast rebuilds
 - 👁️ **Watch Mode** - File watching with automatic rebuilds on changes
 - 🎨 **TC39 Decorators** - Native support for standard decorators, no extra dependencies required
-- 🔧 **Legacy Decorator Metadata** - Optional SWC integration for `emitDecoratorMetadata` when using `experimentalDecorators` (install `@swc/core` separately)
 - 🔌 **Plugin System** - Extensible architecture with custom esbuild plugins
 - 🎯 **ESM-Only** - Pure ESM project with no CommonJS support by design
 - 🧹 **Clean Builds** - Optional output directory cleaning before builds
@@ -31,7 +30,7 @@ TC39 standard decorators are supported natively — no additional dependencies n
 
 ## Why tsbuild?
 
-Most TypeScript build setups involve a compromise: use `tsc` alone and lose bundling speed, or use esbuild/swc alone and lose accurate type checking and declaration generation. tsbuild aims to give you both by running each tool for what it's actually good at.
+Most TypeScript build setups involve a compromise: use `tsc` alone and lose bundling speed, or use esbuild alone and lose accurate type checking and declaration generation. tsbuild aims to give you both by running each tool for what it's actually good at.
 
 The build runs in two phases:
 
@@ -72,8 +71,6 @@ npm install -D @d1g1tal/tsbuild
 # yarn
 yarn add -D @d1g1tal/tsbuild
 ```
-
-`@swc/core` is **not a dependency** and will never be installed automatically. It is only needed if you use `experimentalDecorators` with `emitDecoratorMetadata` — see [Decorator Metadata](#decorator-metadata) for details.
 
 > **Note:** When installed only as a local dev dependency, the `tsbuild` command is not available directly in your terminal. Use it through `package.json` scripts (e.g., `pnpm build`) or invoke it explicitly with `pnpm exec tsbuild` / `npx tsbuild`.
 
@@ -447,11 +444,11 @@ With `isolatedModules: true`, TypeScript catches these issues during the type-ch
 
 **`verbatimModuleSyntax` implies `isolatedModules`:** If you have `verbatimModuleSyntax: true` in your config, it already enforces all of `isolatedModules` and goes further by requiring `import type` for all type-only imports. If you're using `verbatimModuleSyntax`, adding `isolatedModules` is redundant but harmless.
 
-### Decorator Metadata
-
-#### TC39 Standard Decorators (recommended)
+### TC39 Standard Decorators
 
 Standard decorators work out of the box — just use them in your code. No configuration, no extra packages.
+
+> **Note:** Legacy decorator metadata (`experimentalDecorators` / `emitDecoratorMetadata`) is no longer supported. Migrate to TC39 standard decorators.
 
 ```jsonc
 {
@@ -461,27 +458,6 @@ Standard decorators work out of the box — just use them in your code. No confi
   }
 }
 ```
-
-#### Legacy Decorators with Metadata (`experimentalDecorators`)
-
-If you are using the older decorator proposal with `emitDecoratorMetadata`, tsbuild delegates the transform to SWC so that metadata is emitted correctly through the esbuild pipeline. This requires `@swc/core` to be installed manually — it is **not** included with tsbuild:
-
-```bash
-pnpm add -D @swc/core
-```
-
-Then enable the flags in `tsconfig.json`:
-
-```jsonc
-{
-  "compilerOptions": {
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
-  }
-}
-```
-
-tsbuild detects these flags automatically and uses SWC. If `@swc/core` is not installed when these flags are set, the build will fail with a clear message telling you to install it.
 
 ### Custom Plugins
 
@@ -523,7 +499,6 @@ These are used internally but can be leveraged when extending tsbuild.
 
 **External Modules Plugin** - Pattern-based external dependency resolution
 **Output Plugin** - Handles file writing and executable permissions (shebangs get 0o755)
-**Decorator Metadata Plugin** - Optional SWC transform for decorator metadata
 
 ### DTS Bundling System
 
@@ -565,7 +540,6 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 ### Other Dependencies
 - **[esbuild](https://esbuild.github.io/)** - The incredibly fast JavaScript bundler that powers tsbuild's transpilation
 - **[TypeScript](https://www.typescriptlang.org/)** - Type checking, declaration generation, and module resolution
-- **[SWC](https://swc.rs/)** - Optional decorator metadata transformation
 - **[magic-string](https://github.com/Rich-Harris/magic-string)** - Efficient source code transformation with sourcemap support
 - **[watchr](https://github.com/D1g1talEntr0py/watchr)** - File watching for watch mode
 
@@ -585,7 +559,7 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 | Bundling | ✅ esbuild | ✅ esbuild | ✅ Rolldown | ❌ N/A |
 | Declaration Bundling | ✅ Custom Bundler | ✅ rollup-plugin-dts¹ | ✅ rolldown-plugin-dts | ❌ N/A |
 | TC39 Decorators | ✅ Native | ✅ Native | ✅ Native | ✅ Native |
-| Legacy Decorator Metadata | ✅ SWC (manual install) | ✅ SWC | ✅ SWC | ✅ Native |
+| Legacy Decorator Metadata | ❌ Removed | ✅ SWC | ✅ SWC | ✅ Native |
 | CommonJS Support | ❌ None | ✅ Yes | ✅ Yes | ✅ Yes |
 | Watch Mode | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
 | Incremental Builds | ✅ Yes | ⚠️ Limited | ⚠️ Limited | ✅ Yes |
