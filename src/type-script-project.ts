@@ -340,6 +340,12 @@ export class TypeScriptProject implements Closable {
 			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths, noExternal: this.#buildConfiguration.noExternal }));
 		}
 
+		// Legacy decorators (TypeScript `experimentalDecorators` / `emitDecoratorMetadata`) are not supported.
+		// Failing fast avoids a mismatch between TypeScript's type-checker and esbuild's transpiled output.
+		if (this.#configuration.compilerOptions.experimentalDecorators || this.#configuration.compilerOptions.emitDecoratorMetadata) {
+			throw new ConfigurationError('Legacy decorators are not supported. Remove "experimentalDecorators"/"emitDecoratorMetadata" from tsconfig.json and migrate to TC39 standard decorators.');
+		}
+
 		if (this.#buildConfiguration.plugins?.length) { plugins.push(...await resolvePlugins(this.#buildConfiguration.plugins, this.#directory)) }
 
 		// Prepare environment variable definitions as import.meta.env.* definitions
