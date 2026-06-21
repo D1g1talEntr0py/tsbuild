@@ -1,3 +1,35 @@
+## [2.0.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.3...v2.0.0) (2026-06-21)
+
+### ⚠ BREAKING CHANGES
+
+* emitDecoratorMetadata/experimentalDecorators are no
+longer supported. The optional @swc/core integration has been removed
+along with the decoratorMetadata field from BuildOptions. Projects
+using legacy decorator metadata must migrate to TC39 standard decorators,
+which are supported natively with no additional dependencies.
+
+- Remove src/plugins/decorator-metadata.ts (SWC esbuild plugin)
+- Remove src/@types/swc.d.ts (ambient @swc/core declaration)
+- Remove decoratorMetadata from BuildOptions type
+- Remove emitDecoratorMetadata from buildFingerprint
+- Remove experimentalDecorators from esbuild tsconfigRaw pass-through
+- Remove related tests and update README/package.json
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+
+### Code Refactoring
+
+* remove legacy decorator support and SWC dependency (fc9988feb266879ea404740858b9e06a045ec9c3)
+
+### Documentation
+
+* rename decorator section and note legacy metadata removal (bc50fb3af13f9296e9d00aba28777fdd555211b5)
+
+### Tests
+
+* fixed a race condition during test teardown (21b47ba8d2078c695758fb1c08119fb870722421)
+* fixed add/rename/unlink tests (92375a668c119f8ab7ec24ed34756d7beb3fd066)
+
 ## [1.9.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v1.9.2...v1.9.3) (2026-06-20)
 
 ### Bug Fixes
