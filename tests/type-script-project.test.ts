@@ -240,6 +240,20 @@ describe('TypeScriptProject', () => {
 			await expect(access(join(dir, 'dist/beta.js'))).resolves.toBeUndefined();
 		});
 
+		it('sets exit code 3 when legacy decorator options are enabled', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, declaration: false }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			expect(process.exitCode).toBe(3);
+		});
+
 		it('expands ${process.env.*} references in env values', async () => {
 			process.env['TSBUILD_TEST_TOKEN'] = 'expanded-secret';
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
