@@ -444,11 +444,11 @@ With `isolatedModules: true`, TypeScript catches these issues during the type-ch
 
 **`verbatimModuleSyntax` implies `isolatedModules`:** If you have `verbatimModuleSyntax: true` in your config, it already enforces all of `isolatedModules` and goes further by requiring `import type` for all type-only imports. If you're using `verbatimModuleSyntax`, adding `isolatedModules` is redundant but harmless.
 
-### Decorator Metadata
-
-#### TC39 Standard Decorators
+### TC39 Standard Decorators
 
 Standard decorators work out of the box — just use them in your code. No configuration, no extra packages.
+
+> **Note:** Legacy decorator metadata (`experimentalDecorators` / `emitDecoratorMetadata`) is no longer supported. Migrate to TC39 standard decorators.
 
 ```jsonc
 {
