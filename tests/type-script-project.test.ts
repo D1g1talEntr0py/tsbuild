@@ -240,20 +240,6 @@ describe('TypeScriptProject', () => {
 			await expect(access(join(dir, 'dist/beta.js'))).resolves.toBeUndefined();
 		});
 
-		it('sets exit code when emitDecoratorMetadata is enabled without @swc/core', async () => {
-			const { dir, cleanup: c } = await TestHelper.createTempProject({
-				files: { 'src/index.ts': 'export const x = 1;' },
-				tsconfig: { compilerOptions: { emitDecoratorMetadata: true, experimentalDecorators: true, declaration: false }, tsbuild: { clean: false } }
-			});
-			cleanup = c;
-
-			const project = new TypeScriptProject(dir);
-			await project.build();
-			project.close();
-
-			expect(process.exitCode).toBe(1);
-		});
-
 		it('expands ${process.env.*} references in env values', async () => {
 			process.env['TSBUILD_TEST_TOKEN'] = 'expanded-secret';
 			const { dir, cleanup: c } = await TestHelper.createTempProject({

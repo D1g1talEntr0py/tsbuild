@@ -42,7 +42,6 @@ function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOption
 		iife: buildConfig.iife,
 		declaration: compilerOptions.declaration,
 		emitDeclarationOnly: compilerOptions.emitDeclarationOnly,
-		emitDecoratorMetadata: compilerOptions.emitDecoratorMetadata,
 		bundle: buildConfig.bundle,
 		splitting: buildConfig.splitting,
 		format,
@@ -341,16 +340,6 @@ export class TypeScriptProject implements Closable {
 			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths, noExternal: this.#buildConfiguration.noExternal }));
 		}
 
-		// Lazy-load the SWC decorator metadata plugin only when needed for legacy decorator support. Not needed for stage 3 decorators
-		if (this.#configuration.compilerOptions.emitDecoratorMetadata) {
-			try {
-				const { swcDecoratorMetadataPlugin } = await import('./plugins/decorator-metadata.js');
-				plugins.push(swcDecoratorMetadataPlugin);
-			} catch {
-				throw new ConfigurationError('emitDecoratorMetadata is enabled but @swc/core is not installed. Install it with: pnpm add -D @swc/core');
-			}
-		}
-
 		if (this.#buildConfiguration.plugins?.length) { plugins.push(...await resolvePlugins(this.#buildConfiguration.plugins, this.#directory)) }
 
 		// Prepare environment variable definitions as import.meta.env.* definitions
@@ -377,7 +366,6 @@ export class TypeScriptProject implements Closable {
 				tsconfigRaw: {
 					compilerOptions: {
 						alwaysStrict: this.#configuration.compilerOptions.alwaysStrict,
-						experimentalDecorators: this.#configuration.compilerOptions.experimentalDecorators,
 						jsx: toJsxRenderingMode(this.#configuration.compilerOptions.jsx),
 						jsxFactory: this.#configuration.compilerOptions.jsxFactory,
 						jsxFragmentFactory: this.#configuration.compilerOptions.jsxFragmentFactory,
