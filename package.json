@@ -45,22 +45,23 @@
     "tsbuild": "./dist/tsbuild.js"
   },
   "scripts": {
-    "build": "node --experimental-strip-types ./scripts/loader.ts ./src/tsbuild.ts",
-    "build:watch": "node --experimental-strip-types ./scripts/loader.ts ./src/tsbuild.ts --watch",
-    "bench": "node --experimental-strip-types ./scripts/loader.ts ./tests/scripts/benchmark.ts",
-    "type-check": "node --experimental-strip-types ./scripts/loader.ts ./src/tsbuild.ts --noEmit",
-    "lint": "eslint ./src",
+    "build": "tsnode ./src/tsbuild.ts",
+    "build:watch": "tsnode ./src/tsbuild.ts --watch",
+    "bench": "node ./tests/scripts/benchmark.ts",
+    "type-check": "tsnode ./src/tsbuild.ts --noEmit",
+    "lint": "eslint --flag unstable_native_nodejs_ts_config ./src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:compat": "node --experimental-strip-types ./scripts/loader.ts tests/scripts/test-ts-compat.ts --versions 5"
+    "test:compat": "node tests/scripts/test-ts-compat.ts --versions 5"
   },
   "dependencies": {
-    "@d1g1tal/watchr": "^1.0.6",
+    "@d1g1tal/watchr": "^1.0.7",
     "esbuild": "^0.28.1",
     "magic-string": "^0.30.21"
   },
   "devDependencies": {
+    "@d1g1tal/tsnode": "^0.1.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.0.0",
     "@typescript-eslint/eslint-plugin": "^8.61.1",
