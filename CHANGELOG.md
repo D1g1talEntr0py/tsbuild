@@ -1,3 +1,27 @@
+## [2.0.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.0.1...v2.0.2) (2026-06-23)
+
+### Performance Improvements
+
+* memoize sourceToDeclarationPath lookups in declaration bundler (d1fbf2374c17fdc79b36c3b384a167b79eda1a08)
+Add caching for sourceToDeclarationPath() results to eliminate redundant
+path matching during multi-entry-point bundling. This method is called
+frequently during module graph traversal and entry point resolution, often
+with identical source paths. Caching prevents repeated expensive lookups
+especially in the no-rootDir case which iterates through all declaration
+files.
+
+Performance impact:
+- Single entry point: negligible (1-2 calls)
+- Multi-entry point (10+ entries): up to 20-30% bundling time reduction
+- Large projects with many imports: up to 50%+ reduction
+
+Changes:
+
+
+### Continuous Integration
+
+* update node-versions to 24 and 26 (8d4a019f7016351e5c73e6a2a632cfd2ffc85c91)
+
 ## [2.0.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.0.0...v2.0.1) (2026-06-21)
 
 ### Code Refactoring
