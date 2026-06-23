@@ -188,7 +188,7 @@ class DeclarationBundler {
 	/**
 	 * Convert a source file path to its corresponding declaration file path
 	 * @param sourcePath - Absolute path to a source file (.ts, .tsx)
-	 * @returns The corresponding .d.ts path, or undefined if not found
+	 * @returns The corresponding .d.ts path, or the original source path if no declaration exists
 	 */
 	#sourceToDeclarationPath(sourcePath: AbsolutePath): AbsolutePath {
 		// Check cache first to avoid redundant lookups during multi-entry-point bundling
