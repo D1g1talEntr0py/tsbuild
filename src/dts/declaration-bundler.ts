@@ -103,6 +103,8 @@ class DeclarationBundler {
 	readonly #sourceFileCache = new Map<AbsolutePath, SourceFile>();
 	/** Module resolution cache for this bundler instance */
 	readonly #moduleResolutionCache = new Map<string, AbsolutePath>();
+	/** Source-to-declaration path mapping cache to avoid redundant lookups during bundling */
+	readonly #sourceToDeclarationCache = new Map<AbsolutePath, AbsolutePath>();
 	/** Pre-computed set of directory prefixes from declaration file paths for O(1) directoryExists lookups */
 	readonly #declarationDirs: Set<string> = new Set();
 	/** Pre-built matcher for external patterns — O(1) string lookups + cached regex tests */
@@ -180,53 +182,63 @@ class DeclarationBundler {
 		this.#externalDeclarationFiles.clear();
 		this.#moduleResolutionCache.clear();
 		this.#sourceFileCache.clear();
+		this.#sourceToDeclarationCache.clear();
 	}
 
 	/**
 	 * Convert a source file path to its corresponding declaration file path
 	 * @param sourcePath - Absolute path to a source file (.ts, .tsx)
-	 * @returns The corresponding .d.ts path, or undefined if not found
+	 * @returns The corresponding .d.ts path, or the original source path if no declaration exists
 	 */
 	#sourceToDeclarationPath(sourcePath: AbsolutePath): AbsolutePath {
+		// Check cache first to avoid redundant lookups during multi-entry-point bundling
+		const cached = this.#sourceToDeclarationCache.get(sourcePath);
+		if (cached !== undefined) { return cached }
+
 		const { outDir, rootDir } = this.#options.compilerOptions;
 		const sourceWithoutExt = sourcePath.substring(0, sourcePath.lastIndexOf('.') || sourcePath.length);
 
+		let result: AbsolutePath;
 		if (rootDir) {
 			// With explicit rootDir, calculate relative path and append to outDir
 			// posix.normalize is required because TypeScript internally uses POSIX-style forward slashes
 			// for module resolution paths regardless of the host platform
 			const dtsPath = posix.normalize(Paths.join(outDir, Paths.relative(rootDir, sourceWithoutExt) + FileExtension.DTS)) as AbsolutePath;
-			return this.#declarationFiles.has(dtsPath) ? dtsPath : sourcePath;
-		}
+			result = this.#declarationFiles.has(dtsPath) ? dtsPath : sourcePath;
+		} else {
+			// Without rootDir, find .d.ts file by stripping outDir and matching the suffix
+			// TypeScript preserves directory structure, so /path/to/project/src/foo/bar.ts
+			// becomes /path/to/project/dist/foo/bar.d.ts
+			// We can match by checking if they share the same relative path structure
+			// When multiple paths match (e.g. stale cache entries from old builds with different rootDir),
+			// prefer the shortest relative path — TypeScript strips rootDir from output paths, so the
+			// correct current path is always at least as short as any stale path from a shallower rootDir.
+			let bestMatch: AbsolutePath | undefined;
+			let bestRelativeLength = Infinity;
 
-		// Without rootDir, find .d.ts file by stripping outDir and matching the suffix
-		// TypeScript preserves directory structure, so /path/to/project/src/foo/bar.ts
-		// becomes /path/to/project/dist/foo/bar.d.ts
-		// We can match by checking if they share the same relative path structure
-		// When multiple paths match (e.g. stale cache entries from old builds with different rootDir),
-		// prefer the shortest relative path — TypeScript strips rootDir from output paths, so the
-		// correct current path is always at least as short as any stale path from a shallower rootDir.
-		let bestMatch: AbsolutePath | undefined;
-		let bestRelativeLength = Infinity;
+			for (const dtsPath of this.#declarationFiles.keys()) {
+				if (!dtsPath.endsWith(FileExtension.DTS)) { continue }
 
-		for (const dtsPath of this.#declarationFiles.keys()) {
-			if (!dtsPath.endsWith(FileExtension.DTS)) { continue }
+				// Strip outDir prefix from declaration path: /path/to/project/dist/foo/bar.d.ts -> foo/bar.d.ts
+				const withoutOutDir = dtsPath.startsWith(outDir + '/') ? dtsPath.slice(outDir.length + 1) : dtsPath;
 
-			// Strip outDir prefix from declaration path: /path/to/project/dist/foo/bar.d.ts -> foo/bar.d.ts
-			const withoutOutDir = dtsPath.startsWith(outDir + '/') ? dtsPath.slice(outDir.length + 1) : dtsPath;
+				// Remove .d.ts extension to get relative path: foo/bar.d.ts -> foo/bar
+				const relativeDtsPath = withoutOutDir.slice(0, -FileExtension.DTS.length);
 
-			// Remove .d.ts extension to get relative path: foo/bar.d.ts -> foo/bar
-			const relativeDtsPath = withoutOutDir.slice(0, -FileExtension.DTS.length);
-
-			// Check if source path ends with the same relative path structure
-			// Ensure it's a complete path segment match by checking for '/' before the match
-			if ((sourceWithoutExt === relativeDtsPath || sourceWithoutExt.endsWith('/' + relativeDtsPath)) && relativeDtsPath.length < bestRelativeLength) {
-				bestRelativeLength = relativeDtsPath.length;
-				bestMatch = dtsPath;
+				// Check if source path ends with the same relative path structure
+				// Ensure it's a complete path segment match by checking for '/' before the match
+				if ((sourceWithoutExt === relativeDtsPath || sourceWithoutExt.endsWith('/' + relativeDtsPath)) && relativeDtsPath.length < bestRelativeLength) {
+					bestRelativeLength = relativeDtsPath.length;
+					bestMatch = dtsPath;
+				}
 			}
+
+			result = bestMatch ?? sourcePath;
 		}
 
-		return bestMatch ?? sourcePath;
+		// Cache the result for subsequent lookups
+		this.#sourceToDeclarationCache.set(sourcePath, result);
+		return result;
 	}
 
 	/**
