@@ -2,8 +2,8 @@
 
 [![npm version](https://img.shields.io/npm/v/@d1g1tal/tsbuild?color=blue)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
 [![npm downloads](https://img.shields.io/npm/dm/@d1g1tal/tsbuild)](https://www.npmjs.com/package/@d1g1tal/tsbuild)
-[![CI](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/build.yml/badge.svg)](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/build.yml)
-[![codecov](https://codecov.io/gh/D1g1talEntr0py/tsbuild/graph/badge.svg)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
+[![CI](https://img.shields.io/github/actions/workflow/status/D1g1talEntr0py/tsbuild/ci.yml?branch=main&label=CI)](https://github.com/D1g1talEntr0py/tsbuild/actions/workflows/ci.yml)
+[![codecov](https://img.shields.io/codecov/c/github/D1g1talEntr0py/tsbuild?branch=main&label=coverage)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
 [![License: MIT](https://img.shields.io/github/license/D1g1talEntr0py/tsbuild)](https://github.com/D1g1talEntr0py/tsbuild/blob/main/LICENSE)
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript->=5.6.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
