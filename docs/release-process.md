@@ -106,3 +106,8 @@ This requires `GITHUB_TOKEN` to be set in your environment (for reading tags/com
 **npm publish failed:**
 - Verify the `npm` environment exists in the repo's GitHub Settings → Environments.
 - Verify Trusted Publishing is configured on npmjs.com for this repo and the `publish.yml` workflow.
+
+**npm published, but GitHub Release is missing:**
+- Re-run the failed `Release` workflow run. The workflow now checks the latest tag and auto-creates a missing GitHub release.
+- If needed, manually trigger `Release` from the Actions tab (`workflow_dispatch`) to run the same recovery path.
+- If GitHub API is degraded, create the release manually from the existing tag (for example `vX.Y.Z`) and then re-run the workflow later.
