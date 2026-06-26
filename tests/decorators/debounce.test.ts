@@ -1,11 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { debounce } from 'src/decorators/debounce';
+import { debounce, debounceManager } from 'src/decorators/debounce';
 
 describe('debounce', () => {
 	beforeEach(() => { vi.useFakeTimers() });
 	afterEach(() => { vi.useRealTimers() });
 
 	describe('decorator behavior', () => {
+		it('initializes one debounced public method per instance', () => {
+			const debounceSpy = vi.spyOn(debounceManager, 'debounce');
+
+			class Counter {
+				count = 0;
+
+				@debounce(100)
+				increment() { this.count++ }
+			}
+
+			const first = new Counter();
+			const second = new Counter();
+
+			expect(debounceSpy).toHaveBeenCalledTimes(2);
+
+			first.increment();
+			first.increment();
+			second.increment();
+
+			expect(debounceSpy).toHaveBeenCalledTimes(2);
+
+			debounceSpy.mockRestore();
+		});
+
 		it('delays method execution until wait expires', async () => {
 			class Counter {
 				count = 0;
@@ -209,6 +233,83 @@ describe('debounce', () => {
 			await vi.advanceTimersByTimeAsync(0);
 
 			expect(instance.count).toBe(0);
+		});
+	});
+
+	describe('private method support', () => {
+		it('initializes one debounced private method per instance', () => {
+			const debounceSpy = vi.spyOn(debounceManager, 'debounce');
+
+			class Counter {
+				#count = 0;
+
+				@debounce(100)
+				#increment() { this.#count++ }
+
+				trigger() { void this.#increment() }
+			}
+
+			const first = new Counter();
+			const second = new Counter();
+
+			expect(debounceSpy).toHaveBeenCalledTimes(2);
+
+			first.trigger();
+			first.trigger();
+			second.trigger();
+
+			expect(debounceSpy).toHaveBeenCalledTimes(2);
+
+			debounceSpy.mockRestore();
+		});
+
+		it('debounces a private method correctly', async () => {
+			class Counter {
+				#count = 0;
+
+				@debounce(100)
+				#increment() { this.#count++ }
+
+				trigger() { void this.#increment() }
+				get count() { return this.#count }
+			}
+
+			const instance = new Counter();
+			instance.trigger();
+			instance.trigger();
+			instance.trigger();
+
+			expect(instance.count).toBe(0);
+
+			vi.advanceTimersByTime(100);
+			await Promise.resolve();
+
+			expect(instance.count).toBe(1);
+		});
+
+		it('maintains independent state per instance', async () => {
+			class Counter {
+				#count = 0;
+
+				@debounce(100)
+				#increment() { this.#count++ }
+
+				trigger() { void this.#increment() }
+				get count() { return this.#count }
+			}
+
+			const a = new Counter();
+			const b = new Counter();
+
+			a.trigger();
+			b.trigger();
+			b.trigger();
+
+			vi.advanceTimersByTime(100);
+			await Promise.resolve();
+
+			expect(a.count).toBe(1);
+			expect(b.count).toBe(1);
 		});
 	});
 });

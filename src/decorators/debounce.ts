@@ -53,13 +53,14 @@ class DebounceManager implements Closable {
 	}
 
 	/** Closes the manager by clearing all active timers. */
-	close() {
+	close(): void {
 		for (const timer of DebounceManager.#timers) { clearTimeout(timer) }
 		DebounceManager.#timers.clear();
 	}
 }
 
-const debounceManager = new DebounceManager();
+const debounceManager: DebounceManager = new DebounceManager();
+export { debounceManager };
 
 /**
  * Debounces an async method. Can only be applied to methods that return a Promise.
@@ -71,10 +72,27 @@ export function debounce(wait: number) {
 	if (wait < 0) { throw new Error('🚨 wait must be non-negative.') }
 
 	return function(targetMethod: MethodFunction, context: ClassMethodDecoratorContext): MethodFunction {
-		context.addInitializer(function() {
-			Object.defineProperty(this, context.name, { writable: true, configurable: true, value: debounceManager.debounce(targetMethod.bind(this), wait) });
+		if (!context.private) {
+			context.addInitializer(function(this: ThisParameterType<MethodFunction>) {
+				Object.defineProperty(this, context.name, { writable: true, configurable: true, value: debounceManager.debounce(targetMethod.bind(this), wait) });
+			});
+
+			return targetMethod;
+		}
+
+		type DebouncedMethod = (...args: unknown[]) => Promise<unknown>;
+		const debouncedMethodKey = Symbol(String(context.name));
+		const createDebouncedMethod = (instance: object): DebouncedMethod => debounceManager.debounce((...args: unknown[]) => targetMethod.apply(instance, args) as unknown, wait) as DebouncedMethod;
+		context.addInitializer(function(this: ThisParameterType<MethodFunction>) {
+			Object.defineProperty(this, debouncedMethodKey, { configurable: true, value: createDebouncedMethod(this as object) });
 		});
 
-		return targetMethod;
+		return function(this: ThisParameterType<MethodFunction>, ...args: unknown[]) {
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+			const debouncedMethod = this[debouncedMethodKey] as DebouncedMethod | undefined;
+			if (debouncedMethod === undefined) { throw new Error('🚨 Debounced private method was not initialized.') }
+
+			return debouncedMethod(...args);
+		};
 	};
 }
