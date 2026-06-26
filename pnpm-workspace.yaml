@@ -1,5 +1,4 @@
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@d1g1tal/tsnode@0.1.0'
-  - '@d1g1tal/watchr@1.0.7'
+  - '@d1g1tal/watchr@1.1.1'
