@@ -21,7 +21,6 @@ export default defineConfig({ ignores: [ 'node_modules/**', 'tests/**', 'dist/**
 			parserOptions: {
 				ecmaFeatures: {	impliedStrict: true	}
 			},
-			tsconfigRootDir: import.meta.dirname,
 			allowAutomaticSingleRunInference: true,
 			warnOnUnsupportedTypeScriptVersion: false
 		}

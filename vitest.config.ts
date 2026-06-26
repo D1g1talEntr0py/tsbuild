@@ -33,8 +33,7 @@ export default defineConfig({
       include: [ 'src/**/*.ts' ],
       // src/tsbuild.ts is tested (see tests/tsbuild.test.ts) but excluded because
       // Rolldown (coverage-v8 source-map pass) cannot parse TypeScript's `import type` syntax.
-      // src/plugins/decorator-metadata.ts: SWC/legacy decorator removal is pending; no test until then.
-      exclude: [ 'src/index.ts', 'src/tsbuild.ts', 'src/dts/index.ts', 'src/dts/@types', 'src/@types', 'src/plugins/decorator-metadata.ts' ]
+      exclude: [ 'src/index.ts', 'src/tsbuild.ts', 'src/dts/index.ts', 'src/dts/@types', 'src/@types' ]
     }
   }
 });
