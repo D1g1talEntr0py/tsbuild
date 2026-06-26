@@ -87,6 +87,56 @@ describe('TypeScriptProject - Watch Mode', () => {
 		expect(process.exitCode).toBeUndefined();
 	});
 
+	it('keeps only the latest same-path change while async hashing is in flight', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version = 1;' },
+			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir);
+		await project.build();
+
+		await new Promise<void>(resolve => setImmediate(resolve));
+
+		await writeFile(join(dir, 'src/index.ts'), 'export const version = 2;');
+		await new Promise(resolve => setTimeout(resolve, 25));
+		await writeFile(join(dir, 'src/index.ts'), 'export const version = 3;');
+
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('version = 3') || output.includes('version=3')).toBe(true);
+			expect(process.exitCode).toBeUndefined();
+		}, { timeout: 7_500, interval: 100 });
+	});
+
+	it('drains watcher changes queued during async content hashing', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export { value } from "./value.js";',
+				'src/value.ts': 'export const value = 1;'
+			},
+			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir);
+		await project.build();
+
+		await new Promise<void>(resolve => setImmediate(resolve));
+
+		await writeFile(join(dir, 'src/value.ts'), 'export const value = 2;');
+		await new Promise(resolve => setTimeout(resolve, 25));
+		await writeFile(join(dir, 'src/index.ts'), 'export { value } from "./value.js"; export const version = 2;');
+
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('value = 2') || output.includes('value=2')).toBe(true);
+			expect(output.includes('version = 2') || output.includes('version=2')).toBe(true);
+			expect(process.exitCode).toBeUndefined();
+		}, { timeout: 7_500, interval: 100 });
+	});
+
 	it('runs manifest-driven cleanup across watch rebuilds', { timeout: 20_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },

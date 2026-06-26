@@ -17,6 +17,7 @@ import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
 import { inferEntryPoints, type PackageJson } from './entry-points';
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
@@ -28,6 +29,11 @@ const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
 const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
 const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
 const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
+const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string => `${event}:${path}`;
+
+type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
+type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
+type QueuedPendingChange = PendingFileChange & { version: number };
 
 /**
  * Computes a deterministic fingerprint of the build configuration.
@@ -66,7 +72,10 @@ export class TypeScriptProject implements Closable {
 	readonly #configuration: TypeScriptConfiguration;
 	readonly #fileManager: FileManager;
 	readonly #buildConfiguration: ProjectBuildConfiguration;
-	readonly #pendingChanges: PendingFileChange[] = [];
+	readonly #pendingChanges: Map<string, QueuedPendingChange> = new Map();
+	readonly #pendingChangeStats: Map<AbsolutePath, ContentChangeSnapshot> = new Map();
+	readonly #pendingChangeVersions: Map<AbsolutePath, number> = new Map();
+	readonly #contentStates: Map<AbsolutePath, ContentChangeState> = new Map();
 	readonly #buildDependencies: Set<RelativePath> = new Set();
 	#pendingStaleOutputsCleanup?: Promise<void>;
 	/** Identity of the Program that populated buildDependencies — skip re-walking when unchanged */
@@ -426,7 +435,6 @@ export class TypeScriptProject implements Closable {
 	 */
 	async #watch() {
 		const { Watchr } = await import('@d1g1tal/watchr');
-
 		const targets: AbsolutePath[] = [];
 
 		for (const path of this.#configuration.include ?? [ defaultSourceDirectory ]) {
@@ -439,7 +447,14 @@ export class TypeScriptProject implements Closable {
 			// In type-check-only mode, we need to rebuild for ANY source file change since imported files
 			// aren't in buildDependencies. In transpile mode, buildDependencies tracks esbuild inputs.
 			if (this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(Paths.relative(this.#directory, path))) {
-				this.#pendingChanges.push({ event, path: path as AbsolutePath, nextPath: nextPath as AbsolutePath });
+				const absolutePath = path as AbsolutePath;
+				const version = (this.#pendingChangeVersions.get(absolutePath) ?? 0) + 1;
+				this.#pendingChangeVersions.set(absolutePath, version);
+				this.#pendingChangeStats.set(absolutePath, { size: stats.size, modifiedTimeMs: stats.modifiedTimeMs });
+				// Deduplicate: the OS can fire multiple events for a single save (e.g. rename + close_write)
+				// arriving in separate Watchr flush batches. Keep one queued (path, event) pair,
+				// but refresh its metadata so change filtering sees the latest file state.
+				this.#pendingChanges.set(pendingChangeKey(event, absolutePath), { event, path: absolutePath, nextPath: nextPath as AbsolutePath, version });
 				void this.#triggerRebuild();
 			}
 		};
@@ -457,8 +472,11 @@ export class TypeScriptProject implements Closable {
 		this.#fileManager.close();
 		this.#pendingStaleOutputsCleanup = undefined;
 		this.#buildDependencies.clear();
+		this.#pendingChangeStats.clear();
+		this.#pendingChangeVersions.clear();
+		this.#contentStates.clear();
 		this.#buildDependenciesProgram = undefined;
-		this.#pendingChanges.length = 0;
+		this.#pendingChanges.clear();
 	}
 
 	/**
@@ -490,24 +508,38 @@ export class TypeScriptProject implements Closable {
 		});
 	}
 
-	/**
-	 * Triggers a rebuild after debouncing.
-	 */
+	/** Triggers a rebuild after debouncing. */
 	@debounce(100)
 	async #triggerRebuild() {
-		if (this.#pendingChanges.length === 0) { return }
+		if (this.#pendingChanges.size === 0) { return }
+
+		const pendingFileChanges: QueuedPendingChange[] = [];
+		while (this.#pendingChanges.size > 0) {
+			const queuedChanges = [ ...this.#pendingChanges.values() ];
+			this.#pendingChanges.clear();
+			for (const change of queuedChanges) {
+				if (await this.#isContentModified(change)) { pendingFileChanges.push(change) }
+			}
+		}
+
+		if (pendingFileChanges.length === 0) { return }
 
 		Logger.clear();
-		Logger.info(`Rebuilding project: ${this.#pendingChanges.length} file changes detected.`);
+		Logger.info(`Rebuilding project: ${pendingFileChanges.length} file changes detected.`);
 
 		const rootNames = [ ...this.#builderProgram.getProgram().getRootFileNames() ];
 
 		// Apply all pending changes
-		for (const { event, path, nextPath } of this.#pendingChanges) {
+		for (const { event, path, nextPath } of pendingFileChanges) {
 			// If a file or directory is renamed, update the path in the dependencies set
 			if (nextPath !== undefined && (event === 'rename' || event === 'renameDir')) {
 				this.#buildDependencies.delete(Paths.relative(this.#directory, path));
 				this.#buildDependencies.add(Paths.relative(this.#directory, nextPath));
+				const previousState = this.#contentStates.get(path);
+				if (previousState !== undefined) {
+					this.#contentStates.delete(path);
+					this.#contentStates.set(nextPath, previousState);
+				}
 
 				// If a root file was renamed, update it in the root names array
 				const index = rootNames.indexOf(path);
@@ -517,13 +549,12 @@ export class TypeScriptProject implements Closable {
 				const index = rootNames.indexOf(path);
 				if (event === 'unlink' && index !== -1) {
 					rootNames.splice(index, 1);
+					this.#contentStates.delete(path);
 				} else if (event === 'add' && index === -1) {
 					rootNames.push(path);
 				}
 			}
 		}
-
-		this.#pendingChanges.length = 0;
 
 		// Ensure the previous build's .tsbuildinfo write has settled before TypeScript reads it
 		// during createIncrementalProgram(). persistCache() defers that write off the critical
@@ -535,6 +566,40 @@ export class TypeScriptProject implements Closable {
 
 		// build() handles its own errors - no need to catch here
 		await this.build();
+	}
+
+	/**
+	 * Returns true when a pending watcher event reflects a meaningful source content change.
+	 * File-system level churn that doesn't alter bytes (e.g. no-op save metadata updates)
+	 * is ignored for plain "change" events to avoid unnecessary rebuilds.
+	 * @param change - The pending file change event
+	 * @returns True if the change is meaningful, false otherwise
+	 */
+	async #isContentModified(change: QueuedPendingChange): Promise<boolean> {
+		const { event, path, nextPath, version } = change;
+		if (nextPath !== undefined || event !== 'change') { return true }
+
+		try {
+			if (this.#pendingChangeVersions.get(path) !== version) { return false }
+
+			const stats = this.#pendingChangeStats.get(path);
+			const previousState = this.#contentStates.get(path);
+			if (stats?.size !== undefined && stats.modifiedTimeMs !== undefined && previousState?.stats?.size === stats.size && previousState.stats.modifiedTimeMs === stats.modifiedTimeMs) {
+				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+				return false;
+			}
+
+			const digest = createHash('sha1').update(await Files.read(path)).digest('hex');
+			if (this.#pendingChangeVersions.get(path) !== version) { return false }
+
+			this.#contentStates.set(path, { digest, stats });
+			this.#pendingChangeStats.delete(path);
+
+			return previousState === undefined || previousState.digest !== digest;
+		} catch {
+			if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+			return true;
+		}
 	}
 
 	/**
