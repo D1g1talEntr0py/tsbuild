@@ -625,16 +625,12 @@ class DeclarationBundler {
 
 		// Value exports take precedence - remove any types that are also values
 		const finalValueExportsSet = new Set<string>();
-		for (const name of valueExports) {
-			finalValueExportsSet.add(exportsMapper(name));
-		}
+		for (const name of valueExports) { finalValueExportsSet.add(exportsMapper(name)) }
 
 		const finalTypeExports: string[] = [];
 		for (const type of typeExports) {
 			const mapped = exportsMapper(type);
-			if (!finalValueExportsSet.has(mapped)) {
-				finalTypeExports.push(mapped);
-			}
+			if (!finalValueExportsSet.has(mapped)) { finalTypeExports.push(mapped) }
 		}
 
 		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: Array.from(finalValueExportsSet) };
@@ -713,7 +709,10 @@ class DeclarationBundler {
 			if (!path.includes(nodeModules)) {
 				for (const exp of valueExports) { valueExportsSet.add(exp) }
 				for (const exp of typeExports) {
-					if (!typeExportsSeen.has(exp)) { typeExportsSeen.add(exp); orderedTypeExports.push(exp) }
+					if (!typeExportsSeen.has(exp)) {
+						typeExportsSeen.add(exp);
+						orderedTypeExports.push(exp);
+					}
 				}
 
 				// Collect ALL declarations from project modules (exported or not).

@@ -1,7 +1,7 @@
 import { Files } from './files';
 import { Paths } from './paths';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { cacheDirectory, defaultCleanOptions, defaultDirOptions, dtsCacheFile, dtsCacheVersion as version, outputManifestFile } from './constants';
 import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration } from './@types';
 
@@ -47,21 +47,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 		// Capture the manifest synchronously so it survives invalidate() and downstream code can
 		// read it without awaiting. The file is small (a JSON array of paths) so sync I/O is fine.
 		this.#outputsSnapshot = IncrementalBuildCache.#loadOutputsSync(this.#outputsManifestPath);
-	}
-
-	/**
-	 * Loads the cache file asynchronously using V8 deserialization.
-	 * The cache filename is version-stamped, so a present file is always structurally compatible —
-	 * a stale cache from an older format simply has a different filename and is never read.
-	 * @returns The cache, or undefined if the cache doesn't exist or couldn't be read.
-	 */
-	async #loadCache() {
-		try {
-			return await Files.readCompressed<BuildCache>(this.#cacheFilePath);
-		} catch {
-			// Cache doesn't exist or couldn't be read - this is fine for first build
-			return undefined;
-		}
 	}
 
 	/**
@@ -209,6 +194,21 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	hasPersistedManifest(): boolean {
 		return this.#outputsSnapshot !== undefined;
+	}
+
+	/**
+	 * Loads the cache file asynchronously using V8 deserialization.
+	 * The cache filename is version-stamped, so a present file is always structurally compatible —
+	 * a stale cache from an older format simply has a different filename and is never read.
+	 * @returns The cache, or undefined if the cache doesn't exist or couldn't be read.
+	 */
+	async #loadCache() {
+		try {
+			return await Files.readCompressed<BuildCache>(this.#cacheFilePath);
+		} catch {
+			// Cache doesn't exist or couldn't be read - this is fine for first build
+			return undefined;
+		}
 	}
 
 	/**
