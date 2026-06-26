@@ -1,3 +1,28 @@
+## [2.1.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.0.2...v2.1.0) (2026-06-26)
+
+### Features
+
+* **decorators:** support applying debounce to private class methods (0973fa95f36d461ae8f3fda3bc9fe74f27a1e907)
+* **watch:** ignore metadata-only modifications during file watching (22308753dbb40d8641cda95387224f4616cf7c72)
+
+### Code Refactoring
+
+* simplify loops and organize internal module layout (750dfd90e40f2b78812eaf6db1c0b61a462cfaa5)
+
+### Documentation
+
+* fix badges to use shields.io to prevent out dated and misleading information (8d78acecf931d3517a1ef542afe15e5ffb3bf486)
+* updated README.md CI badge to show the correct status (1a3599bd958e82b26f25e745462cef5e08673956)
+
+### Miscellaneous Chores
+
+* clean up ESLint and Vitest configurations (d0478a23c0aa3e0f0957950f81388c52197a5a7a)
+
+### Build System
+
+* **deps:** upgrade dynamic watcher and lint tooling packages (c9656b649824a84c4b903632216ea39d294674e7)
+* **release:** add logic to handle the situation where GitHub refuses to create a release after publishing to npm (c967188b8c10586cddcfef462bde0bb2128fe379)
+
 ## [2.0.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.0.1...v2.0.2) (2026-06-23)
 
 ### Performance Improvements
