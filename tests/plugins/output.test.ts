@@ -124,4 +124,52 @@ describe('outputPlugin', () => {
 			await onEndCallback({} as BuildResult);
 		});
 	});
+
+	describe('specifier rewriting', () => {
+		it('adds .js to extension-less relative from/side-effect/dynamic imports', async () => {
+			const filePath = join(outputDir, 'index.js');
+			await memfs.promises.writeFile(filePath,
+				'import { a } from "./dep";\n' +
+				'export { b } from "../pkg/item";\n' +
+				'import "./setup";\n' +
+				'const m = await import("./lazy/module");\n'
+			);
+
+			await onEndCallback(metafileWith({ [filePath]: { entryPoint: 'src/index.ts' } }) as BuildResult);
+
+			const rewritten = await memfs.promises.readFile(filePath, 'utf8');
+			expect(rewritten).toContain('from "./dep.js"');
+			expect(rewritten).toContain('from "../pkg/item.js"');
+			expect(rewritten).toContain('import "./setup.js"');
+			expect(rewritten).toContain('import("./lazy/module.js")');
+		});
+
+		it('does not rewrite bare specifiers or already-extended relative specifiers', async () => {
+			const filePath = join(outputDir, 'index.js');
+			await memfs.promises.writeFile(filePath,
+				'import { a } from "pkg";\n' +
+				'import { b } from "./dep.js";\n' +
+				'import { c } from "./style.css";\n' +
+				'const d = await import("./chunk.mjs");\n'
+			);
+
+			await onEndCallback(metafileWith({ [filePath]: { entryPoint: 'src/index.ts' } }) as BuildResult);
+
+			const rewritten = await memfs.promises.readFile(filePath, 'utf8');
+			expect(rewritten).toContain('from "pkg"');
+			expect(rewritten).toContain('from "./dep.js"');
+			expect(rewritten).toContain('from "./style.css"');
+			expect(rewritten).toContain('import("./chunk.mjs")');
+		});
+
+		it('rewrites chunk outputs too', async () => {
+			const chunkPath = join(outputDir, 'ABC123.js');
+			await memfs.promises.writeFile(chunkPath, 'import { x } from "./shared";\n');
+
+			await onEndCallback(metafileWith({ [chunkPath]: {} }) as BuildResult);
+
+			const rewritten = await memfs.promises.readFile(chunkPath, 'utf8');
+			expect(rewritten).toContain('from "./shared.js"');
+		});
+	});
 });
