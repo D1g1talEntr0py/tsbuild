@@ -1,3 +1,6 @@
+## [2.2.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.0...v2.2.1) (2026-07-29)
+* resolved bug where the .js extension was not being added to the output when bundle was false (72174601e312d47f839bbdd36888c042c51adfb2)
+
 ## [2.2.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.1.0...v2.2.0) (2026-07-29)
 * enhance TypeScript project build process and add new features (d50a24aee7b0188072f9d2da49edeb7a360bcbdd)
 - Refactor build planning logic into a separate method for clarity and maintainability.
