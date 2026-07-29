@@ -84,11 +84,4 @@ type ModuleDependencyGraph = {
 	readonly bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
-/** Bundled declaration with exports and all declarations */
-type BundledDeclaration = {
-	code: string;
-	exports: string[];
-	allDeclarations: Set<string>;
-};
-
-export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, DeclarationCode, ExternalImport, ModuleDependencyGraph, BundledDeclaration };
+export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, DeclarationCode, ExternalImport, ModuleDependencyGraph };

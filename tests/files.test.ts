@@ -85,6 +85,20 @@ describe('Files', () => {
 			expect(vol.readFileSync('/output/file.txt', 'utf8')).toBe('hello world');
 		});
 
+		it('reuses an already ensured directory for repeated writes', async () => {
+			const fsp = await import('node:fs/promises');
+			const mkdirSpy = vi.spyOn(fsp, 'mkdir');
+			const directory = `/cached-${Date.now().toString(36)}`;
+
+			await Files.write(`${directory}/first.txt` as Path, 'one');
+			await Files.write(`${directory}/second.txt` as Path, 'two');
+
+			expect(vol.readFileSync(`${directory}/first.txt`, 'utf8')).toBe('one');
+			expect(vol.readFileSync(`${directory}/second.txt`, 'utf8')).toBe('two');
+			expect(mkdirSpy.mock.calls.filter(([path]) => path === directory).length).toBe(1);
+			mkdirSpy.mockRestore();
+		});
+
 		it('creates parent directories if they do not exist', async () => {
 			vol.mkdirSync('/', { recursive: true });
 			await Files.write('/deep/nested/dir/file.txt' as Path, 'data');

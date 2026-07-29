@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { sys } from 'typescript';
 import { parseArgs } from 'node:util';
 import { BuildError } from './errors';
 import type { TypeScriptOptions } from './@types';
@@ -9,7 +8,7 @@ const options = {
 	version: { type: 'boolean', default: undefined, short: 'v', description: 'Show version number' },
 	force: { type: 'boolean', default: false, short: 'f', description: 'Force a full rebuild' },
 	watch: { type: 'boolean', default: false, short: 'w', description: 'Watch for changes and rebuild' },
-	project: { type: 'string', default: sys.getCurrentDirectory(), short: 'p', description: 'Project directory (defaults to current directory)' },
+	project: { type: 'string', default: process.cwd(), short: 'p', description: 'Project directory (defaults to current directory)' },
 	noEmit: { type: 'boolean', default: undefined, short: 'n', description: 'Do not emit output files' },
 	clearCache: { type: 'boolean', default: false, short: 'c', description: 'Clear the cache before the build' },
 	minify: { type: 'boolean', default: undefined, short: 'm', description: 'Minify the output' }

@@ -1,8 +1,9 @@
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';
 import { processManager } from '../../src/process-manager';
+import { Files } from '../../src/files';
 import { TestHelper } from '../scripts/test-helper';
 
 // When a watched path is removed (tmpdir cleanup after close(), or a rebuild's directory
@@ -17,6 +18,7 @@ vi.mock('@d1g1tal/watchr', async (importOriginal) => {
 		constructor(...args: ConstructorParameters<typeof actual.Watchr>) {
 			super(...args);
 			this.on('error', () => {});
+			watchCallback = args[2] as ((event: string, stats: { size: number; modifiedTimeMs: number }, path: string, nextPath?: string) => void) | undefined;
 
 			const self = this as unknown as { watchPath: (...args: unknown[]) => Promise<unknown> };
 			const watchPath = self.watchPath.bind(self);
@@ -35,6 +37,7 @@ vi.mock('@d1g1tal/watchr', async (importOriginal) => {
 });
 
 const readUtf8 = (path: string): Promise<string> => readFile(path, 'utf8');
+let watchCallback: ((event: string, stats: { size: number; modifiedTimeMs: number }, path: string, nextPath?: string) => void) | undefined;
 
 describe('TypeScriptProject - Watch Mode', () => {
 	let cleanup: (() => Promise<void>) | undefined;
@@ -159,5 +162,64 @@ describe('TypeScriptProject - Watch Mode', () => {
 		}, { timeout: 8_500, interval: 100 });
 
 		expect(process.exitCode).toBeUndefined();
+	});
+
+	it('uses metadata fast path for size-changed events without hashing file contents', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const value = 1;' },
+			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir);
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		// First change seeds content state (digest + stats) for subsequent metadata fast-path checks.
+		await writeFile(join(dir, 'src/index.ts'), 'export const value = 2;');
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('value = 2') || output.includes('value=2')).toBe(true);
+		}, { timeout: 7_500, interval: 100 });
+
+		const readSpy = vi.spyOn(Files, 'read');
+
+		await writeFile(join(dir, 'src/index.ts'), 'export const value = 123456789;');
+
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('value = 123456789') || output.includes('value=123456789')).toBe(true);
+		}, { timeout: 7_500, interval: 100 });
+
+		expect(readSpy).not.toHaveBeenCalled();
+		readSpy.mockRestore();
+	});
+
+	it('keeps the latest queued stats snapshot when an older size-change event is processed first', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const value = 1;' },
+			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir);
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const filePath = join(dir, 'src/index.ts');
+		const initialStats = await stat(filePath);
+		const previousStats = { size: initialStats.size, modifiedTimeMs: initialStats.mtimeMs };
+		const readSpy = vi.spyOn(Files, 'read');
+		readSpy.mockClear();
+
+		watchCallback?.('change', { size: previousStats.size + 1, modifiedTimeMs: previousStats.modifiedTimeMs + 1 }, filePath);
+		watchCallback?.('change', previousStats, filePath);
+
+		await vi.waitFor(() => {
+			const targetedReads = readSpy.mock.calls.filter(([path]) => path === filePath);
+			expect(targetedReads).toHaveLength(0);
+		}, { timeout: 1_000, interval: 50 });
+
+		readSpy.mockRestore();
 	});
 });

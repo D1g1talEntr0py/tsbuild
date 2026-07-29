@@ -1,4 +1,5 @@
 import { Paths } from 'src/paths';
+import { createPatternMatcher } from 'src/pattern-matcher';
 import MagicString from 'magic-string';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, posix } from 'node:path';
@@ -30,8 +31,8 @@ import {
 	forEachChild
 } from 'typescript';
 import type { SourceFile, Node, StringLiteral, ModuleResolutionHost } from 'typescript';
-import type { AbsolutePath, CachedDeclaration, Pattern, WrittenFile } from 'src/@types';
-import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, BundledDeclaration, ExternalImport } from './@types';
+import type { AbsolutePath, CachedDeclaration, WrittenFile } from 'src/@types';
+import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, ExternalImport } from './@types';
 
 const nodeModules = '/node_modules/';
 const emptySet: ReadonlySet<string> = new Set();
@@ -170,8 +171,8 @@ class DeclarationBundler {
 		}
 
 		this.#options = dtsBundleOptions;
-		this.#matchExternal = DeclarationBundler.#buildMatcher(dtsBundleOptions.external);
-		this.#matchNoExternal = DeclarationBundler.#buildMatcher(dtsBundleOptions.noExternal);
+		this.#matchExternal = createPatternMatcher(dtsBundleOptions.external, { allowSubpaths: true });
+		this.#matchNoExternal = createPatternMatcher(dtsBundleOptions.noExternal, { allowSubpaths: true });
 	}
 
 	/**
@@ -239,28 +240,6 @@ class DeclarationBundler {
 		// Cache the result for subsequent lookups
 		this.#sourceToDeclarationCache.set(sourcePath, result);
 		return result;
-	}
-
-	/**
-	 * Builds an O(1) matcher from a mixed Pattern array by splitting into a Set<string> for
-	 * exact/sub-path checks and a RegExp[] for regex tests. Called once per bundler instance.
-	 * @param patterns - The array of string and RegExp patterns to match against module specifiers
-	 * @returns A function that takes a module specifier and returns true if it matches any of the patterns
-	 */
-	static #buildMatcher(patterns: readonly Pattern[]): (id: string) => boolean {
-		const exact = new Set<string>();
-		const prefixes: string[] = [];
-		const regexps: RegExp[] = [];
-		for (const p of patterns) {
-			if (typeof p === 'string') { exact.add(p); prefixes.push(p + '/') } else { regexps.push(p) }
-		}
-		if (exact.size === 0 && regexps.length === 0) { return () => false }
-		return (id: string): boolean => {
-			if (exact.has(id)) { return true }
-			for (let i = 0; i < prefixes.length; i++) { if (id.startsWith(prefixes[i])) { return true } }
-			for (let i = 0; i < regexps.length; i++) { if (regexps[i].test(id)) { return true } }
-			return false;
-		};
 	}
 
 	/**
@@ -642,7 +621,7 @@ class DeclarationBundler {
 	 * @param bundledSpecifiers - Map of module paths to their bundled import specifiers
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
-	#combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): BundledDeclaration {
+	#combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): string {
 		// Use Sets directly to deduplicate as we collect — avoids intermediate arrays + later `new Set(array)` round-trips
 		const typeReferencesSet = new Set<string>();
 		const fileReferencesSet = new Set<string>();
@@ -651,7 +630,6 @@ class DeclarationBundler {
 		const typeExportsSeen = new Set<string>();
 		const orderedTypeExports: string[] = []; // preserve first-seen order for stable output
 		const codeBlocks: string[] = [];
-		const allDeclarations = new Set<string>();
 
 		// Track declarations per module to detect conflicts and rename
 		const declarationSources = new Map<string, Set<string>>(); // identifier -> Set of module paths
@@ -714,11 +692,6 @@ class DeclarationBundler {
 						orderedTypeExports.push(exp);
 					}
 				}
-
-				// Collect ALL declarations from project modules (exported or not).
-				// These should be preserved during tree-shaking since TypeScript emitted them.
-				for (const name of types) { allDeclarations.add(name) }
-				for (const name of values) { allDeclarations.add(name) }
 			}
 
 			// Skip modules that only contain imports/exports (pure re-export files)
@@ -786,8 +759,7 @@ class DeclarationBundler {
 			}
 		}
 
-		// Return combined code with exports and all declarations from bundled modules
-		return { code: outputParts.join(newLine), exports: [...finalTypeExports, ...finalValueExports], allDeclarations };
+		return outputParts.join(newLine);
 	}
 
 	/**
@@ -805,8 +777,8 @@ class DeclarationBundler {
 		// Build the module dependency graph
 		const { modules, bundledSpecifiers } = this.#buildModuleGraph(dtsEntryPoint);
 
-		// Combine modules and collect exports and all declarations
-		const { code } = this.#combineModules(this.#sortModules(modules, dtsEntryPoint), bundledSpecifiers);
+		// Combine modules and collect exports
+		const code = this.#combineModules(this.#sortModules(modules, dtsEntryPoint), bundledSpecifiers);
 
 		// Post-process combined modules to fix any issues
 		// Tree-shaking is now done during combineModules

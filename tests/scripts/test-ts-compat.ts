@@ -42,8 +42,9 @@ if (values.target) {
 	}
 
 	// Query npm for all stable TypeScript versions
+	// TS 7+ ships an entirely new API; exclude until the legacy-compatible API is available (expected 7.1+)
 	const allVersions: string[] = JSON.parse(run('npm view typescript versions --json'));
-	const stable = allVersions.filter((v) => /^\d+\.\d+\.\d+$/.test(v));
+	const stable = allVersions.filter((v) => /^\d+\.\d+\.\d+$/.test(v) && Number(v.split('.')[0]) < 7);
 
 	// Deduplicate by major.minor, keeping the latest patch for each
 	const latestByMinor = new Map<string, string>();

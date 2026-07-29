@@ -49,15 +49,11 @@ export class ConfigurationError extends BuildError {
 /** Error thrown when encountering unsupported syntax during DTS processing */
 export class UnsupportedSyntaxError extends BundleError {
 	constructor(node: Node, message: string = 'Syntax not yet supported') {
-		const syntaxKindName = SyntaxKind[node.kind] ?? `Unknown(${node.kind})`;
-		const nodeText = node.getText ? node.getText().slice(0, 100) : '<no text>';
-		super(`${message}: ${syntaxKindName} - "${nodeText}"`);
+		super(`${message}: ${SyntaxKind[node.kind] ?? `Unknown(${node.kind})`} - "${node.getText ? node.getText().slice(0, 100) : '<no text>'}"`);
 		this.name = 'UnsupportedSyntaxError';
 	}
 }
 
 export const castError = (exception: unknown): Error => {
-	if (exception instanceof Error) { return exception }
-
-	return new Error(typeof exception === 'string' ? exception : 'Unknown error');
+	return exception instanceof Error ? exception : new Error(typeof exception === 'string' ? exception : 'Unknown error');
 };

@@ -3,18 +3,19 @@ import { serialize, deserialize } from 'node:v8';
 import { defaultCleanOptions, defaultDirOptions, Encoding } from 'src/constants';
 import { brotliDecompress, brotliCompress } from 'node:zlib';
 import { access, constants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import type { Stream } from 'node:stream';
 import type { WriteFileOptions } from 'node:fs';
 import type { AbsolutePath, Path } from 'src/@types';
 
-type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView> | Stream;
+type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView>;
 
 const windowsDrivePathRegex = /^[A-Za-z]:[\\/]/;
+const removalBatchSize = 32;
 
 /**
  * A class for handling file operations such as reading, writing, compressing, and decompressing files.
  */
 export class Files {
+	static readonly #ensuredDirectories = new Set<string>();
 	private constructor() { /* Static class - no instantiation */ }
 
 	/**
@@ -55,12 +56,11 @@ export class Files {
 
 		if (entries.length === 0) { return }
 
-		const removals = new Array<Promise<void>>(entries.length);
-		for (let i = 0, length = entries.length; i < length; i++) {
-			removals[i] = rm(join(directory, entries[i]), defaultCleanOptions);
+		// Keep removal concurrency bounded to avoid threadpool thrash on very large trees.
+		for (let i = 0; i < entries.length; i += removalBatchSize) {
+			const batch = entries.slice(i, i + removalBatchSize);
+			await Promise.all(batch.map((entry) => rm(join(directory, entry), defaultCleanOptions)));
 		}
-
-		await Promise.all(removals);
 	}
 
 	/**
@@ -71,9 +71,19 @@ export class Files {
 	 * @param options Optional write file options.
 	 */
 	static async write(filePath: Path | string, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }): Promise<void> {
-		// Ensure the directory exists before writing
-		await mkdir(dirname(filePath), defaultDirOptions);
-		await writeFile(filePath, data, options);
+		const directory = dirname(filePath);
+		await Files.#ensureDirectory(directory);
+
+		try {
+			await writeFile(filePath, data, options);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error }
+
+			// The directory may have been deleted after being cached; retry once after recreating it.
+			Files.#ensuredDirectories.delete(directory);
+			await Files.#ensureDirectory(directory);
+			await writeFile(filePath, data, options);
+		}
 	}
 
 	/**
@@ -147,7 +157,33 @@ export class Files {
 	 */
 	static async writeCompressed<T>(path: Path, data: T): Promise<void> {
 		const normalizedPath = this.normalizePath(path);
-		await mkdir(dirname(normalizedPath), defaultDirOptions);
-		await writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
+		const directory = dirname(normalizedPath);
+		await Files.#ensureDirectory(directory);
+
+		try {
+			await writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error }
+
+			Files.#ensuredDirectories.delete(directory);
+			await Files.#ensureDirectory(directory);
+			await writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
+		}
+	}
+
+	/**
+	 * Ensures a directory exists, caching successful checks so repeated writes avoid redundant mkdir calls.
+	 * @param directory The directory to ensure exists.
+	 */
+	static async #ensureDirectory(directory: string): Promise<void> {
+		if (this.#ensuredDirectories.has(directory)) { return }
+
+		try {
+			await mkdir(directory, defaultDirOptions);
+			this.#ensuredDirectories.add(directory);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') { throw error }
+			this.#ensuredDirectories.add(directory);
+		}
 	}
 }

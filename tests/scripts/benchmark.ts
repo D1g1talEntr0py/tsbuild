@@ -193,8 +193,53 @@ interface Tool {
 	id: string;
 	outDir: string;
 	dtsEnabled?: boolean;
+	typeCheck?: boolean;
 	/** Build the command line. Returns [cmd, args]. */
 	command: (dir: string) => [ string, string[] ];
+}
+
+function typeCheckCommand(dir: string): [ string, string[] ] {
+	return [
+		'pnpm',
+		dlxArgs(
+			[ `typescript@${TOOL_VERSIONS.typescript}` ],
+			'tsc',
+			[ '--noEmit', '-p', join(dir, 'tsconfig.json') ],
+		),
+	];
+}
+
+function toolCommands(tool: Tool, dir: string): Array<[ string, string[] ]> {
+	const commands: Array<[ string, string[] ]> = [];
+	if (tool.typeCheck) { commands.push(typeCheckCommand(dir)) }
+	commands.push(tool.command(dir));
+	return commands;
+}
+
+function execTool(tool: Tool, cwd: string): void {
+	const commands = toolCommands(tool, cwd);
+	for (let i = 0; i < commands.length; i++) {
+		const [ cmd, args ] = commands[i];
+		exec(cmd, args, cwd);
+	}
+}
+
+function execToolWithOutput(tool: Tool, cwd: string): { stdout: string; stderr: string } {
+	let stdout = '';
+	let stderr = '';
+	const commands = toolCommands(tool, cwd);
+	for (let i = 0; i < commands.length; i++) {
+		const [ cmd, args ] = commands[i];
+		const result = execWithOutput(cmd, args, cwd);
+		if (i > 0) {
+			stdout += '\n';
+			stderr += '\n';
+		}
+		stdout += result.stdout;
+		stderr += result.stderr;
+	}
+
+	return { stdout, stderr };
 }
 
 function tsbuildTool(opts: { dts?: boolean } = {}): Tool {
@@ -220,6 +265,7 @@ function tsupTool(opts: { dts: boolean }): Tool {
 	return {
 		id: opts.dts ? 'tsup --dts' : 'tsup',
 		outDir,
+		typeCheck: true,
 		command: dir => [
 			'pnpm',
 			dlxArgs(
@@ -245,6 +291,7 @@ function tsdownTool(opts: { dts: boolean }): Tool {
 	return {
 		id: opts.dts ? 'tsdown --dts' : 'tsdown',
 		outDir,
+		typeCheck: true,
 		command: dir => [
 			'pnpm',
 			dlxArgs(
@@ -285,6 +332,7 @@ function resetForTool(dir: string, tool: Tool): void {
 function prewarm(): void {
 	console.log(`${c.dim}Pre-warming pnpm dlx cache (one-time download)…${c.reset}`);
 	const targets: Array<{ label: string; packages: string[]; cmd: string }> = [
+		{ label: 'typescript', packages: [ `typescript@${TOOL_VERSIONS.typescript}` ], cmd: 'tsc' },
 		{ label: 'tsup', packages: [ `tsup@${TOOL_VERSIONS.tsup}`, `typescript@${TOOL_VERSIONS.typescript}` ], cmd: 'tsup' },
 		{ label: 'tsdown', packages: [ `tsdown@${TOOL_VERSIONS.tsdown}`, `typescript@${TOOL_VERSIONS.typescript}` ], cmd: 'tsdown' },
 	];
@@ -333,12 +381,11 @@ interface Artifact {
 
 function measureArtifact(dir: string, tool: Tool): Artifact {
 	resetForTool(dir, tool);
-	const [ cmd, args ] = tool.command(dir);
 	const start = performance.now();
-	const r = execWithOutput(cmd, args, dir);
+	const r = execToolWithOutput(tool, dir);
 	const wallMs = performance.now() - start;
 	const outputBytes = dirSizeBytes(join(dir, tool.outDir));
-	const phases = tool.id === 'tsbuild' ? parseTsbuildPhases(r.stdout + r.stderr) : undefined;
+	const phases = tool.id.startsWith('tsbuild') ? parseTsbuildPhases(r.stdout + r.stderr) : undefined;
 	return { id: tool.id, wallMs, outputBytes, phases };
 }
 
@@ -405,8 +452,7 @@ barplot(() => {
 				const tool = fullTools[i];
 				bench(tool.id, function* () {
 					resetForTool(dir, tool);
-					const [ cmd, args ] = tool.command(dir);
-					yield () => { exec(cmd, args, dir); };
+					yield () => { execTool(tool, dir); };
 				});
 			}
 		});
@@ -415,13 +461,12 @@ barplot(() => {
 
 barplot(() => {
 	summary(() => {
-		group('No dts · bundle only', () => {
+		group('No dts · type-check + bundle', () => {
 			for (let i = 0; i < noDtsTools.length; i++) {
 				const tool = noDtsTools[i];
 				bench(tool.id, function* () {
 					resetForTool(dir, tool);
-					const [ cmd, args ] = tool.command(dir);
-					yield () => { exec(cmd, args, dir); };
+					yield () => { execTool(tool, dir); };
 				});
 			}
 		});

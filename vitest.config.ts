@@ -31,9 +31,7 @@ export default defineConfig({
       reporter: [ 'text', 'json' ],
 			reportsDirectory: 'tests/coverage',
       include: [ 'src/**/*.ts' ],
-      // src/tsbuild.ts is tested (see tests/tsbuild.test.ts) but excluded because
-      // Rolldown (coverage-v8 source-map pass) cannot parse TypeScript's `import type` syntax.
-      exclude: [ 'src/index.ts', 'src/tsbuild.ts', 'src/dts/index.ts', 'src/dts/@types', 'src/@types' ]
+      exclude: [ 'src/dts/@types', 'src/@types' ]
     }
   }
 });

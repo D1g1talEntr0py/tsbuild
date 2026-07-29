@@ -22,7 +22,8 @@ import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWith
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
-import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern } from './@types';
+import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern, Plugin } from './@types';
+import type { BuildOptions, Message, Metafile } from 'esbuild';
 
 const globCharacters = /[*?\\[\]!].*$/;
 const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
@@ -34,6 +35,16 @@ const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string =>
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
 type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
 type QueuedPendingChange = PendingFileChange & { version: number };
+type BuildPlan = {
+	buildCache: TypeScriptConfiguration['buildCache'];
+	currentFingerprint: string;
+	fingerprintMatched: boolean;
+	force: boolean;
+	cleanEnabled: boolean;
+	useManifest: boolean;
+	previousOutputs: readonly string[] | undefined;
+	eagerCleanPromise: Promise<void> | undefined;
+};
 
 /**
  * Computes a deterministic fingerprint of the build configuration.
@@ -171,29 +182,7 @@ export class TypeScriptProject implements Closable {
 
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];
-			const buildCache = this.#configuration.buildCache;
-
-			// Check if build configuration has changed (minify, iife, declaration, platform, etc.)
-			// If so, invalidate the dts cache and force a full rebuild
-			const currentFingerprint = buildFingerprint(this.#buildConfiguration, this.#configuration.compilerOptions);
-			const fingerprintMatched = buildCache !== undefined && await buildCache.fingerprintMatches(currentFingerprint);
-			const force = this.#configuration.tsbuild.force || !fingerprintMatched;
-
-			const cleanEnabled = this.#configuration.clean && !this.#configuration.compilerOptions.noEmit;
-
-			// Manifest-driven output cleanup: when a manifest snapshot from a prior build is available,
-			// skip the upfront clean entirely — even on --force / --clearCache. dts/transpile overwrite
-			// same-named files, and stale outputs are diffed and removed asynchronously after the build
-			// phases complete (off the critical path). This keeps the parallel `clean()` from racing
-			// libuv's threadpool with TypeScript's emit and esbuild's I/O. Pre-clean is reserved for
-			// truly cold builds (no manifest snapshot at all).
-			const useManifest = cleanEnabled && buildCache !== undefined && buildCache.hasPersistedManifest();
-			const previousOutputs = useManifest ? buildCache.getPreviousOutputs() : undefined;
-
-			// On a true cold build (no manifest available), pre-clean in parallel with typeCheck —
-			// only when emission is guaranteed to follow (force, or no persisted incremental state).
-			const willEmit = force || buildCache?.hasPersistedState() !== true;
-			const eagerCleanPromise = cleanEnabled && willEmit && !useManifest ? this.clean() : undefined;
+			const { buildCache, currentFingerprint, fingerprintMatched, force, cleanEnabled, useManifest, previousOutputs, eagerCleanPromise } = await this.#resolveBuildPlan();
 
 			const filesWereEmitted = await this.#typeCheck();
 
@@ -266,6 +255,38 @@ export class TypeScriptProject implements Closable {
 	}
 
 	/**
+	 * Resolves build planning decisions (cache/fingerprint/clean strategy) for the current run.
+	 * @returns Build execution plan used by {@link build}
+	 */
+	async #resolveBuildPlan(): Promise<BuildPlan> {
+		const buildCache = this.#configuration.buildCache;
+
+		// Check if build configuration has changed (minify, iife, declaration, platform, etc.)
+		// If so, invalidate the dts cache and force a full rebuild
+		const currentFingerprint = buildFingerprint(this.#buildConfiguration, this.#configuration.compilerOptions);
+		const fingerprintMatched = buildCache !== undefined && await buildCache.fingerprintMatches(currentFingerprint);
+		const force = this.#configuration.tsbuild.force || !fingerprintMatched;
+
+		const cleanEnabled = this.#configuration.clean && !this.#configuration.compilerOptions.noEmit;
+
+		// Manifest-driven output cleanup: when a manifest snapshot from a prior build is available,
+		// skip the upfront clean entirely — even on --force / --clearCache. dts/transpile overwrite
+		// same-named files, and stale outputs are diffed and removed asynchronously after the build
+		// phases complete (off the critical path). This keeps the parallel `clean()` from racing
+		// libuv's threadpool with TypeScript's emit and esbuild's I/O. Pre-clean is reserved for
+		// truly cold builds (no manifest snapshot at all).
+		const useManifest = cleanEnabled && buildCache !== undefined && buildCache.hasPersistedManifest();
+		const previousOutputs = useManifest ? buildCache.getPreviousOutputs() : undefined;
+
+		// On a true cold build (no manifest available), pre-clean in parallel with typeCheck —
+		// only when emission is guaranteed to follow (force, or no persisted incremental state).
+		const willEmit = force || buildCache?.hasPersistedState() !== true;
+		const eagerCleanPromise = cleanEnabled && willEmit && !useManifest ? this.clean() : undefined;
+
+		return { buildCache, currentFingerprint, fingerprintMatched, force, cleanEnabled, useManifest, previousOutputs, eagerCleanPromise };
+	}
+
+	/**
 	 * Type-checks the project and optionally emits declaration files.
 	 * When declarations are enabled in compiler options, this method also handles
 	 * initializing and finalizing the file manager for incremental builds.
@@ -279,14 +300,29 @@ export class TypeScriptProject implements Closable {
 	async #typeCheck() {
 		await this.#fileManager.initialize();
 
-		let allDiagnostics: Diagnostic[];
+		const allDiagnostics = this.#collectTypeCheckDiagnostics();
+
+		if (allDiagnostics.length > 0) {
+			TypeScriptProject.#handleTypeErrors('Type-checking failed', TypeScriptProject.#dedupeDiagnostics(allDiagnostics), this.#directory);
+		}
+
+		// When declaration is disabled, TypeScript never emits .d.ts files, so finalize()
+		// has no change signal — always proceed to allow esbuild to run.
+		return this.#fileManager.finalize() || !this.#configuration.compilerOptions.declaration;
+	}
+
+	/**
+	 * Runs TypeScript emit and returns diagnostics for the current build mode.
+	 * In noEmit mode, diagnostics are gathered before emit() so incremental state is populated.
+	 */
+	#collectTypeCheckDiagnostics(): Diagnostic[] {
 		if (this.#configuration.compilerOptions.noEmit) {
 			// For noEmit, collect diagnostics first to populate the builder's incremental state,
 			// then emit() writes .tsbuildinfo with the populated cache for use on the next run.
 			// Calling builderProgram methods directly (not getProgram()) uses cached results
 			// for unchanged files, replicating `tsc --noEmit` including declaration diagnostics.
 			performance.mark('diagnostics:start');
-			allDiagnostics = [
+			const diagnostics = [
 				...this.#builderProgram.getConfigFileParsingDiagnostics(),
 				...this.#builderProgram.getOptionsDiagnostics(),
 				...this.#builderProgram.getSyntacticDiagnostics(),
@@ -296,29 +332,32 @@ export class TypeScriptProject implements Closable {
 			];
 
 			this.#builderProgram.emit(undefined, this.#fileManager.fileWriter, undefined, true);
-		} else {
-			// For normal emit, emit() processes files incrementally and also returns emit-phase
-			// diagnostics. Semantic diagnostics are collected separately as emit() only returns
-			// emit-phase errors and silently ignores e.g. TS2307 (Cannot find module).
-			const { diagnostics } = this.#builderProgram.emit(undefined, this.#fileManager.fileWriter, undefined, true);
-
-			allDiagnostics = [ ...this.#builderProgram.getSemanticDiagnostics(), ...diagnostics ];
+			return diagnostics;
 		}
 
-		if (allDiagnostics.length > 0) {
-			// Deduplicate: with isolatedDeclarations, errors like TS9007 appear in both
-			// getSemanticDiagnostics() and emit/declaration diagnostics simultaneously.
-			const unique = new Map<string, Diagnostic>();
-			for (const diagnostic of allDiagnostics) {
-				const key = `${diagnostic.file?.fileName ?? ''}:${diagnostic.start ?? -1}:${diagnostic.code}`;
-				if (!unique.has(key)) { unique.set(key, diagnostic) }
-			}
-			TypeScriptProject.#handleTypeErrors('Type-checking failed', Array.from(unique.values()), this.#directory);
+		// For normal emit, emit() processes files incrementally and also returns emit-phase
+		// diagnostics. Semantic diagnostics are collected separately as emit() only returns
+		// emit-phase errors and silently ignores e.g. TS2307 (Cannot find module).
+		const { diagnostics } = this.#builderProgram.emit(undefined, this.#fileManager.fileWriter, undefined, true);
+
+		return [ ...this.#builderProgram.getSemanticDiagnostics(), ...diagnostics ];
+	}
+
+	/**
+	 * Deduplicates diagnostics by file/start/code to avoid duplicate reporting across diagnostic sources.
+	 * @param diagnostics - Diagnostics emitted by TypeScript APIs
+	 * @returns Deduplicated diagnostics preserving first-seen order
+	 */
+	static #dedupeDiagnostics(diagnostics: ReadonlyArray<Diagnostic>): Diagnostic[] {
+		// Deduplicate: with isolatedDeclarations, errors like TS9007 appear in both
+		// getSemanticDiagnostics() and emit/declaration diagnostics simultaneously.
+		const unique = new Map<string, Diagnostic>();
+		for (const diagnostic of diagnostics) {
+			const key = `${diagnostic.file?.fileName ?? ''}:${diagnostic.start ?? -1}:${diagnostic.code}`;
+			if (!unique.has(key)) { unique.set(key, diagnostic) }
 		}
 
-		// When declaration is disabled, TypeScript never emits .d.ts files, so finalize()
-		// has no change signal — always proceed to allow esbuild to run.
-		return this.#fileManager.finalize() || !this.#configuration.compilerOptions.declaration;
+		return Array.from(unique.values());
 	}
 
 	/**
@@ -328,7 +367,116 @@ export class TypeScriptProject implements Closable {
 	@logPerformance('Transpile', true)
 	async #transpile(): Promise<WrittenFile[]> {
 		const { build: esbuild, formatMessages } = await import('esbuild');
-		const plugins = [];
+		const { plugins, iife, define } = await this.#prepareTranspileSetup();
+
+		try {
+			const { warnings, errors, metafile } = await esbuild(await this.#buildEsbuildOptions(plugins, define));
+			const outputs = metafile?.outputs;
+			if (outputs === undefined) { return [] }
+
+			if (await this.#hasEsbuildErrors(formatMessages, warnings, errors)) { return [] }
+
+			return this.#collectWrittenFiles(outputs, iife);
+		} catch (error) {
+			Logger.error('Transpile failed', error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Logs esbuild warnings/errors and returns whether the build produced errors.
+	 * @param formatMessages - esbuild formatter function
+	 * @param warnings - esbuild warnings
+	 * @param errors - esbuild errors
+	 * @returns True when errors were reported, false otherwise
+	 */
+	async #hasEsbuildErrors(
+		formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>,
+		warnings: Message[],
+		errors: Message[]
+	): Promise<boolean> {
+		for (const [ kind, logEntryType, messages ] of [[ BuildMessageType.WARNING, Logger.EntryType.Warn, warnings ], [ BuildMessageType.ERROR, Logger.EntryType.Error, errors ]] as const) {
+			if (messages.length > 0) {
+				for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
+			}
+
+			if (kind === BuildMessageType.ERROR && errors.length > 0) { return true }
+		}
+
+		return false;
+	}
+
+	/**
+	 * Collects written files from esbuild metafile outputs and optional IIFE outputs.
+	 * @param outputs - esbuild output metadata
+	 * @param iife - Optional IIFE plugin instance
+	 * @returns Written file metadata
+	 */
+	#collectWrittenFiles(outputs: Metafile['outputs'], iife: IifePluginInstance | undefined): WrittenFile[] {
+		const writtenFiles: WrittenFile[] = [];
+		for (const outputPath in outputs) {
+			writtenFiles.push({ path: outputPath as RelativePath, size: outputs[outputPath].bytes });
+		}
+
+		if (iife) { writtenFiles.push(...iife.files) }
+
+		return writtenFiles;
+	}
+
+	/**
+	 * Builds the esbuild options object from current project and transpile setup.
+	 * @param plugins - Ordered plugin chain for esbuild
+	 * @param define - esbuild define map
+	 * @returns esbuild build options
+	 */
+	async #buildEsbuildOptions(plugins: Plugin[], define: Record<string, string>): Promise<BuildOptions> {
+		return {
+			format: format as 'esm',
+			plugins,
+			define,
+			write: true,
+			metafile: true,
+			treeShaking: true,
+			logLevel: 'warning' as const,
+			tsconfigRaw: {
+				compilerOptions: {
+					alwaysStrict: this.#configuration.compilerOptions.alwaysStrict,
+					jsx: toJsxRenderingMode(this.#configuration.compilerOptions.jsx),
+					jsxFactory: this.#configuration.compilerOptions.jsxFactory,
+					jsxFragmentFactory: this.#configuration.compilerOptions.jsxFragmentFactory,
+					jsxImportSource: this.#configuration.compilerOptions.jsxImportSource,
+					paths: this.#configuration.compilerOptions.paths,
+					strict: this.#configuration.compilerOptions.strict,
+					target: this.#buildConfiguration.target,
+					useDefineForClassFields: this.#configuration.compilerOptions.useDefineForClassFields,
+					verbatimModuleSyntax: this.#configuration.compilerOptions.verbatimModuleSyntax
+				}
+			},
+			entryPoints: await this.#buildConfiguration.entryPoints,
+			bundle: this.#buildConfiguration.bundle,
+			packages: this.#buildConfiguration.packages,
+			platform: this.#buildConfiguration.platform,
+			sourcemap: this.#buildConfiguration.sourceMap,
+			target: this.#buildConfiguration.target,
+			banner: this.#buildConfiguration.banner,
+			footer: this.#buildConfiguration.footer,
+			outdir: this.#buildConfiguration.outDir,
+			splitting: this.#buildConfiguration.splitting,
+			chunkNames: '[hash]',
+			minify: this.#buildConfiguration.minify,
+			// Force decorator transformation even with ESNext target since Node.js doesn't support decorators yet
+			supported: { decorators: false }
+		};
+	}
+
+	/**
+	 * Prepares plugin chain and define map for esbuild transpilation.
+	 * @returns Transpile setup with ordered plugins and define entries
+	 */
+	async #prepareTranspileSetup(): Promise<{ plugins: Plugin[]; iife: IifePluginInstance | undefined; define: Record<string, string> }> {
+		this.#assertSupportedDecoratorConfiguration();
+
+		const plugins: Plugin[] = [];
 
 		// Register IIFE first when enabled. Its setup() forces write:false on the primary build,
 		// and its onEnd() writes primary outputs from in-memory buffers (in parallel with the
@@ -349,85 +497,42 @@ export class TypeScriptProject implements Closable {
 			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths, noExternal: this.#buildConfiguration.noExternal }));
 		}
 
+		if (this.#buildConfiguration.plugins?.length) {
+			plugins.push(...await resolvePlugins(this.#buildConfiguration.plugins, this.#directory));
+		}
+
+		return { plugins, iife, define: this.#buildDefineMap() };
+	}
+
+	/**
+	 * Asserts that unsupported legacy decorator compiler options are not enabled.
+	 */
+	#assertSupportedDecoratorConfiguration(): void {
 		// Legacy decorators (TypeScript `experimentalDecorators` / `emitDecoratorMetadata`) are not supported.
 		// Failing fast avoids a mismatch between TypeScript's type-checker and esbuild's transpiled output.
 		if (this.#configuration.compilerOptions.experimentalDecorators || this.#configuration.compilerOptions.emitDecoratorMetadata) {
 			throw new ConfigurationError('Legacy decorators are not supported. Remove "experimentalDecorators"/"emitDecoratorMetadata" from tsconfig.json and migrate to TC39 standard decorators.');
 		}
+	}
 
-		if (this.#buildConfiguration.plugins?.length) { plugins.push(...await resolvePlugins(this.#buildConfiguration.plugins, this.#directory)) }
-
+	/**
+	 * Builds esbuild define entries for configured import.meta.env variables.
+	 * @returns Define map passed to esbuild
+	 */
+	#buildDefineMap(): Record<string, string> {
 		// Prepare environment variable definitions as import.meta.env.* definitions
 		// See: https://esbuild.github.io/api/#define
 		const define: Record<string, string> = {};
-		if (this.#buildConfiguration.env !== undefined) {
-			// We can't use global regexes with String.replace, so we need to create a new RegExp object
-			const envExpansion = new RegExp(processEnvExpansionPattern, 'g');
-			for (const [ key, value ] of Object.entries(this.#buildConfiguration.env)) {
-				// Expand process.env references (e.g., "${process.env.npm_package_version}") in env values to allow dynamic values in esbuild define, which only supports static strings
-				define[`import.meta.env.${key}`] = Json.serialize(value.replace(envExpansion, (_, envVar: string) => process.env[envVar] ?? ''));
-			}
+		if (this.#buildConfiguration.env === undefined) { return define }
+
+		// We can't use global regexes with String.replace, so we need to create a new RegExp object
+		const envExpansion = new RegExp(processEnvExpansionPattern, 'g');
+		for (const [ key, value ] of Object.entries(this.#buildConfiguration.env)) {
+			// Expand process.env references (e.g., "${process.env.npm_package_version}") in env values to allow dynamic values in esbuild define, which only supports static strings
+			define[`import.meta.env.${key}`] = Json.serialize(value.replace(envExpansion, (_, envVar: string) => process.env[envVar] ?? ''));
 		}
 
-		try {
-			const { warnings, errors, metafile: { outputs } } = await esbuild({
-				format,
-				plugins,
-				define,
-				write: true,
-				metafile: true,
-				treeShaking: true,
-				logLevel: 'warning',
-				tsconfigRaw: {
-					compilerOptions: {
-						alwaysStrict: this.#configuration.compilerOptions.alwaysStrict,
-						jsx: toJsxRenderingMode(this.#configuration.compilerOptions.jsx),
-						jsxFactory: this.#configuration.compilerOptions.jsxFactory,
-						jsxFragmentFactory: this.#configuration.compilerOptions.jsxFragmentFactory,
-						jsxImportSource: this.#configuration.compilerOptions.jsxImportSource,
-						paths: this.#configuration.compilerOptions.paths,
-						strict: this.#configuration.compilerOptions.strict,
-						target: this.#buildConfiguration.target,
-						useDefineForClassFields: this.#configuration.compilerOptions.useDefineForClassFields,
-						verbatimModuleSyntax: this.#configuration.compilerOptions.verbatimModuleSyntax
-					}
-				},
-				entryPoints: await this.#buildConfiguration.entryPoints,
-				bundle: this.#buildConfiguration.bundle,
-				packages: this.#buildConfiguration.packages,
-				platform: this.#buildConfiguration.platform,
-				sourcemap: this.#buildConfiguration.sourceMap,
-				target: this.#buildConfiguration.target,
-				banner: this.#buildConfiguration.banner,
-				footer: this.#buildConfiguration.footer,
-				outdir: this.#buildConfiguration.outDir,
-				splitting: this.#buildConfiguration.splitting,
-				chunkNames: '[hash]',
-				minify: this.#buildConfiguration.minify,
-				// Force decorator transformation even with ESNext target since Node.js doesn't support decorators yet
-				supported: { decorators: false }
-			});
-
-			for (const [ kind, logEntryType, messages ] of [[ BuildMessageType.WARNING, Logger.EntryType.Warn, warnings ], [ BuildMessageType.ERROR, Logger.EntryType.Error, errors ]] as const) {
-				if (messages.length > 0) {
-					for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
-				}
-
-				if (kind === BuildMessageType.ERROR && errors.length > 0) { return [] }
-			}
-
-			const writtenFiles = [];
-			for (const outputPath in outputs) {
-				writtenFiles.push({ path: outputPath as RelativePath, size: outputs[outputPath].bytes });
-			}
-
-			if (iife) { writtenFiles.push(...iife.files) }
-
-			return writtenFiles;
-		} catch (error) {
-			Logger.error('Transpile failed', error);
-			throw error;
-		}
+		return define;
 	}
 
 	/**
@@ -444,19 +549,10 @@ export class TypeScriptProject implements Closable {
 		const rebuild = (event: FileSystemEvent, stats: WatchrStats, path: string, nextPath?: string): void => {
 			if (stats?.size === 0 && (event === Watchr.FileEvent.add || event === Watchr.FileEvent.unlink)) { return }
 
-			// In type-check-only mode, we need to rebuild for ANY source file change since imported files
-			// aren't in buildDependencies. In transpile mode, buildDependencies tracks esbuild inputs.
-			if (this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(Paths.relative(this.#directory, path))) {
-				const absolutePath = path as AbsolutePath;
-				const version = (this.#pendingChangeVersions.get(absolutePath) ?? 0) + 1;
-				this.#pendingChangeVersions.set(absolutePath, version);
-				this.#pendingChangeStats.set(absolutePath, { size: stats.size, modifiedTimeMs: stats.modifiedTimeMs });
-				// Deduplicate: the OS can fire multiple events for a single save (e.g. rename + close_write)
-				// arriving in separate Watchr flush batches. Keep one queued (path, event) pair,
-				// but refresh its metadata so change filtering sees the latest file state.
-				this.#pendingChanges.set(pendingChangeKey(event, absolutePath), { event, path: absolutePath, nextPath: nextPath as AbsolutePath, version });
-				void this.#triggerRebuild();
-			}
+			if (!this.#shouldQueueRebuild(path)) { return }
+
+			this.#queuePendingChange(event, stats, path as AbsolutePath, nextPath as AbsolutePath | undefined);
+			void this.#triggerRebuild();
 		};
 
 		const pathsToIgnore = [ ...this.#configuration.exclude ?? [], ...this.#buildConfiguration.watch.ignore ?? [] ];
@@ -464,6 +560,33 @@ export class TypeScriptProject implements Closable {
 		this.#fileWatcher = new Watchr(targets, { ...this.#buildConfiguration.watch, ignore: (path: string) => pathsToIgnore.some((p) => path.includes(`/${p}/`) || path.endsWith(`/${p}`)) }, rebuild);
 
 		Logger.info(`Watching for changes in: ${targets.join(', ')}`);
+	}
+
+	/**
+	 * Returns true if a file-system event should be queued for rebuild processing.
+	 * In noEmit mode we rebuild for any source change; otherwise we rebuild only tracked dependencies.
+	 * @param path - Absolute file path from watcher callback
+	 */
+	#shouldQueueRebuild(path: string): boolean {
+		return this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(Paths.relative(this.#directory, path));
+	}
+
+	/**
+	 * Queues a pending watcher event with deduping metadata.
+	 * @param event - Watcher event type
+	 * @param stats - Watcher file stats snapshot
+	 * @param path - Absolute path of changed file
+	 * @param nextPath - Absolute rename target when applicable
+	 */
+	#queuePendingChange(event: FileSystemEvent, stats: WatchrStats, path: AbsolutePath, nextPath?: AbsolutePath): void {
+		const version = (this.#pendingChangeVersions.get(path) ?? 0) + 1;
+		this.#pendingChangeVersions.set(path, version);
+		this.#pendingChangeStats.set(path, { size: stats.size, modifiedTimeMs: stats.modifiedTimeMs });
+
+		// Deduplicate: the OS can fire multiple events for a single save (e.g. rename + close_write)
+		// arriving in separate Watchr flush batches. Keep one queued (path, event) pair,
+		// but refresh its metadata so change filtering sees the latest file state.
+		this.#pendingChanges.set(pendingChangeKey(event, path), { event, path, nextPath, version });
 	}
 
 	/** Closes the project and cleans up resources. */
@@ -513,14 +636,7 @@ export class TypeScriptProject implements Closable {
 	async #triggerRebuild() {
 		if (this.#pendingChanges.size === 0) { return }
 
-		const pendingFileChanges: QueuedPendingChange[] = [];
-		while (this.#pendingChanges.size > 0) {
-			const queuedChanges = [ ...this.#pendingChanges.values() ];
-			this.#pendingChanges.clear();
-			for (const change of queuedChanges) {
-				if (await this.#isContentModified(change)) { pendingFileChanges.push(change) }
-			}
-		}
+		const pendingFileChanges = await this.#collectPendingFileChanges();
 
 		if (pendingFileChanges.length === 0) { return }
 
@@ -529,7 +645,45 @@ export class TypeScriptProject implements Closable {
 
 		const rootNames = [ ...this.#builderProgram.getProgram().getRootFileNames() ];
 
-		// Apply all pending changes
+		this.#applyPendingFileChanges(pendingFileChanges, rootNames);
+
+		// Ensure the previous build's .tsbuildinfo write has settled before TypeScript reads it
+		// during createIncrementalProgram(). persistCache() defers that write off the critical
+		// path; the @debounce(100) usually covers it, but flushing here removes the race entirely.
+		await this.#fileManager.flush();
+
+		// Recreate program with incremental support if configured
+		this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences: this.#configuration.projectReferences, configFileParsingDiagnostics: this.#configuration.configFileParsingDiagnostics });
+
+		// build() handles its own errors - no need to catch here
+		await this.build();
+	}
+
+	/**
+	 * Drains queued watcher events and returns only meaningful content changes.
+	 * @returns Pending file changes after metadata/content filtering
+	 */
+	async #collectPendingFileChanges(): Promise<QueuedPendingChange[]> {
+		const pendingFileChanges: QueuedPendingChange[] = [];
+
+		while (this.#pendingChanges.size > 0) {
+			const queuedChanges = [ ...this.#pendingChanges.values() ];
+			this.#pendingChanges.clear();
+
+			for (const change of queuedChanges) {
+				if (await this.#isContentModified(change)) { pendingFileChanges.push(change) }
+			}
+		}
+
+		return pendingFileChanges;
+	}
+
+	/**
+	 * Applies watcher changes to dependency tracking/content-state maps and rootNames.
+	 * @param pendingFileChanges - Filtered pending watcher changes
+	 * @param rootNames - Mutable rootNames array used to recreate the incremental program
+	 */
+	#applyPendingFileChanges(pendingFileChanges: ReadonlyArray<QueuedPendingChange>, rootNames: string[]): void {
 		for (const { event, path, nextPath } of pendingFileChanges) {
 			// If a file or directory is renamed, update the path in the dependencies set
 			if (nextPath !== undefined && (event === 'rename' || event === 'renameDir')) {
@@ -544,28 +698,18 @@ export class TypeScriptProject implements Closable {
 				// If a root file was renamed, update it in the root names array
 				const index = rootNames.indexOf(path);
 				if (index !== -1) { rootNames.splice(index, 1, nextPath) }
-			} else {
-				// Only remove from rootNames if it's an unlink event; push new files on add
-				const index = rootNames.indexOf(path);
-				if (event === 'unlink' && index !== -1) {
-					rootNames.splice(index, 1);
-					this.#contentStates.delete(path);
-				} else if (event === 'add' && index === -1) {
-					rootNames.push(path);
-				}
+				continue;
+			}
+
+			// Only remove from rootNames if it's an unlink event; push new files on add
+			const index = rootNames.indexOf(path);
+			if (event === 'unlink' && index !== -1) {
+				rootNames.splice(index, 1);
+				this.#contentStates.delete(path);
+			} else if (event === 'add' && index === -1) {
+				rootNames.push(path);
 			}
 		}
-
-		// Ensure the previous build's .tsbuildinfo write has settled before TypeScript reads it
-		// during createIncrementalProgram(). persistCache() defers that write off the critical
-		// path; the @debounce(100) usually covers it, but flushing here removes the race entirely.
-		await this.#fileManager.flush();
-
-		// Recreate program with incremental support if configured
-		this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences: this.#configuration.projectReferences, configFileParsingDiagnostics: this.#configuration.configFileParsingDiagnostics });
-
-		// build() handles its own errors - no need to catch here
-		await this.build();
 	}
 
 	/**
@@ -584,9 +728,18 @@ export class TypeScriptProject implements Closable {
 
 			const stats = this.#pendingChangeStats.get(path);
 			const previousState = this.#contentStates.get(path);
+
+			// Fast path: unchanged size/mtime means the event is metadata churn only.
 			if (stats?.size !== undefined && stats.modifiedTimeMs !== undefined && previousState?.stats?.size === stats.size && previousState.stats.modifiedTimeMs === stats.modifiedTimeMs) {
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
 				return false;
+			}
+
+			// Fast path: size changes are always meaningful content changes, so skip hashing.
+			if (stats?.size !== undefined && previousState?.stats?.size !== undefined && previousState.stats.size !== stats.size) {
+				this.#contentStates.set(path, { digest: previousState.digest, stats });
+				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+				return true;
 			}
 
 			const digest = createHash('sha1').update(await Files.read(path)).digest('hex');
@@ -706,22 +859,48 @@ export class TypeScriptProject implements Closable {
 		const expandedEntryPoints: EntryPoints<AbsolutePath> = {};
 
 		for (const [ name, entryPoint ] of Object.entries(entryPoints)) {
-			const resolvedPath = Paths.absolute(this.#directory, entryPoint);
-
-			if (await Paths.isDirectory(resolvedPath)) {
-				for (const file of await Files.readDirectory(resolvedPath)) {
-					const filePath = Paths.join(resolvedPath, file);
-
-					if (await Paths.isFile(filePath)) { expandedEntryPoints[Paths.parse(file).name] = filePath }
-				}
-			} else if (await Paths.isFile(resolvedPath)) {
-				expandedEntryPoints[name] = resolvedPath;
-			} else {
-				throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+			const resolved = await this.#resolveEntryPoint(name, entryPoint);
+			for (const [ resolvedName, resolvedPath ] of Object.entries(resolved)) {
+				expandedEntryPoints[resolvedName] = resolvedPath;
 			}
 		}
 
 		return expandedEntryPoints;
+	}
+
+	/**
+	 * Resolves a single configured entry point to one or more absolute file entries.
+	 * @param name - Entry point key from config
+	 * @param entryPoint - Configured entry path
+	 * @returns Expanded entry mapping for this entry
+	 */
+	async #resolveEntryPoint(name: string, entryPoint: string): Promise<EntryPoints<AbsolutePath>> {
+		const resolvedPath = Paths.absolute(this.#directory, entryPoint);
+
+		if (await Paths.isDirectory(resolvedPath)) {
+			return this.#expandDirectoryEntryPoints(resolvedPath);
+		}
+
+		if (await Paths.isFile(resolvedPath)) {
+			return { [name]: resolvedPath };
+		}
+
+		throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+	}
+
+	/**
+	 * Expands a directory entry into per-file entries using file stem names.
+	 * @param directory - Absolute directory path
+	 * @returns Entry mapping with one key per file in the directory
+	 */
+	async #expandDirectoryEntryPoints(directory: AbsolutePath): Promise<EntryPoints<AbsolutePath>> {
+		const entries: EntryPoints<AbsolutePath> = {};
+		for (const file of await Files.readDirectory(directory)) {
+			const filePath = Paths.join(directory, file);
+			if (await Paths.isFile(filePath)) { entries[Paths.parse(file).name] = filePath }
+		}
+
+		return entries;
 	}
 
 	/**
