@@ -1,3 +1,20 @@
+## [2.2.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.1.0...v2.2.0) (2026-07-29)
+* enhance TypeScript project build process and add new features (d50a24aee7b0188072f9d2da49edeb7a360bcbdd)
+- Refactor build planning logic into a separate method for clarity and maintainability.
+- Introduce a fast path for handling file size changes without hashing content during rebuilds.
+- Implement a new pattern matcher utility for flexible string and regex matching.
+- Add tests for file writing behavior and ensure directory reuse.
+- Extend integration tests to validate metadata handling during watch mode.
+- Update benchmark scripts to include type-checking commands for tools.
+- Exclude TypeScript versions 7 and above from compatibility checks until API support is available.
+- Clean up tsconfig.json by removing deprecated options.
+- Adjust Vitest configuration to improve coverage reporting and exclude unnecessary files.
+
+* **deps:** updated dependencies to fix security vulnerabilities (d8f37971b99532485191e4d483ddb60ef3a9ca9e)
+- [CWE-400, CWE-407] brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups ()
+
+* update GitHub Actions to use latest versions of checkout, setup-node, and codecov-action (c77a247f8224d94c151b9e69f84846cba96f3938)
+
 ## [2.1.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.0.2...v2.1.0) (2026-06-26)
 
 ### Features
