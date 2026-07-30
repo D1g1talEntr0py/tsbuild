@@ -55,11 +55,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('starts watching after build() and close() stops the watcher without error', async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
-			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -70,11 +70,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('triggers a rebuild when a watched source file changes', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
-			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -93,11 +93,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('keeps only the latest same-path change while async hashing is in flight', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
-			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -119,11 +119,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 				'src/index.ts': 'export { value } from "./value.js";',
 				'src/value.ts': 'export const value = 1;'
 			},
-			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -143,11 +143,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('runs manifest-driven cleanup across watch rebuilds', { timeout: 20_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
-			tsconfig: { compilerOptions: { declaration: false }, tsbuild: { watch: { enabled: true }, clean: true } }
+			tsconfig: { compilerOptions: { declaration: false }, tsbuild: { clean: true } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -167,11 +167,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('uses metadata fast path for size-changed events without hashing file contents', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const value = 1;' },
-			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -198,11 +198,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('keeps the latest queued stats snapshot when an older size-change event is processed first', async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const value = 1;' },
-			tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir);
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 

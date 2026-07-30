@@ -186,7 +186,7 @@ That's it. tsbuild reads your `compilerOptions`, infers entry points from your `
 
 Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, `baseUrl`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
 
-The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behavior, entry points, watch mode, output formatting, and similar build-specific settings.
+The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behavior, entry points, output formatting, and similar build-specific settings.
 
 This means your type-checker and your build always use the exact same TypeScript configuration — no drift, no duplication.
 
@@ -258,7 +258,7 @@ tsbuild --help  # or -h
 tsbuild --version  # or -v
 ```
 
-> **Note**: `--watch` and `--force` are CLI-only options. If you configure `watch` or `force` in the config, it will be ignored.
+> **Note**: `--watch` and `--force` are CLI-only runtime options. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default. `--minify` uses an explicit CLI default (`false`).
 
 ### Package.json Scripts
 
@@ -429,7 +429,6 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
     "sourceMap": true,           // Generate source maps (boolean | 'inline' | 'external' | 'both')
     "splitting": true,           // Enable code splitting
     "bundle": true,              // Enable/disable bundling
-    "force": false,              // Force full rebuild, bypassing incremental cache
     "banner": {                  // Inject code at start of files
       "js": "#!/usr/bin/env node"
     },
@@ -439,16 +438,12 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
     "env": {                     // Environment variables (accessible via import.meta.env)
       "API_URL": "https://api.example.com"
     },
-    "watch": {                   // Watch mode configuration
-      "enabled": false,          // Set via --watch CLI flag
-      "ignore": ["**/*.test.ts"]
-    },
     "plugins": []                // Custom esbuild plugins (programmatic API only)
   }
 }
 ```
 
-**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. The `force` and `minify` options are generally more useful as CLI flags (`--force`, `--minify`) than as persistent config values.
+**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--force` and `--watch` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape.
 
 ## Advanced Features
 

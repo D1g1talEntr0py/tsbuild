@@ -11,7 +11,7 @@ const options = {
 	project: { type: 'string', default: process.cwd(), short: 'p', description: 'Project directory (defaults to current directory)' },
 	noEmit: { type: 'boolean', default: undefined, short: 'n', description: 'Do not emit output files' },
 	clearCache: { type: 'boolean', default: false, short: 'c', description: 'Clear the cache before the build' },
-	minify: { type: 'boolean', default: undefined, short: 'm', description: 'Minify the output' }
+	minify: { type: 'boolean', default: false, short: 'm', description: 'Minify the output' }
 } as const;
 
 const { values: { help, version, ...args } } = parseArgs({ options });
@@ -35,8 +35,8 @@ if (help) {
 } else {
 	const typeScriptOptions = {
 		clearCache: args.clearCache,
-		compilerOptions: { noEmit: args.noEmit },
-		tsbuild: { force: args.force, minify: args.minify, watch: { enabled: args.watch } }
+		compilerOptions: { ...(args.noEmit !== undefined ? { noEmit: args.noEmit } : {}) },
+		tsbuild: { force: args.force, watch: { enabled: args.watch }, minify: args.minify }
 	} satisfies TypeScriptOptions;
 
 	try {

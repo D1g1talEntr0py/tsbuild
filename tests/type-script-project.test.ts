@@ -400,7 +400,7 @@ describe('TypeScriptProject', () => {
 			await project1.build();
 			project1.close();
 
-			const project2 = new TypeScriptProject(dir, { tsbuild: { clean: false, force: true } });
+					const project2 = new TypeScriptProject(dir, { force: true, tsbuild: { clean: false } });
 			await project2.build();
 			project2.close();
 
@@ -481,11 +481,11 @@ describe('TypeScriptProject', () => {
 		it('starts watching and close() cleans up the watcher', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const x = 1;' },
-				tsconfig: { tsbuild: { watch: { enabled: true }, clean: false } }
+				tsconfig: { tsbuild: { clean: false } }
 			});
 			cleanup = c;
 
-			const project = new TypeScriptProject(dir);
+					const project = new TypeScriptProject(dir, { watch: { enabled: true } });
 			await project.build();
 			await new Promise<void>(resolve => setImmediate(resolve));
 
