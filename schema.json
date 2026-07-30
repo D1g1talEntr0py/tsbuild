@@ -3,11 +3,10 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "tsbuild tsconfig schema extension",
   "description": "Extends the standard tsconfig schema with the tsbuild property.",
-  "version": 1.0,
 	"type": "object",
   "allOf": [
     {
-      "$ref": "https://json.schemastore.org/tsconfig"
+      "$ref": "https://json.schemastore.org/jsconfig.json"
     },
     {
       "type": "object",
@@ -215,8 +214,7 @@
               {
                 "type": "array",
                 "description": "Plugin module specifier with options: [specifier, options]",
-                "items": false,
-                "prefixItems": [
+                "items": [
                   {
                     "type": "string",
                     "description": "Plugin module specifier (npm package or relative path)"
@@ -227,6 +225,7 @@
                     "additionalProperties": true
                   }
                 ],
+                "additionalItems": false,
                 "minItems": 2,
                 "maxItems": 2
               }
