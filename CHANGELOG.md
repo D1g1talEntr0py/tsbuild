@@ -1,3 +1,6 @@
+## [2.2.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.1...v2.2.2) (2026-07-30)
+* update .gitignore and enhance JSON schema documentation for tsbuild (26c3b1aefe572ded3d86ae6ae28bbf33329b294f)
+
 ## [2.2.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.0...v2.2.1) (2026-07-29)
 * resolved bug where the .js extension was not being added to the output when bundle was false (72174601e312d47f839bbdd36888c042c51adfb2)
 
