@@ -31,7 +31,7 @@ export default defineConfig({
       reporter: [ 'text', 'json' ],
 			reportsDirectory: 'tests/coverage',
       include: [ 'src/**/*.ts' ],
-      exclude: [ 'src/dts/@types', 'src/@types' ]
+      exclude: [ 'src/dts/@types', 'src/@types', 'src/tsbuild.ts' ]
     }
   }
 });
