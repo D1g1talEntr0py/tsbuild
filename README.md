@@ -330,7 +330,7 @@ tsbuild supports a comprehensive set of options (full schema available in [`sche
 
 tsbuild publishes a JSON schema at:
 
-- `https://unpkg.com/@d1g1tal/tsbuild/schema.json`
+- `https://json.schemastore.org/tsbuild.json`
 
 This schema composes the standard `tsconfig` schema and adds documentation/completions for the `tsbuild` property.
 
@@ -340,7 +340,7 @@ If automatic association is unavailable (offline environments, schema download d
 
 ```jsonc
 {
-  "$schema": "https://unpkg.com/@d1g1tal/tsbuild/schema.json",
+  "$schema": "https://json.schemastore.org/tsbuild.json",
   "compilerOptions": {
     "outDir": "./dist"
   },
@@ -349,8 +349,6 @@ If automatic association is unavailable (offline environments, schema download d
   }
 }
 ```
-
-Maintainers: see [`docs/schemastore-submission.md`](./docs/schemastore-submission.md) for the full SchemaStore registration checklist.
 
 ### Entry Points
 
