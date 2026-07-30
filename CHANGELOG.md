@@ -1,3 +1,6 @@
+## [2.2.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.2...v2.2.3) (2026-07-30)
+* **docs:** update README and schema documentation; adjust TypeScriptProject watch mode handling (0677b9952e9391e7f7edab95d38917092a5047c0)
+
 ## [2.2.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.1...v2.2.2) (2026-07-30)
 * update .gitignore and enhance JSON schema documentation for tsbuild (26c3b1aefe572ded3d86ae6ae28bbf33329b294f)
 
