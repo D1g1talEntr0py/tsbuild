@@ -1,22 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "tsbuild",
+  "$id": "https://unpkg.com/@d1g1tal/tsbuild/schema.json",
+  "title": "tsbuild tsconfig schema extension",
+  "description": "Extends the standard tsconfig schema with the tsbuild property.",
   "version": 1.0,
-  "type": "object",
-  "additionalProperties": true,
-  "properties": {
-    "tsbuild": {
-      "$ref": "#/definitions/options"
+  "allOf": [
+    {
+      "$ref": "https://json.schemastore.org/tsconfig"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "tsbuild": {
+          "$ref": "#/definitions/options",
+          "markdownDescription": "tsbuild-specific build options inside tsconfig.json."
+        }
+      }
     }
-  },
+  ],
   "definitions": {
     "options": {
       "type": "object",
-      "markdownDescription": "Configuration options for [tsbuild]",
+      "markdownDescription": "Configuration options for tsbuild.",
       "additionalProperties": false,
       "properties": {
         "entryPoints": {
           "markdownDescription": "Files that each serve as an input to the bundling algorithm. Can be an array of paths or an object mapping output names to input paths.\n\nWhen omitted, tsbuild auto-infers entry points from the `exports`, `bin`, `main`, or `module` fields in `package.json` by reverse-mapping output paths to source paths.",
+          "examples": [
+            ["./src/index.ts", "./src/cli.ts"],
+            { "index": "./src/index.ts", "cli": "./src/cli.ts" }
+          ],
           "oneOf": [
             {
               "type": "array",
@@ -39,7 +52,13 @@
             "node",
             "browser",
             "neutral"
-          ]
+          ],
+          "markdownEnumDescriptions": [
+            "Node.js runtime output.",
+            "Browser runtime output.",
+            "Environment-agnostic output."
+          ],
+          "examples": ["node"]
         },
         "bundle": {
           "description": "Whether to bundle source files together. When false, each file is output separately.",
@@ -57,11 +76,17 @@
           "enum": [
             "bundle",
             "external"
-          ]
+          ],
+          "markdownEnumDescriptions": [
+            "Bundle package contents into output files.",
+            "Keep package imports as external specifiers."
+          ],
+          "examples": ["external"]
         },
         "external": {
           "description": "Specific dependencies to externalize (don't bundle). In tsconfig.json this must be strings (RegExp patterns are only supported via the programmatic API).",
           "type": "array",
+          "examples": [["typescript", "esbuild"]],
           "items": {
             "type": "string"
           }
@@ -69,6 +94,7 @@
         "noExternal": {
           "description": "Specific dependencies to bundle (overrides packages setting). In tsconfig.json this must be strings (RegExp patterns are only supported via the programmatic API).",
           "type": "array",
+          "examples": [["lodash-es"]],
           "items": {
             "type": "string"
           }
@@ -89,11 +115,22 @@
               "description": "Bundle external types from node_modules into declaration files. When false, external imports remain as import statements. Defaults to false for 'node' platform, true for 'browser' and 'neutral' platforms."
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "examples": [
+            {
+              "entryPoints": ["index"],
+              "resolve": false
+            }
+          ]
         },
         "env": {
           "type": "object",
           "description": "Environment variables to define (accessible via import.meta.env)",
+          "examples": [
+            {
+              "API_URL": "https://api.example.com"
+            }
+          ],
           "additionalProperties": {
             "type": "string"
           }
@@ -113,14 +150,21 @@
             },
             {
               "type": "string",
-              "enum": ["inline", "external", "both"]
+              "enum": ["inline", "external", "both"],
+              "markdownEnumDescriptions": [
+                "Embed source maps directly in generated files.",
+                "Emit separate .map files.",
+                "Emit both inline and external source maps."
+              ]
             }
           ],
-          "description": "Generate source maps. Options: true/false, 'inline', 'external', or 'both'. Overrides tsconfig.json compilerOptions.sourceMap."
+          "description": "Generate source maps. Options: true/false, 'inline', 'external', or 'both'. Overrides tsconfig.json compilerOptions.sourceMap.",
+          "examples": [true, "external"]
         },
         "splitting": {
           "type": "boolean",
-          "description": "Enable code splitting for better caching and parallel loading"
+          "description": "Enable code splitting for better caching and parallel loading",
+          "examples": [true]
         },
         "banner": {
           "type": "object",
@@ -135,7 +179,12 @@
               "description": "Banner text for CSS files"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "examples": [
+            {
+              "js": "#!/usr/bin/env node"
+            }
+          ]
         },
         "footer": {
           "type": "object",
@@ -150,7 +199,12 @@
               "description": "Footer text for CSS files"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "examples": [
+            {
+              "js": "/* (c) Example Corp */"
+            }
+          ]
         },
         "watch": {
           "type": "object",
@@ -192,7 +246,14 @@
               }
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "examples": [
+            {
+              "enabled": true,
+              "debounce": 100,
+              "ignore": ["dist/**", "node_modules/**"]
+            }
+          ]
         },
         "plugins": {
           "type": "array",

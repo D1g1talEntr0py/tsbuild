@@ -326,6 +326,32 @@ Or add the entry manually:
 
 tsbuild supports a comprehensive set of options (full schema available in [`schema.json`](./schema.json)):
 
+### Editor IntelliSense for `tsbuild` in `tsconfig.json`
+
+tsbuild publishes a JSON schema at:
+
+- `https://unpkg.com/@d1g1tal/tsbuild/schema.json`
+
+This schema composes the standard `tsconfig` schema and adds documentation/completions for the `tsbuild` property.
+
+If/when this schema is registered in SchemaStore, most users in VS Code and other SchemaStore-aware editors should get `tsbuild` hover docs and completion automatically.
+
+If automatic association is unavailable (offline environments, schema download disabled, non-SchemaStore editors), use a manual fallback:
+
+```jsonc
+{
+  "$schema": "https://unpkg.com/@d1g1tal/tsbuild/schema.json",
+  "compilerOptions": {
+    "outDir": "./dist"
+  },
+  "tsbuild": {
+    "clean": true
+  }
+}
+```
+
+Maintainers: see [`docs/schemastore-submission.md`](./docs/schemastore-submission.md) for the full SchemaStore registration checklist.
+
 ### Entry Points
 
 ```jsonc

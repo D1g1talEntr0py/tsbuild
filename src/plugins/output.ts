@@ -1,5 +1,5 @@
-import { chmod, open, readFile, writeFile } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { chmod, open, readFile, writeFile } from 'node:fs/promises';
 import { FileExtension } from 'src/constants';
 import type { BuildResult, Plugin } from 'esbuild';
 
@@ -12,7 +12,7 @@ const fileExtensionPattern = /\.[^./]+$/i;
  * Returns true when the path portion of a specifier already has a file extension.
  * @param path The path portion of an import specifier (no query/hash)
  */
-function hasExtension(path: string): boolean {
+function hasExtension(path: string) {
 	const index = path.lastIndexOf('/');
 	return fileExtensionPattern.test(index === -1 ? path : path.slice(index + 1));
 }
@@ -22,15 +22,15 @@ function hasExtension(path: string): boolean {
  * @param path Relative module specifier path (without quote characters)
  * @param suffix Any query/hash suffix captured after the path
  */
-function appendJsExtension(path: string, suffix: string): string {
-	return path.endsWith('/') || hasExtension(path) ? path + suffix : `${path}.js${suffix}`;
+function appendJsExtension(path: string, suffix: string) {
+	return path.endsWith('/') || hasExtension(path) ? path + suffix : path + FileExtension.JS + suffix;
 }
 
 /**
  * Rewrites extension-less relative import/export/dynamic-import specifiers to include `.js`.
  * @param code The JavaScript output content to rewrite
  */
-function rewriteRelativeSpecifiers(code: string): string {
+function rewriteRelativeSpecifiers(code: string) {
 	const rewrite = (_: string, before: string, path: string, suffix: string, after: string): string => `${before}${appendJsExtension(path, suffix)}${after}`;
 
 	return code
@@ -44,7 +44,7 @@ function rewriteRelativeSpecifiers(code: string): string {
  * Reads only the first 2 bytes to minimize I/O.
  * @param filePath The path to the output file.
  */
-async function setShebangPermissions(filePath: string): Promise<void> {
+async function setShebangPermissions(filePath: string) {
 	const handle = await open(filePath, 'r');
 
 	try {
@@ -62,7 +62,7 @@ async function setShebangPermissions(filePath: string): Promise<void> {
  * Rewrites extension-less relative JS specifiers in an emitted output file.
  * @param filePath The emitted JavaScript file path
  */
-async function rewriteOutputSpecifiers(filePath: string): Promise<void> {
+async function rewriteOutputSpecifiers(filePath: string) {
 	const source = await readFile(filePath, 'utf8');
 	const rewritten = rewriteRelativeSpecifiers(source);
 	if (rewritten !== source) { await writeFile(filePath, rewritten) }
@@ -80,7 +80,7 @@ export const outputPlugin = (): Plugin => {
 		 * @param build The esbuild plugin build object.
 		 */
 		setup(build): void {
-			build.onEnd(async ({ metafile }: BuildResult): Promise<void> => {
+			build.onEnd(async ({ metafile }: BuildResult) => {
 				if (!metafile) { return }
 
 				const rewriteTasks: Promise<void>[] = [];
