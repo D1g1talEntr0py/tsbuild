@@ -1,3 +1,19 @@
+## [2.2.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.3...v2.2.4) (2026-08-01)
+* update TypeScript project transpilation and output handling (2d512d1a48f284bcf6c378562fc3bdc3918f3905)
+- Refactored transpilation process in TypeScriptProject to improve plugin handling and output file management.
+- Replaced iifePlugin with createIifePluginHandle for better encapsulation of IIFE plugin functionality.
+- Introduced createWriteOutputPlugin to manage output file writing and permissions.
+- Enhanced error handling and logging during transpilation.
+- Added tests for private methods in performance logger decorator.
+- Improved file writing tests to cover concurrency and shebang handling.
+- Updated output plugin tests to validate specifier rewriting and permissions.
+
+* **docs:** update schema again to fix some errors (182f1fb9907382bc5d390ea5cbe68dd8966603fe)
+* **docs:** updated readme (1eb3c9a7ddfe7359c6b7b08b5739e0344123bb1b)
+* update dev dependencies and pnpm-workspace.yaml to include minimumReleaseAgeExclude for specific package (34abe9183783f6d595824612a437662527d64d52)
+* update schema URLs in configuration files and improve README instructions for IntelliSense setup (5fb4f2a8dc1bca9d639f7f08edff2b9c7f3b7512)
+* **test:** fix failing test due to vitest coverage parsing error by excluding tsbuild.ts (38610825e9bead1b0b2d56dfe3980336a85b6c1b)
+
 ## [2.2.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.2...v2.2.3) (2026-07-30)
 * **docs:** update README and schema documentation; adjust TypeScriptProject watch mode handling (0677b9952e9391e7f7edab95d38917092a5047c0)
 
