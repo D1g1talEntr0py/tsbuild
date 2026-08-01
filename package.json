@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=22.6.0"
   },
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@11.19.0",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -61,7 +61,7 @@
     "magic-string": "^1.1.0"
   },
   "devDependencies": {
-    "@d1g1tal/tsnode": "^1.0.1",
+    "@d1g1tal/tsnode": "^1.1.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.2",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
@@ -73,6 +73,7 @@
     "fs-monkey": "^1.1.0",
     "memfs": "^4.64.0",
     "mitata": "^1.0.34",
+    "ts-node": "^10.9.2",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
