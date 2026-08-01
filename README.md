@@ -334,7 +334,9 @@ tsbuild publishes a JSON schema at:
 
 This schema composes the standard `tsconfig` schema and adds documentation/completions for the `tsbuild` property.
 
-If/when this schema is registered in SchemaStore, most users in VS Code and other SchemaStore-aware editors should get `tsbuild` hover docs and completion automatically.
+SchemaStore currently associates this schema with `tsbuild.json` (not `tsconfig*.json`). That means adding the schema to SchemaStore does **not** automatically enable `tsbuild` IntelliSense in `tsconfig.json` unless you explicitly point your `tsconfig.json` to it.
+
+Recommended setup: add the `$schema` field shown below to each `tsconfig.json` where you want `tsbuild` IntelliSense.
 
 If automatic association is unavailable (offline environments, schema download disabled, non-SchemaStore editors), use a manual fallback:
 
@@ -347,6 +349,19 @@ If automatic association is unavailable (offline environments, schema download d
   "tsbuild": {
     "clean": true
   }
+}
+```
+
+If your editor still doesn't pick this up for `tsconfig.json`, add a per-workspace association in VS Code:
+
+```jsonc
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["/tsconfig.json", "/tsconfig.*.json"],
+      "url": "https://json.schemastore.org/tsbuild.json"
+    }
+  ]
 }
 ```
 
