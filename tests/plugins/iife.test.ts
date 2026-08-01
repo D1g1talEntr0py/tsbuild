@@ -1,11 +1,16 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { build } from 'esbuild';
-import { iifePlugin } from 'src/plugins/iife';
-import type { IifePluginInstance } from 'src/plugins/iife';
+import { createIifePluginHandle } from 'src/plugins/iife';
+import type { IifePluginHandle } from 'src/plugins/iife';
 import type { PluginBuild } from 'esbuild';
 import { TestHelper } from '../scripts/test-helper';
+
+function getOutputText(instance: IifePluginHandle, suffix: string): string {
+	const file = instance.files.find(({ path }) => path.endsWith(suffix));
+	expect(file).toBeDefined();
+	return file!.text;
+}
 
 describe('iifePlugin', () => {
 	let cleanup: (() => Promise<void>) | undefined;
@@ -17,17 +22,17 @@ describe('iifePlugin', () => {
 
 	describe('factory', () => {
 		it('has the correct plugin name', () => {
-			expect(iifePlugin().plugin.name).toBe('esbuild:iife');
+			expect(createIifePluginHandle().plugin.name).toBe('esbuild:iife');
 		});
 
 		it('returns a plugin and an empty files array', () => {
-			const instance: IifePluginInstance = iifePlugin();
+			const instance: IifePluginHandle = createIifePluginHandle();
 			expect(typeof instance.plugin.setup).toBe('function');
 			expect(instance.files).toEqual([]);
 		});
 
 		it('does not register onEnd when outdir is missing', () => {
-			const { plugin } = iifePlugin();
+			const { plugin } = createIifePluginHandle();
 			let called = false;
 			const build: Partial<PluginBuild> = {
 				initialOptions: {} as PluginBuild['initialOptions'],
@@ -39,13 +44,13 @@ describe('iifePlugin', () => {
 	});
 
 	describe('real esbuild integration', () => {
-		it('produces ESM output and IIFE output alongside it', async () => {
+		it('produces IIFE output alongside the primary build', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const value = 42;' }
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist'),
@@ -57,13 +62,8 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			// ESM output in outdir
-			const esm = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			expect(esm).toContain('value');
-
-			// IIFE output in outdir/iife
-			const iife = await readFile(join(dir, 'dist/iife/index.js'), 'utf8');
-			expect(iife).toContain('value');
+			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/index.js'))).toBe(true);
+			expect(getOutputText(instance, 'dist/iife/index.js')).toContain('value');
 		});
 
 		it('wraps exports in named global when globalName is provided', async () => {
@@ -72,7 +72,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin({ globalName: 'MyLib' });
+			const instance = createIifePluginHandle({ globalName: 'MyLib' });
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist'),
@@ -84,8 +84,7 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			const iife = await readFile(join(dir, 'dist/iife/index.js'), 'utf8');
-			expect(iife).toContain('globalThis.MyLib');
+			expect(getOutputText(instance, 'dist/iife/index.js')).toContain('globalThis.MyLib');
 		});
 
 		it('uses flat Object.assign when no globalName is provided', async () => {
@@ -94,7 +93,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist'),
@@ -106,8 +105,7 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			const iife = await readFile(join(dir, 'dist/iife/index.js'), 'utf8');
-			expect(iife).toContain('Object.assign(globalThis');
+			expect(getOutputText(instance, 'dist/iife/index.js')).toContain('Object.assign(globalThis');
 		});
 
 		it('produces source map file when sourcemap is enabled', async () => {
@@ -116,7 +114,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist'),
@@ -129,7 +127,7 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			await expect(access(join(dir, 'dist/iife/index.js.map'))).resolves.toBeUndefined();
+			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/index.js.map'))).toBe(true);
 		});
 
 		it('produces minified IIFE output when minify is true', async () => {
@@ -138,7 +136,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instanceMinified = iifePlugin();
+			const instanceMinified = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist-min'),
@@ -151,7 +149,7 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			const instanceNormal = iifePlugin();
+			const instanceNormal = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist-normal'),
@@ -164,8 +162,8 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			const minified = await readFile(join(dir, 'dist-min/iife/index.js'), 'utf8');
-			const normal = await readFile(join(dir, 'dist-normal/iife/index.js'), 'utf8');
+			const minified = getOutputText(instanceMinified, 'dist-min/iife/index.js');
+			const normal = getOutputText(instanceNormal, 'dist-normal/iife/index.js');
 			// Minified output should be shorter
 			expect(minified.length).toBeLessThan(normal.length);
 		});
@@ -179,7 +177,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: {
 					index: join(dir, 'src/index.ts'),
@@ -194,8 +192,8 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			await expect(access(join(dir, 'dist/iife/index.js'))).resolves.toBeUndefined();
-			await expect(access(join(dir, 'dist/iife/utils.js'))).resolves.toBeUndefined();
+			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/index.js'))).toBe(true);
+			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/utils.js'))).toBe(true);
 		});
 
 		it('populates the files array with written IIFE output paths', async () => {
@@ -204,7 +202,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist'),
@@ -229,7 +227,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: [
 					join(dir, 'src/index.ts'),
@@ -244,8 +242,8 @@ describe('iifePlugin', () => {
 				logLevel: 'silent',
 			});
 
-			await expect(access(join(dir, 'dist/iife/index.js'))).resolves.toBeUndefined();
-			await expect(access(join(dir, 'dist/iife/utils.js'))).resolves.toBeUndefined();
+			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/index.js'))).toBe(true);
+			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/utils.js'))).toBe(true);
 		});
 
 		it('inlines split chunks via the virtual loader for self-contained IIFE output', async () => {
@@ -258,7 +256,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: {
 					index: join(dir, 'src/index.ts'),
@@ -275,7 +273,7 @@ describe('iifePlugin', () => {
 			});
 
 			// The split shared chunk must be inlined into each self-contained IIFE entry.
-			const iife = await readFile(join(dir, 'dist/iife/index.js'), 'utf8');
+			const iife = getOutputText(instance, 'dist/iife/index.js');
 			expect(iife).toContain('10');
 			expect(iife).not.toContain('import');
 		});
@@ -288,7 +286,7 @@ describe('iifePlugin', () => {
 			});
 			cleanup = c;
 
-			const instance = iifePlugin();
+			const instance = createIifePluginHandle();
 			await build({
 				entryPoints: { index: join(dir, 'src/index.ts') },
 				outdir: join(dir, 'dist'),
@@ -301,7 +299,7 @@ describe('iifePlugin', () => {
 			});
 
 			// The bare specifier stays external (imported), not inlined, in the IIFE output.
-			const iife = await readFile(join(dir, 'dist/iife/index.js'), 'utf8');
+			const iife = getOutputText(instance, 'dist/iife/index.js');
 			expect(iife).toContain('node:path');
 		});
 	});

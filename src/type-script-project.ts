@@ -5,10 +5,10 @@ import { Logger } from './logger';
 import { rm } from 'node:fs/promises';
 import { TextFormat } from './text-formatter';
 import { bundleDeclarations } from './dts/declaration-bundler';
-import { outputPlugin } from './plugins/output';
 import { externalModulesPlugin } from './plugins/external-modules';
 import { resolvePlugins } from './plugins/resolve-plugin';
-import { iifePlugin, type IifePluginInstance } from './plugins/iife';
+import { createIifePluginHandle } from './plugins/iife';
+import { createWriteOutputPlugin } from './plugins/output';
 import { closeOnExit } from './decorators/close-on-exit';
 import { logPerformance } from './decorators/performance-logger';
 import { debounce } from './decorators/debounce';
@@ -20,10 +20,10 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
+import type { Message, OutputFile } from 'esbuild';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
 import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern, Plugin } from './@types';
-import type { BuildOptions, Message, Metafile } from 'esbuild';
 
 const globCharacters = /[*?\\[\]!].*$/;
 const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
@@ -365,18 +365,56 @@ export class TypeScriptProject implements Closable {
 	 * @returns A promise that resolves to an array of written files after transpilation.
 	 */
 	@logPerformance('Transpile', true)
-	async #transpile(): Promise<WrittenFile[]> {
+	async #transpile() {
 		const { build: esbuild, formatMessages } = await import('esbuild');
-		const { plugins, iife, define } = await this.#prepareTranspileSetup();
+		const { plugins, iifeFiles, define } = await this.#configureTranspileOptions();
+		const writtenFiles: WrittenFile[] = [];
+		plugins.push(createWriteOutputPlugin(this.#directory, (files) => { writtenFiles.push(...files) }, iifeFiles));
 
 		try {
-			const { warnings, errors, metafile } = await esbuild(await this.#buildEsbuildOptions(plugins, define));
-			const outputs = metafile?.outputs;
+			const { warnings, errors, metafile: { outputs } = {} } = await esbuild({
+				format,
+				plugins,
+				define,
+				write: false,
+				metafile: true,
+				treeShaking: true,
+				logLevel: 'warning',
+				tsconfigRaw: {
+					compilerOptions: {
+						alwaysStrict: this.#configuration.compilerOptions.alwaysStrict,
+						jsx: toJsxRenderingMode(this.#configuration.compilerOptions.jsx),
+						jsxFactory: this.#configuration.compilerOptions.jsxFactory,
+						jsxFragmentFactory: this.#configuration.compilerOptions.jsxFragmentFactory,
+						jsxImportSource: this.#configuration.compilerOptions.jsxImportSource,
+						paths: this.#configuration.compilerOptions.paths,
+						strict: this.#configuration.compilerOptions.strict,
+						target: this.#buildConfiguration.target,
+						useDefineForClassFields: this.#configuration.compilerOptions.useDefineForClassFields,
+						verbatimModuleSyntax: this.#configuration.compilerOptions.verbatimModuleSyntax
+					}
+				},
+				entryPoints: await this.#buildConfiguration.entryPoints,
+				bundle: this.#buildConfiguration.bundle,
+				packages: this.#buildConfiguration.packages,
+				platform: this.#buildConfiguration.platform,
+				sourcemap: this.#buildConfiguration.sourceMap,
+				target: this.#buildConfiguration.target,
+				banner: this.#buildConfiguration.banner,
+				footer: this.#buildConfiguration.footer,
+				outdir: this.#buildConfiguration.outDir,
+				splitting: this.#buildConfiguration.splitting,
+				chunkNames: '[hash]',
+				minify: this.#buildConfiguration.minify,
+				// Force decorator transformation even with ESNext target since Node.js doesn't support decorators yet
+				supported: { decorators: false }
+			});
+
 			if (outputs === undefined) { return [] }
 
 			if (await this.#hasEsbuildErrors(formatMessages, warnings, errors)) { return [] }
 
-			return this.#collectWrittenFiles(outputs, iife);
+			return writtenFiles;
 		} catch (error) {
 			Logger.error('Transpile failed', error);
 			throw error;
@@ -390,11 +428,7 @@ export class TypeScriptProject implements Closable {
 	 * @param errors - esbuild errors
 	 * @returns True when errors were reported, false otherwise
 	 */
-	async #hasEsbuildErrors(
-		formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>,
-		warnings: Message[],
-		errors: Message[]
-	): Promise<boolean> {
+	async #hasEsbuildErrors(formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>, warnings: Message[], errors: Message[]): Promise<boolean> {
 		for (const [ kind, logEntryType, messages ] of [[ BuildMessageType.WARNING, Logger.EntryType.Warn, warnings ], [ BuildMessageType.ERROR, Logger.EntryType.Error, errors ]] as const) {
 			if (messages.length > 0) {
 				for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
@@ -406,89 +440,24 @@ export class TypeScriptProject implements Closable {
 		return false;
 	}
 
-	/**
-	 * Collects written files from esbuild metafile outputs and optional IIFE outputs.
-	 * @param outputs - esbuild output metadata
-	 * @param iife - Optional IIFE plugin instance
-	 * @returns Written file metadata
-	 */
-	#collectWrittenFiles(outputs: Metafile['outputs'], iife: IifePluginInstance | undefined): WrittenFile[] {
-		const writtenFiles: WrittenFile[] = [];
-		for (const outputPath in outputs) {
-			writtenFiles.push({ path: outputPath as RelativePath, size: outputs[outputPath].bytes });
-		}
-
-		if (iife) { writtenFiles.push(...iife.files) }
-
-		return writtenFiles;
-	}
-
-	/**
-	 * Builds the esbuild options object from current project and transpile setup.
-	 * @param plugins - Ordered plugin chain for esbuild
-	 * @param define - esbuild define map
-	 * @returns esbuild build options
-	 */
-	async #buildEsbuildOptions(plugins: Plugin[], define: Record<string, string>): Promise<BuildOptions> {
-		return {
-			format: format as 'esm',
-			plugins,
-			define,
-			write: true,
-			metafile: true,
-			treeShaking: true,
-			logLevel: 'warning' as const,
-			tsconfigRaw: {
-				compilerOptions: {
-					alwaysStrict: this.#configuration.compilerOptions.alwaysStrict,
-					jsx: toJsxRenderingMode(this.#configuration.compilerOptions.jsx),
-					jsxFactory: this.#configuration.compilerOptions.jsxFactory,
-					jsxFragmentFactory: this.#configuration.compilerOptions.jsxFragmentFactory,
-					jsxImportSource: this.#configuration.compilerOptions.jsxImportSource,
-					paths: this.#configuration.compilerOptions.paths,
-					strict: this.#configuration.compilerOptions.strict,
-					target: this.#buildConfiguration.target,
-					useDefineForClassFields: this.#configuration.compilerOptions.useDefineForClassFields,
-					verbatimModuleSyntax: this.#configuration.compilerOptions.verbatimModuleSyntax
-				}
-			},
-			entryPoints: await this.#buildConfiguration.entryPoints,
-			bundle: this.#buildConfiguration.bundle,
-			packages: this.#buildConfiguration.packages,
-			platform: this.#buildConfiguration.platform,
-			sourcemap: this.#buildConfiguration.sourceMap,
-			target: this.#buildConfiguration.target,
-			banner: this.#buildConfiguration.banner,
-			footer: this.#buildConfiguration.footer,
-			outdir: this.#buildConfiguration.outDir,
-			splitting: this.#buildConfiguration.splitting,
-			chunkNames: '[hash]',
-			minify: this.#buildConfiguration.minify,
-			// Force decorator transformation even with ESNext target since Node.js doesn't support decorators yet
-			supported: { decorators: false }
-		};
-	}
 
 	/**
 	 * Prepares plugin chain and define map for esbuild transpilation.
 	 * @returns Transpile setup with ordered plugins and define entries
 	 */
-	async #prepareTranspileSetup(): Promise<{ plugins: Plugin[]; iife: IifePluginInstance | undefined; define: Record<string, string> }> {
+	async #configureTranspileOptions(): Promise<{ plugins: Plugin[]; iifeFiles: OutputFile[] | undefined; define: Record<string, string> }> {
 		this.#assertSupportedDecoratorConfiguration();
 
 		const plugins: Plugin[] = [];
 
 		// Register IIFE first when enabled. Its setup() forces write:false on the primary build,
-		// and its onEnd() writes primary outputs from in-memory buffers (in parallel with the
-		// secondary IIFE bundle). Subsequent onEnd hooks (e.g. outputPlugin's shebang chmod)
-		// run serially after, so the files exist on disk by the time they read them.
-		let iife: IifePluginInstance | undefined;
+		// and its onEnd() collects IIFE outputs from in-memory buffers alongside the primary build.
+		let iifeFiles: OutputFile[] | undefined;
+		let plugin: Plugin | undefined;
 		if (this.#buildConfiguration.iife) {
-			iife = iifePlugin(this.#buildConfiguration.iife === true ? undefined : this.#buildConfiguration.iife);
-			plugins.push(iife.plugin);
+			({ files: iifeFiles, plugin } = createIifePluginHandle(this.#buildConfiguration.iife === true ? undefined : this.#buildConfiguration.iife));
+			plugins.push(plugin);
 		}
-
-		plugins.push(outputPlugin());
 
 		// Only use the external modules plugin when we have noExternal patterns to apply
 		// When packages === 'bundle', we can just use esbuild's built-in packages option
@@ -501,7 +470,7 @@ export class TypeScriptProject implements Closable {
 			plugins.push(...await resolvePlugins(this.#buildConfiguration.plugins, this.#directory));
 		}
 
-		return { plugins, iife, define: this.#buildDefineMap() };
+		return { plugins, iifeFiles, define: this.#buildDefineMap() };
 	}
 
 	/**
@@ -607,7 +576,7 @@ export class TypeScriptProject implements Closable {
 	 * @returns A promise that resolves to an array of written files after processing declarations.
 	 */
 	@logPerformance('Bundle Declarations', true)
-	async #processDeclarations(): Promise<WrittenFile[]> {
+	async #processDeclarations() {
 		// If not bundling, just write declaration files to disk
 		if (!this.#buildConfiguration.bundle) { return this.#fileManager.writeFiles(this.#directory) }
 

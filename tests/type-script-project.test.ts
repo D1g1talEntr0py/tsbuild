@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../src/type-script-project';
+import { Files } from '../src/files';
 import { processManager } from '../src/process-manager';
 import { TestHelper } from './scripts/test-helper';
 
@@ -56,6 +57,36 @@ describe('TypeScriptProject', () => {
 
 			const dts = await readFile(join(dir, 'dist/index.d.ts'), 'utf8');
 			expect(dts).toContain('value');
+		});
+
+		it('writes shebang entry points with executable mode from the start', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': '#!/usr/bin/env node\nexport const value = 1;' },
+				tsconfig: { compilerOptions: { declaration: false } }
+			});
+			cleanup = c;
+
+			const originalWriteFiles = Files.writeFiles.bind(Files);
+			let capturedEntries: Array<{ path: string; data: string | NodeJS.ArrayBufferView; options?: { mode?: number } }> = [];
+			const writeFilesSpy = vi.spyOn(Files, 'writeFiles').mockImplementation(async (entries) => {
+				capturedEntries = entries as Array<{ path: string; data: string | NodeJS.ArrayBufferView; options?: { mode?: number } }>;
+				return await originalWriteFiles(entries);
+			});
+			const chmodSpy = vi.spyOn(Files, 'chmod').mockImplementation(async () => {
+				throw new Error('chmod should not be used for shebang writes');
+			});
+
+			try {
+				const project = new TypeScriptProject(dir);
+				await project.build();
+				project.close();
+
+				const entry = capturedEntries.find((entry) => entry.path === join(dir, 'dist/index.js'));
+				expect(entry?.options).toMatchObject({ mode: 0o755 });
+			} finally {
+				writeFilesSpy.mockRestore();
+				chmodSpy.mockRestore();
+			}
 		});
 
 		it('sets exit code 1 on TypeScript type error', async () => {

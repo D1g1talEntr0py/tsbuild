@@ -1,8 +1,9 @@
 import { dirname, join } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
-import { defaultCleanOptions, defaultDirOptions, Encoding } from 'src/constants';
+import { defaultCleanOptions, defaultDirOptions, Encoding, FileExtension } from 'src/constants';
 import { brotliDecompress, brotliCompress } from 'node:zlib';
-import { access, constants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, constants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { LanguageVariant, ScriptTarget, SyntaxKind, createScanner } from 'typescript';
 import type { WriteFileOptions } from 'node:fs';
 import type { AbsolutePath, Path } from 'src/@types';
 
@@ -10,6 +11,9 @@ type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.A
 
 const windowsDrivePathRegex = /^[A-Za-z]:[\\/]/;
 const removalBatchSize = 32;
+const writeBatchSize = 32;
+const fileExtensionPattern = /\.[^./]+$/i;
+const relativeSpecifierCandidatePattern = /(?:\bfrom\s*['"]\.\.?\/|\bimport\s*['"]\.\.?\/|\bimport\s*\(\s*['"`]\.\.?\/)/;
 
 /**
  * A class for handling file operations such as reading, writing, compressing, and decompressing files.
@@ -84,6 +88,192 @@ export class Files {
 			await Files.#ensureDirectory(directory);
 			await writeFile(filePath, data, options);
 		}
+	}
+
+	/**
+	 * Write multiple files with bounded concurrency.
+	 * Ensures each target directory exists via {@link Files.write}.
+	 * @param entries File write entries containing path/data/options.
+	 */
+	static async writeFiles(entries: ReadonlyArray<{ path: Path | string; data: WritableData; options?: WriteFileOptions }>): Promise<void> {
+		if (entries.length === 0) { return }
+
+		for (let i = 0; i < entries.length; i += writeBatchSize) {
+			const writes: Promise<void>[] = [];
+			for (const { path, data, options } of entries.slice(i, i + writeBatchSize)) {
+				writes.push(this.write(path, data, options));
+			}
+
+			await Promise.all(writes);
+		}
+	}
+
+	/**
+	 * Rewrites extension-less relative import/export/dynamic-import specifiers to include `.js`.
+	 * @param code The JavaScript output content to rewrite
+	 */
+	static rewriteRelativeSpecifiers(code: string): string {
+		type Replacement = { start: number; end: number; content: string };
+
+		// Fast paths for the common case where no relative module specifier rewrite is needed.
+		if (!code.includes('./') && !code.includes('../') || (!code.includes('import') && !code.includes('export')) || !relativeSpecifierCandidatePattern.test(code)) { return code }
+
+		const hasExtension = (path: string) => {
+			const index = path.lastIndexOf('/');
+			return fileExtensionPattern.test(index === -1 ? path : path.slice(index + 1));
+		};
+
+		const appendJsExtension = (specifier: string) => {
+			const hashIndex = specifier.indexOf('#');
+			const queryIndex = specifier.indexOf('?');
+			let suffixStart = specifier.length;
+
+			if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
+			if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
+
+			const path = specifier.slice(0, suffixStart);
+			if (path.endsWith('/') || hasExtension(path)) { return specifier }
+
+			return `${path}${FileExtension.JS}${specifier.slice(suffixStart)}`;
+		};
+
+		const isRelativeSpecifier = (specifier: string) => specifier.startsWith('./') || specifier.startsWith('../');
+		const scanner = createScanner(ScriptTarget.Latest, true, LanguageVariant.Standard, code);
+
+		const replacements: Replacement[] = [];
+
+		const addSpecifierRewrite = (start: number, end: number, tokenText: string) => {
+			if (tokenText.length < 2) { return }
+
+			const quote = tokenText[0];
+			const specifier = tokenText.slice(1, -1);
+			if (!isRelativeSpecifier(specifier)) { return }
+
+			const rewritten = appendJsExtension(specifier);
+			if (rewritten === specifier) { return }
+
+			replacements.push({ start, end, content: `${quote}${rewritten}${quote}` });
+		};
+
+		let seenImportOrExport = false;
+		let importOrExportDepth = 0;
+		let expectSpecifierAfterFrom = false;
+		let expectSideEffectImportSpecifier = false;
+		let maybeDynamicImport = false;
+		let expectDynamicImportSpecifier = false;
+
+		for (let token = scanner.scan(); token !== SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+			switch (token) {
+				case SyntaxKind.ImportKeyword: {
+					seenImportOrExport = true;
+					importOrExportDepth = 0;
+					expectSpecifierAfterFrom = false;
+					expectSideEffectImportSpecifier = true;
+					maybeDynamicImport = true;
+					expectDynamicImportSpecifier = false;
+					break;
+				}
+				case SyntaxKind.ExportKeyword: {
+					seenImportOrExport = true;
+					importOrExportDepth = 0;
+					expectSpecifierAfterFrom = false;
+					expectSideEffectImportSpecifier = false;
+					maybeDynamicImport = false;
+					expectDynamicImportSpecifier = false;
+					break;
+				}
+				case SyntaxKind.OpenParenToken: {
+					if (maybeDynamicImport) {
+						expectDynamicImportSpecifier = true;
+						maybeDynamicImport = false;
+					}
+					if (seenImportOrExport) { importOrExportDepth += 1 }
+					break;
+				}
+				case SyntaxKind.CloseParenToken: {
+					if (seenImportOrExport && importOrExportDepth > 0) { importOrExportDepth -= 1 }
+					break;
+				}
+				case SyntaxKind.FromKeyword: {
+					if (seenImportOrExport) {
+						expectSpecifierAfterFrom = true;
+						expectSideEffectImportSpecifier = false;
+					}
+					break;
+				}
+				case SyntaxKind.StringLiteral:
+				case SyntaxKind.NoSubstitutionTemplateLiteral: {
+					if (expectDynamicImportSpecifier || expectSpecifierAfterFrom || expectSideEffectImportSpecifier) {
+						addSpecifierRewrite(scanner.getTokenPos(), scanner.getTextPos(), scanner.getTokenText());
+						expectDynamicImportSpecifier = false;
+						expectSpecifierAfterFrom = false;
+						expectSideEffectImportSpecifier = false;
+					}
+					break;
+				}
+				case SyntaxKind.SemicolonToken: {
+					seenImportOrExport = false;
+					importOrExportDepth = 0;
+					expectSpecifierAfterFrom = false;
+					expectSideEffectImportSpecifier = false;
+					maybeDynamicImport = false;
+					expectDynamicImportSpecifier = false;
+					break;
+				}
+				case SyntaxKind.OpenBraceToken:
+				case SyntaxKind.OpenBracketToken:
+				case SyntaxKind.LessThanToken:
+				case SyntaxKind.Identifier:
+				case SyntaxKind.AsteriskToken:
+				case SyntaxKind.TypeKeyword:
+				case SyntaxKind.DefaultKeyword:
+				case SyntaxKind.AsKeyword: {
+					maybeDynamicImport = false;
+					break;
+				}
+				default: break;
+			}
+
+			if (seenImportOrExport && importOrExportDepth === 0 && token === SyntaxKind.CloseBraceToken) {
+				// End `import { ... }` / `export { ... }` clause where semicolon may be omitted.
+				expectSideEffectImportSpecifier = false;
+			}
+		}
+
+		if (replacements.length === 0) { return code }
+
+		// Single forward pass; repeated slice-and-concat is O(n * replacements) on large bundles.
+		replacements.sort((left, right) => left.start - right.start);
+
+		const segments: string[] = [];
+		let cursor = 0;
+		for (const { start, content, end } of replacements) {
+			segments.push(code.slice(cursor, start), content);
+			cursor = end;
+		}
+
+		segments.push(code.slice(cursor));
+
+		return segments.join('');
+	}
+
+	/**
+	 * Returns true when JavaScript output begins with a shebang line.
+	 * @param output JavaScript output text to inspect
+	 */
+	static hasShebang(output: string | Uint8Array): boolean {
+		if (output.length < 2) { return false }
+
+		return typeof output === 'string' ? output.charCodeAt(0) === 0x23 && output.charCodeAt(1) === 0x21 : output[0] === 0x23 && output[1] === 0x21;
+	}
+
+	/**
+	 * Change mode bits on a file.
+	 * @param filePath The file path.
+	 * @param mode Numeric mode bits (e.g. `0o755`).
+	 */
+	static async chmod(filePath: Path | string, mode: number): Promise<void> {
+		await chmod(filePath, mode);
 	}
 
 	/**

@@ -89,6 +89,34 @@ describe('logPerformance', () => {
 		});
 	});
 
+	describe('private methods', () => {
+		it('supports decorated private methods', async () => {
+			class Test {
+				#value = 7;
+
+				@logPerformance('private op')
+				#method(): number { return this.#value }
+
+				call(): number { return this.#method(); }
+			}
+
+			expect(new Test().call()).toBe(7);
+		});
+
+		it('supports decorated async private methods', async () => {
+			class Test {
+				#value = 7;
+
+				@logPerformance('private async op')
+				async #method(): Promise<number> { return this.#value }
+
+				async call(): Promise<number> { return this.#method(); }
+			}
+
+			await expect(new Test().call()).resolves.toBe(7);
+		});
+	});
+
 	describe('performance marks and measures', () => {
 		it('creates performance marks', () => {
 			class Test {

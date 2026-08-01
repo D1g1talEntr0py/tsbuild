@@ -1,19 +1,18 @@
+import { mkdir } from 'node:fs/promises';
 import { Paths } from 'src/paths.js';
 import { FileExtension, format } from 'src/constants.js';
-import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { AbsolutePath, IifeOptions, WrittenFile } from '../@types/index.js';
+import type { AbsolutePath, IifeOptions } from '../@types/index.js';
 import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
 
 /** Result of creating an IIFE plugin, providing both the esbuild plugin and collected output file info */
-export interface IifePluginInstance {
+export interface IifePluginHandle {
 	readonly plugin: Plugin;
-	readonly files: WrittenFile[];
+	readonly files: OutputFile[];
 }
 
 const namespace = 'iife';
 const fileExtensionRegex = /\.[^.]+$/;
-const textDecoder = new TextDecoder();
 
 /**
  * esbuild plugin that produces additional IIFE output alongside the primary ESM build.
@@ -22,8 +21,8 @@ const textDecoder = new TextDecoder();
  * for self-contained browser/CDN usage. Output is written to an `iife` subdirectory.
  * @param options - IIFE plugin options
  */
-export function iifePlugin(options?: IifeOptions): IifePluginInstance {
-	const files: WrittenFile[] = [];
+export function createIifePluginHandle(options?: IifeOptions): IifePluginHandle {
+	const files: OutputFile[] = [];
 
 	return {
 		files,
@@ -37,9 +36,8 @@ export function iifePlugin(options?: IifeOptions): IifePluginInstance {
 				const outdir = build.initialOptions.outdir;
 				if (!outdir) { return }
 
-				// Force write:false so we can reuse primary build buffers in-memory for the IIFE
-				// rebuild (avoiding a wasteful readFile of files esbuild just wrote) and overlap
-				// writing primary outputs to disk with the secondary build.
+				// Force write:false so we can reuse primary build buffers in-memory for the IIFE rebuild
+				// (avoiding a wasteful readFile of files esbuild just wrote) and overlap writing primary outputs to disk with the secondary build.
 				build.initialOptions.write = false;
 
 				const sourcemap = build.initialOptions.sourcemap;
@@ -146,24 +144,14 @@ function wrapAsIife(text: string, globalName?: string) {
  * @param minify The primary build's minify setting
  * @returns An array of written IIFE output files
  */
-async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap'], minify: BuildOptions['minify']): Promise<WrittenFile[]> {
+async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap'], minify: BuildOptions['minify']): Promise<OutputFile[]> {
 	const { build: esbuild } = await import('esbuild');
 	const fileContents = new Map<string, string>();
-	const primaryWrites: Promise<void>[] = [];
-	const ensuredDirs = new Map<string, Promise<string | undefined>>();
 
-	// Decode JS outputs once for the IIFE virtual loader; kick off primary disk writes in parallel.
+	// Decode JS outputs once for the IIFE virtual loader.
 	for (const file of primaryOutputs) {
 		const absolute = resolve(file.path);
 		if (absolute.endsWith(FileExtension.JS)) { fileContents.set(absolute, file.text) }
-
-		const dir = dirname(absolute);
-		let dirReady = ensuredDirs.get(dir);
-		if (dirReady === undefined) {
-			dirReady = mkdir(dir, { recursive: true });
-			ensuredDirs.set(dir, dirReady);
-		}
-		primaryWrites.push(dirReady.then(() => writeFile(absolute, file.contents)));
 	}
 
 	const validEntries: Array<{ name: string; path: AbsolutePath }> = [];
@@ -174,10 +162,7 @@ async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[]
 		}
 	}
 
-	if (validEntries.length === 0) {
-		await Promise.all(primaryWrites);
-		return [];
-	}
+	if (validEntries.length === 0) { return [] }
 
 	const sourcemapValue = sourcemap !== undefined && sourcemap !== false ? 'external' : false;
 	const plugins = [ virtualLoaderPlugin(fileContents) ];
@@ -186,49 +171,30 @@ async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[]
 	await mkdir(iifeOutdir, { recursive: true });
 
 	const results = await Promise.all(validEntries.map(({ name, path }) => {
-		return esbuild({
-			entryPoints: { [name]: path },
-			bundle: true,
-			format,
-			splitting: false,
-			outdir: iifeOutdir,
-			sourcemap: sourcemapValue,
-			minify,
-			write: false,
-			logLevel: 'warning',
-			plugins
-		});
+		return esbuild({ entryPoints: { [name]: path }, bundle: true, format, splitting: false, outdir: iifeOutdir, sourcemap: sourcemapValue, minify, write: false, logLevel: 'warning', plugins });
 	}));
 
-	const written: WrittenFile[] = [];
-	const writes: Promise<void>[] = [];
-	const cwd = process.cwd();
+	const written: OutputFile[] = [];
 
 	for (const { outputFiles } of results) {
 		const outputFilePaths = new Set(outputFiles.map(({ path }) => path));
 
-		for (const { path, contents } of outputFiles) {
-			let text, size = contents.byteLength;
-			if (path.endsWith(FileExtension.JS)) {
-				text = wrapAsIife(textDecoder.decode(contents), globalName);
-
-				// esbuild does not add //# sourceMappingURL= to outputFiles when write:false;
-				// append it manually when the map file is present in the result.
-				if (outputFilePaths.has(`${path}.map`)) {
-					text += `\n//# sourceMappingURL=${basename(path)}.map`;
-					size = Buffer.byteLength(text);
-				}
-			} else {
-				text = contents;
+		for (const file of outputFiles) {
+			// Non-JS outputs (source maps) pass through untouched — reading `text` would force a needless decode.
+			if (!file.path.endsWith(FileExtension.JS)) {
+				written.push(file);
+				continue;
 			}
 
-			writes.push(writeFile(path, text));
-			written.push({ path: Paths.relative(cwd, path), size });
+			let outputText = wrapAsIife(file.text, globalName);
+
+			// esbuild does not add //# sourceMappingURL= to outputFiles when write:false;
+			// append it manually when the map file is present in the result.
+			if (outputFilePaths.has(`${file.path}.map`)) { outputText += `\n//# sourceMappingURL=${basename(file.path)}.map` }
+
+			written.push({ path: file.path, contents: Buffer.from(outputText), text: outputText, hash: file.hash });
 		}
 	}
-
-	// Wait for both the IIFE writes and the parallel primary writes before returning.
-	await Promise.all([ ...writes, ...primaryWrites ]);
 
 	return written;
 }
@@ -248,9 +214,7 @@ function virtualLoaderPlugin(fileContents: Map<string, string>): Plugin {
 		 */
 		setup(build) {
 			build.onResolve({ filter: /.*/ }, (args) => {
-				if (args.kind === 'entry-point') {
-					return { path: args.path, namespace };
-				}
+				if (args.kind === 'entry-point') { return { path: args.path, namespace } }
 
 				if (!args.path.startsWith('.') && !args.path.startsWith('/')) {
 					return { external: true };

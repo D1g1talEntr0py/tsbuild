@@ -106,6 +106,121 @@ describe('Files', () => {
 		});
 	});
 
+	describe('writeFiles', () => {
+		it('writes multiple files in parallel', async () => {
+			await Files.writeFiles([
+				{ path: '/batch/a.txt' as Path, data: 'a' },
+				{ path: '/batch/b.txt' as Path, data: Buffer.from('b') },
+			]);
+
+			expect(vol.readFileSync('/batch/a.txt', 'utf8')).toBe('a');
+			expect(vol.readFileSync('/batch/b.txt', 'utf8')).toBe('b');
+		});
+
+		it('does nothing for empty write sets', async () => {
+			await expect(Files.writeFiles([])).resolves.toBeUndefined();
+		});
+
+		it('limits concurrency for large write sets', async () => {
+			const concurrencyCap = 32;
+			let activeWrites = 0;
+			let maxActiveWrites = 0;
+			let releaseWrites!: () => void;
+			const gate = new Promise<void>((resolve) => { releaseWrites = resolve });
+
+			const writeSpy = vi.spyOn(Files, 'write').mockImplementation(async () => {
+				activeWrites += 1;
+				maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
+				await gate;
+				activeWrites -= 1;
+			});
+
+			const writes = Array.from({ length: concurrencyCap * 2 }, (_, index) => ({
+				path: `/batch/${index.toString()}.txt` as Path,
+				data: `${index.toString()}`,
+			}));
+
+			const pendingWriteFiles = Files.writeFiles(writes);
+			await Promise.resolve();
+
+			expect(maxActiveWrites).toBe(concurrencyCap);
+			releaseWrites();
+			await pendingWriteFiles;
+
+			writeSpy.mockRestore();
+		});
+	});
+
+	describe('chmod', () => {
+		it('updates file mode bits', async () => {
+			await Files.write('/mode/file.sh' as Path, '#!/usr/bin/env node\n');
+			await Files.chmod('/mode/file.sh' as Path, 0o755);
+			const stats = vol.statSync('/mode/file.sh');
+			expect(Number(stats.mode) & 0o777).toBe(0o755);
+		});
+	});
+
+	describe('output helpers', () => {
+		it('rewrites extension-less relative import specifiers to .js', () => {
+			const code = [
+				'import { a } from "./dep";',
+				'export { b } from "../pkg/item";',
+				'import "./setup";',
+				'const lazy = await import("./lazy/module");'
+			].join('\n');
+
+			const rewritten = Files.rewriteRelativeSpecifiers(code);
+
+			expect(rewritten).toContain('from "./dep.js"');
+			expect(rewritten).toContain('from "../pkg/item.js"');
+			expect(rewritten).toContain('import "./setup.js"');
+			expect(rewritten).toContain('import("./lazy/module.js")');
+		});
+
+		it('leaves already extended relative imports and bare specifiers alone', () => {
+			const code = [
+				'import { a } from "pkg";',
+				'import { b } from "./dep.js";',
+				'import { c } from "./style.css";',
+				'const lazy = await import("./chunk.mjs");'
+			].join('\n');
+
+			const rewritten = Files.rewriteRelativeSpecifiers(code);
+
+			expect(rewritten).toContain('from "pkg"');
+			expect(rewritten).toContain('from "./dep.js"');
+			expect(rewritten).toContain('from "./style.css"');
+			expect(rewritten).toContain('import("./chunk.mjs")');
+		});
+
+		it('does not rewrite import-like text inside comments or string literals', () => {
+			const code = [
+				"const message = 'from \"./not-an-import\"';",
+				'// import "./also-not-an-import";',
+				'import "./real-import";'
+			].join('\n');
+
+			const rewritten = Files.rewriteRelativeSpecifiers(code);
+
+			expect(rewritten).toContain("'from \"./not-an-import\"'");
+			expect(rewritten).toContain('// import "./also-not-an-import";');
+			expect(rewritten).toContain('import "./real-import.js";');
+		});
+
+		it('rewrites dynamic imports when import attributes are present', () => {
+			const code = 'const data = await import("./config", { with: { type: "json" } });';
+
+			const rewritten = Files.rewriteRelativeSpecifiers(code);
+
+			expect(rewritten).toContain('import("./config.js", { with: { type: "json" } })');
+		});
+
+		it('detects shebangs at the start of a file', () => {
+			expect(Files.hasShebang('#!/usr/bin/env node\nconsole.log("hi");')).toBe(true);
+			expect(Files.hasShebang('console.log("hi");')).toBe(false);
+		});
+	});
+
 	describe('read', () => {
 		it('reads file contents as string', async () => {
 			vol.fromJSON({ '/test/file.txt': 'hello world' });

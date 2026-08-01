@@ -31,7 +31,7 @@ describe('tsbuild CLI', () => {
 			throw new Error(`process.exit(${code})`);
 		});
 		originalArgv = process.argv;
-		originalExitCode = process.exitCode;
+		originalExitCode = process.exitCode as number | undefined;
 		originalNpmPackageVersion = process.env['npm_package_version'];
 		vi.resetModules();
 	});
