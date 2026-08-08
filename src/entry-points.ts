@@ -1,8 +1,10 @@
-import { FileExtension } from './constants.js';
-import type { EntryPoints, RelativePath } from './@types/index.js';
+import { FileExtension } from './constants';
+import type { AbsolutePath, EntryPoints, RelativePath } from './@types/index';
 
 /** Conditional export keys tried in priority order */
 const importConditions = [ 'import', 'node', 'module', 'default' ] as const;
+const endsWithSlash = /\/$/;
+const startsWithDotSlash = /^\.\//;
 
 /**
  * Extracts the filename stem from a path (e.g., `'./src/index.ts'` → `'index'`).
@@ -19,7 +21,7 @@ function stemOf(filePath: string) {
 const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
 	[ FileExtension.JS, FileExtension.TS ],
 	[ FileExtension.JSX, FileExtension.TSX ],
-	[ FileExtension.DTS, FileExtension.TS ],
+	[ FileExtension.DTS, FileExtension.TS ]
 ]);
 
 interface PackageJsonConditionalExport { [key: string]: string | PackageJsonConditionalExport | undefined }
@@ -56,8 +58,8 @@ function unscope(name: string): string {
  * @returns The source path (e.g., `./src/index.ts`), or undefined if the path cannot be reverse-mapped
  */
 function outputToSourcePath(outputPath: string, outDir: string, sourceDir: string): RelativePath | undefined {
-	const normalizedOutput = outputPath.replace(/^\.\//, '');
-	const normalizedOutDir = outDir.replace(/^\.\//, '').replace(/\/$/, '');
+	const normalizedOutput = outputPath.replace(startsWithDotSlash, '');
+	const normalizedOutDir = outDir.replace(startsWithDotSlash, '').replace(endsWithSlash, '');
 
 	if (!normalizedOutput.startsWith(normalizedOutDir + '/') && normalizedOutput !== normalizedOutDir) { return undefined }
 
@@ -100,7 +102,7 @@ function resolveConditionalExport(exportValue: string | PackageJsonConditionalEx
 function subpathToEntryName(subpath: string, packageName?: string): string {
 	if (subpath === '.') { return packageName !== undefined ? unscope(packageName) : 'index' }
 
-	const withoutPrefix = subpath.replace(/^\.\//, '');
+	const withoutPrefix = subpath.replace(startsWithDotSlash, '');
 	const lastSegment = withoutPrefix.lastIndexOf('/');
 
 	return lastSegment === -1 ? withoutPrefix : withoutPrefix.slice(lastSegment + 1);
@@ -145,24 +147,44 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 		}
 	}
 
-	let hasEntries = false;
-	// Why use a loop to check for entries instead of Object.keys().length? Because entryPoints may have a prototype, and we only want own properties.
-	// Then why not use Object.hasOwnProperty? Because entryPoints may be a plain object without a prototype at all (i.e., `Object.create(null)`),
-	// so we can't rely on hasOwnProperty either. The safest way is to just loop through the keys and break immediately after finding the first one.
-	for (const _ in entryPoints) { hasEntries = true; break }
+	let hasEntries = Object.keys(entryPoints).length > 0;
 
 	if (!hasEntries) {
 		const legacyPath = packageJson.module ?? packageJson.main;
 		if (legacyPath !== undefined) {
 			const sourcePath = outputToSourcePath(legacyPath, outDir, sourceDir);
-			if (sourcePath) { entryPoints['index'] = sourcePath }
+			if (sourcePath) {
+				entryPoints['index'] = sourcePath;
+				hasEntries = true;
+			}
 		}
 	}
 
-	for (const _ in entryPoints) { return entryPoints }
-
-	return undefined;
+	return hasEntries ? entryPoints : undefined;
 }
 
-export { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName };
+/**
+ * Creates a mutable snapshot of resolved entry points.
+ * @param entryPoints - Resolved entry points to clone
+ * @returns A shallow copy that can be updated in place
+ */
+function cloneEntryPoints(entryPoints: EntryPoints<AbsolutePath>): EntryPoints<AbsolutePath> {
+	return { ...entryPoints };
+}
+
+/**
+ * Updates a cached entry-point map when a source file is renamed.
+ * @param entryPoints - Mutable entry point snapshot
+ * @param path - Previous absolute path
+ * @param nextPath - New absolute path
+ */
+function updateEntryPoints(entryPoints: EntryPoints<AbsolutePath> | undefined, path: AbsolutePath, nextPath: AbsolutePath): void {
+	if (entryPoints === undefined) { return }
+
+	for (const entryName of Object.keys(entryPoints)) {
+		if (entryPoints[entryName] === path) { entryPoints[entryName] = nextPath }
+	}
+}
+
+export { cloneEntryPoints, inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName, updateEntryPoints };
 export type { PackageJson, PackageJsonExports, PackageJsonConditionalExport };

@@ -253,6 +253,23 @@ describe('TypeScriptProject', () => {
 			expect(output).not.toContain("from \"magic-string\"");
 		});
 
+		it('does not read dependency metadata when noExternal is empty', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value = 1;' },
+				tsconfig: { tsbuild: { entryPoints: { index: './src/index.ts' }, clean: false }, compilerOptions: { declaration: false } }
+			});
+			cleanup = c;
+			const packagePath = join(dir, 'package.json');
+			const readSpy = vi.spyOn(Files, 'read');
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			expect(readSpy.mock.calls.some(([path]) => path === packagePath)).toBe(false);
+			readSpy.mockRestore();
+		});
+
 		it('expands a directory entry point into per-file entries', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: {
@@ -431,7 +448,7 @@ describe('TypeScriptProject', () => {
 			await project1.build();
 			project1.close();
 
-					const project2 = new TypeScriptProject(dir, { force: true, tsbuild: { clean: false } });
+			const project2 = new TypeScriptProject(dir, { tsbuild: { force: true, clean: false } });
 			await project2.build();
 			project2.close();
 
@@ -516,7 +533,12 @@ describe('TypeScriptProject', () => {
 			});
 			cleanup = c;
 
-					const project = new TypeScriptProject(dir, { watch: { enabled: true } });
+			const project = new TypeScriptProject(dir, {
+				tsbuild: {
+					clean: false,
+					watch: { enabled: true, recursive: false, persistent: false, ignoreInitial: false },
+				},
+			});
 			await project.build();
 			await new Promise<void>(resolve => setImmediate(resolve));
 

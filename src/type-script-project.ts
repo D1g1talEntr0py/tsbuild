@@ -1,25 +1,24 @@
 import { Files } from './files';
-import { Paths } from './paths.js';
-import { Json } from './json.js';
+import { Paths } from './paths';
+import { Json } from './json';
 import { Logger } from './logger';
 import { rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { TextFormat } from './text-formatter';
 import { bundleDeclarations } from './dts/declaration-bundler';
 import { externalModulesPlugin } from './plugins/external-modules';
 import { resolvePlugins } from './plugins/resolve-plugin';
 import { createIifePluginHandle } from './plugins/iife';
 import { createWriteOutputPlugin } from './plugins/output';
-import { closeOnExit } from './decorators/close-on-exit';
-import { logPerformance } from './decorators/performance-logger';
-import { debounce } from './decorators/debounce';
+import { logPerformance, flushPerformanceLog } from './decorators/performance-logger';
 import { BuildError, ConfigurationError, TypeCheckError } from './errors';
 import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
-import { inferEntryPoints, type PackageJson } from './entry-points';
-import { performance } from 'node:perf_hooks';
-import { createHash } from 'node:crypto';
+import { processManager } from './process-manager';
+import { cloneEntryPoints, inferEntryPoints, updateEntryPoints, type PackageJson } from './entry-points';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
-import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from 'src/constants';
+import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from './constants';
 import type { Message, OutputFile } from 'esbuild';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
@@ -31,10 +30,28 @@ const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS '))
 const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
 const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
 const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string => `${event}:${path}`;
+const isRenameEvent = (event: FileSystemEvent): boolean => event === 'rename' || event === 'renameDir';
+const isRenameSuppressedEvent = (event: FileSystemEvent): boolean => event === 'change' || event === 'add' || event === 'addDir' || event === 'unlink' || event === 'unlinkDir';
+const hasRenameChanges = (pendingFileChanges: ReadonlyArray<PendingFileChange>): boolean => pendingFileChanges.some(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event));
 
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
 type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
 type QueuedPendingChange = PendingFileChange & { version: number };
+
+/**
+ * Formats the observed watcher-change summary for rebuild logging.
+ * @param pendingFileChanges - Filtered watcher changes that will be applied to the rebuild
+ * @returns Human-readable rebuild summary text
+ */
+function formatPendingChangeSummary(pendingFileChanges: ReadonlyArray<PendingFileChange>): string {
+	const renamedFiles = pendingFileChanges.filter(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event)).length;
+	if (renamedFiles > 0) {
+		return `${renamedFiles} file${renamedFiles === 1 ? '' : 's'} renamed detected.`;
+	}
+
+	return `${pendingFileChanges.length} file change${pendingFileChanges.length === 1 ? '' : 's'} detected.`;
+}
+
 type BuildPlan = {
 	buildCache: TypeScriptConfiguration['buildCache'];
 	currentFingerprint: string;
@@ -44,6 +61,14 @@ type BuildPlan = {
 	useManifest: boolean;
 	previousOutputs: readonly string[] | undefined;
 	eagerCleanPromise: Promise<void> | undefined;
+};
+
+type BuildFinalizeContext = {
+	buildCache: TypeScriptConfiguration['buildCache'];
+	currentFingerprint: string;
+	fingerprintMatched: boolean;
+	previousOutputs: readonly string[] | undefined;
+	newOutputs: readonly string[];
 };
 
 /**
@@ -75,23 +100,32 @@ function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOption
 }
 
 /** Class representing a TypeScript project */
-@closeOnExit
 export class TypeScriptProject implements Closable {
 	#fileWatcher?: Watchr;
 	#builderProgram: BuilderProgram;
+	#entryPoints?: EntryPoints<AbsolutePath>;
+	#rebuildDispatch: NodeJS.Timeout | undefined;
+	#renameCycleTimer: NodeJS.Timeout | undefined;
+	#renameCycleDeadline = 0;
+	#queueRevision = 0;
+	#dispatchRevision = 0;
+	#pendingStaleOutputsCleanup?: Promise<void>;
+	#rebuildInFlight = false;
+	#rebuildPending = false;
+	/** Identity of the Program that populated buildDependencies — skip re-walking when unchanged */
+	#buildDependenciesProgram: ReturnType<BuilderProgram['getProgram']> | undefined;
+	#dependencyPaths?: Promise<string[]>;
 	readonly #directory: AbsolutePath;
 	readonly #configuration: TypeScriptConfiguration;
 	readonly #fileManager: FileManager;
 	readonly #buildConfiguration: ProjectBuildConfiguration;
 	readonly #pendingChanges: Map<string, QueuedPendingChange> = new Map();
+	readonly #pendingChangeKeysByPath: Map<AbsolutePath, string> = new Map();
 	readonly #pendingChangeStats: Map<AbsolutePath, ContentChangeSnapshot> = new Map();
 	readonly #pendingChangeVersions: Map<AbsolutePath, number> = new Map();
+	readonly #renameCyclePaths: Set<AbsolutePath> = new Set();
 	readonly #contentStates: Map<AbsolutePath, ContentChangeState> = new Map();
 	readonly #buildDependencies: Set<RelativePath> = new Set();
-	#pendingStaleOutputsCleanup?: Promise<void>;
-	/** Identity of the Program that populated buildDependencies — skip re-walking when unchanged */
-	#buildDependenciesProgram: ReturnType<BuilderProgram['getProgram']> | undefined;
-	#dependencyPaths?: Promise<string[]>;
 
 	/**
 	 * Creates a TypeScript project and prepares it for building/bundling.
@@ -112,18 +146,17 @@ export class TypeScriptProject implements Closable {
 		this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences, configFileParsingDiagnostics });
 		this.#buildConfiguration = { entryPoints: this.#getEntryPoints(entryPoints), target: toEsTarget(target), outDir, ...tsbuildOptions };
 
-		// Eagerly read package.json in parallel with TS Program creation — overlaps I/O with CPU work.
-		// `transpile()` only awaits this promise when it needs the dependency list.
-		this.#dependencyPaths = Files.read<JsonString<PackageJson>>(Paths.absolute(this.#directory, 'package.json'))
-			.then((content) => {
-				const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
-				const dependencySet = new Set<string>();
-				for (const key of Object.keys(dependencies)) { dependencySet.add(key) }
-				for (const key of Object.keys(peerDependencies)) { dependencySet.add(key) }
+		if (this.#buildConfiguration.noExternal.length > 0) {
+			// Start package metadata I/O early only when the external-modules plugin will consume it.
+			this.#dependencyPaths = Files.read<JsonString<PackageJson>>(Paths.absolute(this.#directory, 'package.json'))
+				.then((content) => {
+					const { dependencies = {}, peerDependencies = {} } = Json.parse(content);
+					return Array.from(new Set([ ...Object.keys(dependencies), ...Object.keys(peerDependencies) ]));
+				})
+				.catch(() => []);
+		}
 
-				return Array.from(dependencySet);
-			})
-			.catch(() => []);
+		processManager.addCloseable(this);
 	}
 
 	/**
@@ -204,27 +237,8 @@ export class TypeScriptProject implements Closable {
 			}
 
 			const settled = await Promise.allSettled(processes);
-
-			// Collect successful outputs (project-relative paths) for the manifest and stale-file diff.
-			const newOutputs: string[] = [];
-			for (const result of settled) {
-				if (result.status === 'rejected') { this.#handleBuildError(result.reason); continue }
-				for (const { path } of result.value) { newOutputs.push(path) }
-			}
-
-			// Defer the dts cache Brotli compression until AFTER the parallel phases complete.
-			// Running it during transpile inflates esbuild's wall time by 50-70ms via libuv threadpool contention.
-			// Pass configChanged so the new fingerprint is persisted even when TypeScript had nothing
-			// new to emit — without this, every subsequent build after a config change would see a
-			// fingerprint mismatch and force an unnecessary full rebuild.
-			this.#fileManager.persistCache(currentFingerprint, !fingerprintMatched);
-
-			// Stale-file cleanup + new manifest persistence — both fire-and-forget after the build
-			// has reported completion, so they never inflate the critical path.
-			if (buildCache !== undefined && newOutputs.length > 0) {
-				if (previousOutputs !== undefined) { this.#cleanupStaleOutputs(previousOutputs, newOutputs) }
-				void buildCache.saveOutputs(newOutputs).catch(() => { /* best-effort manifest persistence */ });
-			}
+			const newOutputs = this.#collectWrittenOutputs(settled);
+			this.#finalizeBuildArtifacts({ buildCache, currentFingerprint, fingerprintMatched, previousOutputs, newOutputs });
 		} catch (error) {
 			this.#handleBuildError(error);
 		} finally {
@@ -248,10 +262,49 @@ export class TypeScriptProject implements Closable {
 					}
 				}
 
-				// Ensure that `watch()` is called after the build by calling `setImmediate()`
-				if (this.#fileWatcher === undefined || this.#fileWatcher.isClosed()) { setImmediate(() => void this.#watch()) }
+				// Await watcher readiness so a file change occurring right after build()
+				// resolves is never absorbed by the watcher's initial baseline scan.
+				if (this.#fileWatcher === undefined || this.#fileWatcher.isClosed()) { await this.#watch() }
 			}
 		}
+	}
+
+	/**
+	 * Collects successful output paths and reports rejected phase results.
+	 * @param settled - Settled declaration/transpile phase results
+	 * @returns Project-relative output paths from successful phases
+	 */
+	#collectWrittenOutputs(settled: ReadonlyArray<PromiseSettledResult<WrittenFile[]>>): string[] {
+		const newOutputs: string[] = [];
+		for (const result of settled) {
+			if (result.status === 'rejected') {
+				this.#handleBuildError(result.reason);
+				continue;
+			}
+
+			for (const { path } of result.value) { newOutputs.push(path) }
+		}
+
+		return newOutputs;
+	}
+
+	/**
+	 * Persists build artifacts after declaration/transpile phases complete.
+	 * @param context - Build artifact finalization inputs
+	 */
+	#finalizeBuildArtifacts({ buildCache, currentFingerprint, fingerprintMatched, previousOutputs, newOutputs }: BuildFinalizeContext): void {
+		// Defer the dts cache Brotli compression until AFTER the parallel phases complete.
+		// Running it during transpile inflates esbuild's wall time by 50-70ms via libuv thread pool contention.
+		// Pass configChanged so the new fingerprint is persisted even when TypeScript had nothing
+		// new to emit — without this, every subsequent build after a config change would see a
+		// fingerprint mismatch and force an unnecessary full rebuild.
+		this.#fileManager.persistCache(currentFingerprint, !fingerprintMatched);
+
+		// Stale-file cleanup + new manifest persistence — both fire-and-forget after the build
+		// has reported completion, so they never inflate the critical path.
+		if (buildCache === undefined || newOutputs.length === 0) { return }
+		if (previousOutputs !== undefined) { this.#cleanupStaleOutputs(previousOutputs, newOutputs) }
+		void buildCache.saveOutputs(newOutputs).catch(() => { /* best-effort manifest persistence */ });
 	}
 
 	/**
@@ -266,14 +319,13 @@ export class TypeScriptProject implements Closable {
 		const currentFingerprint = buildFingerprint(this.#buildConfiguration, this.#configuration.compilerOptions);
 		const fingerprintMatched = buildCache !== undefined && await buildCache.fingerprintMatches(currentFingerprint);
 		const force = this.#configuration.tsbuild.force || !fingerprintMatched;
-
 		const cleanEnabled = this.#configuration.clean && !this.#configuration.compilerOptions.noEmit;
 
 		// Manifest-driven output cleanup: when a manifest snapshot from a prior build is available,
 		// skip the upfront clean entirely — even on --force / --clearCache. dts/transpile overwrite
 		// same-named files, and stale outputs are diffed and removed asynchronously after the build
 		// phases complete (off the critical path). This keeps the parallel `clean()` from racing
-		// libuv's threadpool with TypeScript's emit and esbuild's I/O. Pre-clean is reserved for
+		// libuv's thread pool with TypeScript's emit and esbuild's I/O. Pre-clean is reserved for
 		// truly cold builds (no manifest snapshot at all).
 		const useManifest = cleanEnabled && buildCache !== undefined && buildCache.hasPersistedManifest();
 		const previousOutputs = useManifest ? buildCache.getPreviousOutputs() : undefined;
@@ -394,7 +446,7 @@ export class TypeScriptProject implements Closable {
 						verbatimModuleSyntax: this.#configuration.compilerOptions.verbatimModuleSyntax
 					}
 				},
-				entryPoints: await this.#buildConfiguration.entryPoints,
+				entryPoints: await this.#currentEntryPoints(),
 				bundle: this.#buildConfiguration.bundle,
 				packages: this.#buildConfiguration.packages,
 				platform: this.#buildConfiguration.platform,
@@ -440,6 +492,13 @@ export class TypeScriptProject implements Closable {
 		return false;
 	}
 
+	/**
+	 * Returns the cached entry point map, resolving it once on first use.
+	 * @returns Mutable entry point map for the current build cycle
+	 */
+	async #currentEntryPoints(): Promise<EntryPoints<AbsolutePath>> {
+		return this.#entryPoints ??= cloneEntryPoints(await this.#buildConfiguration.entryPoints);
+	}
 
 	/**
 	 * Prepares plugin chain and define map for esbuild transpilation.
@@ -463,7 +522,7 @@ export class TypeScriptProject implements Closable {
 		// When packages === 'bundle', we can just use esbuild's built-in packages option
 		if (this.#buildConfiguration.noExternal.length > 0) {
 			// esbuild's `external` option doesn't support RegExp. So here we use a custom plugin to implement it
-			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths, noExternal: this.#buildConfiguration.noExternal }));
+			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths ?? [], noExternal: this.#buildConfiguration.noExternal }));
 		}
 
 		if (this.#buildConfiguration.plugins?.length) {
@@ -516,28 +575,34 @@ export class TypeScriptProject implements Closable {
 		}
 
 		const rebuild = (event: FileSystemEvent, stats: WatchrStats, path: string, nextPath?: string): void => {
-			if (stats?.size === 0 && (event === Watchr.FileEvent.add || event === Watchr.FileEvent.unlink)) { return }
-
-			if (!this.#shouldQueueRebuild(path)) { return }
+			if (!(this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(this.#relativeToProject(path as AbsolutePath)))) { return }
 
 			this.#queuePendingChange(event, stats, path as AbsolutePath, nextPath as AbsolutePath | undefined);
-			void this.#triggerRebuild();
 		};
 
 		const pathsToIgnore = [ ...this.#configuration.exclude ?? [], ...this.#buildConfiguration.watch.ignore ?? [] ];
 
 		this.#fileWatcher = new Watchr(targets, { ...this.#buildConfiguration.watch, ignore: (path: string) => pathsToIgnore.some((p) => path.includes(`/${p}/`) || path.endsWith(`/${p}`)) }, rebuild);
 
-		Logger.info(`Watching for changes in: ${targets.join(', ')}`);
+		// The watcher only reports changes observed after its initial baseline scan completes.
+		await this.#fileWatcher.readyLock;
+
+		// Deferred past build() resolution so the build summary can be flushed ahead of the banner.
+		setImmediate(() => {
+			if (this.#fileWatcher?.isClosed() ?? true) { return }
+
+			flushPerformanceLog();
+			Logger.info(`Watching for changes in: ${targets.join(', ')}`);
+		});
 	}
 
 	/**
-	 * Returns true if a file-system event should be queued for rebuild processing.
-	 * In noEmit mode we rebuild for any source change; otherwise we rebuild only tracked dependencies.
-	 * @param path - Absolute file path from watcher callback
+	 * Converts an absolute path to a project-relative path.
+	 * @param path - Absolute path to convert
+	 * @returns Project-relative path
 	 */
-	#shouldQueueRebuild(path: string): boolean {
-		return this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(Paths.relative(this.#directory, path));
+	#relativeToProject(path: AbsolutePath): RelativePath {
+		return Paths.relative(this.#directory, path);
 	}
 
 	/**
@@ -547,35 +612,159 @@ export class TypeScriptProject implements Closable {
 	 * @param path - Absolute path of changed file
 	 * @param nextPath - Absolute rename target when applicable
 	 */
-	#queuePendingChange(event: FileSystemEvent, stats: WatchrStats, path: AbsolutePath, nextPath?: AbsolutePath): void {
+	#queuePendingChange(event: FileSystemEvent, stats: WatchrStats | undefined, path: AbsolutePath, nextPath?: AbsolutePath): void {
+		const renameEvent = isRenameEvent(event);
+		const renameCycleActive = this.#isRenameCycleActive();
+		const hasActiveRenameCycle = this.#renameCyclePaths.size > 0;
+		const followsActiveRename = this.#renameCyclePaths.has(path) || (nextPath !== undefined && this.#renameCyclePaths.has(nextPath));
+
+		// Suppress only follow-up events for the renamed paths. Unrelated changes must
+		// remain queued even while the rename rebuild is in flight.
+		if (followsActiveRename && (this.#rebuildInFlight || renameCycleActive)) { return }
+		if (!renameCycleActive && hasActiveRenameCycle) { this.#renameCyclePaths.clear() }
+
+		// Renames are followed by a burst of file updates (for example VS Code rewriting
+		// imports/usages). One rebuild triggered by the rename already reads the final
+		// on-disk state, so treat the rest of that burst as part of the same cycle.
+		if (renameEvent) {
+			this.#activateRenameCycle();
+			this.#renameCyclePaths.add(path);
+			if (nextPath !== undefined) { this.#renameCyclePaths.add(nextPath) }
+		} else if (this.#renameCyclePaths.has(path) || (nextPath !== undefined && this.#renameCyclePaths.has(nextPath))) {
+			return;
+		}
+
 		const version = (this.#pendingChangeVersions.get(path) ?? 0) + 1;
 		this.#pendingChangeVersions.set(path, version);
-		this.#pendingChangeStats.set(path, { size: stats.size, modifiedTimeMs: stats.modifiedTimeMs });
+		if (stats !== undefined) {
+			this.#pendingChangeStats.set(path, { size: stats.size, modifiedTimeMs: stats.modifiedTimeMs });
+		} else {
+			this.#pendingChangeStats.delete(path);
+		}
+
+		const relatedKeys = new Set<string>();
+		const pathKey = this.#pendingChangeKeysByPath.get(path);
+		if (pathKey !== undefined) { relatedKeys.add(pathKey) }
+		if (nextPath !== undefined) {
+			const nextPathKey = this.#pendingChangeKeysByPath.get(nextPath);
+			if (nextPathKey !== undefined) { relatedKeys.add(nextPathKey) }
+		}
+		const hasRenamePendingChange = Array.from(relatedKeys, (key) => this.#pendingChanges.get(key)).some((change) => change?.nextPath !== undefined);
+
+		if (hasRenamePendingChange && isRenameSuppressedEvent(event)) { return }
+
+		for (const key of relatedKeys) { this.#deletePendingChange(key) }
 
 		// Deduplicate: the OS can fire multiple events for a single save (e.g. rename + close_write)
 		// arriving in separate Watchr flush batches. Keep one queued (path, event) pair,
 		// but refresh its metadata so change filtering sees the latest file state.
-		this.#pendingChanges.set(pendingChangeKey(event, path), { event, path, nextPath, version });
+		const key = pendingChangeKey(event, path);
+		this.#pendingChanges.set(key, { event, path, nextPath, version });
+		this.#pendingChangeKeysByPath.set(path, key);
+		if (nextPath !== undefined) { this.#pendingChangeKeysByPath.set(nextPath, key) }
+		this.#queueRevision++;
+		this.#requestRebuild();
+	}
+
+	/**
+	 * Removes a queued change and its path-index entries.
+	 * @param key - Pending-change map key to remove
+	 */
+	#deletePendingChange(key: string): void {
+		const change = this.#pendingChanges.get(key);
+		if (change === undefined) { return }
+
+		this.#pendingChanges.delete(key);
+		if (this.#pendingChangeKeysByPath.get(change.path) === key) { this.#pendingChangeKeysByPath.delete(change.path) }
+		if (change.nextPath !== undefined && this.#pendingChangeKeysByPath.get(change.nextPath) === key) { this.#pendingChangeKeysByPath.delete(change.nextPath) }
 	}
 
 	/** Closes the project and cleans up resources. */
 	close(): void {
 		this.#fileWatcher?.close();
+		if (this.#rebuildDispatch !== undefined) {
+			clearTimeout(this.#rebuildDispatch);
+			this.#rebuildDispatch = undefined;
+		}
+		if (this.#renameCycleTimer !== undefined) {
+			clearTimeout(this.#renameCycleTimer);
+			this.#renameCycleTimer = undefined;
+		}
 		this.#fileManager.close();
 		this.#pendingStaleOutputsCleanup = undefined;
 		this.#buildDependencies.clear();
+		this.#renameCyclePaths.clear();
+		this.#queueRevision = 0;
+		this.#dispatchRevision = 0;
 		this.#pendingChangeStats.clear();
 		this.#pendingChangeVersions.clear();
+		this.#pendingChangeKeysByPath.clear();
 		this.#contentStates.clear();
 		this.#buildDependenciesProgram = undefined;
 		this.#pendingChanges.clear();
 	}
 
 	/**
+	 * Starts/extends a rename suppression window so delayed follow-up edits from the same
+	 * VS Code rename operation are coalesced into the same rebuild.
+	 */
+	#activateRenameCycle(): void {
+		const timeoutMs = this.#buildConfiguration.watch.renameTimeout ?? 150;
+		this.#renameCycleDeadline = Date.now() + timeoutMs;
+
+		if (this.#renameCycleTimer !== undefined) {
+			clearTimeout(this.#renameCycleTimer);
+		}
+
+		this.#renameCycleTimer = setTimeout(() => {
+			if (!this.#isRenameCycleActive()) {
+				this.#renameCyclePaths.clear();
+				this.#renameCycleTimer = undefined;
+			}
+		}, timeoutMs + 1);
+	}
+
+	/**
+	 * Returns true while rename-cycle suppression is active.
+	 */
+	#isRenameCycleActive(): boolean {
+		return Date.now() <= this.#renameCycleDeadline;
+	}
+
+	/** Queues one rebuild after Watchr's rename-pairing window. */
+	#requestRebuild(): void {
+		if (this.#rebuildInFlight) {
+			this.#rebuildPending = true;
+			return;
+		}
+
+		if (this.#pendingChanges.size === 0) { return }
+
+		if (this.#rebuildDispatch !== undefined) { return }
+
+		const renameTimeoutMs = this.#buildConfiguration.watch.renameTimeout ?? 150;
+		this.#rebuildDispatch = setTimeout(() => {
+			this.#rebuildDispatch = undefined;
+			this.#dispatchRevision = this.#queueRevision;
+			void this.#triggerRebuild(this.#dispatchRevision);
+		}, renameTimeoutMs + 1);
+	}
+
+	/**
+	 * Waits one event-loop turn and confirms the queue has not changed.
+	 * @param expectedRevision - Queue revision snapshot captured when the rebuild was scheduled
+	 */
+	async #awaitQueueStability(expectedRevision: number): Promise<boolean> {
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		return this.#queueRevision === expectedRevision;
+	}
+
+	/**
 	 * Processes declaration files.
 	 * @returns A promise that resolves to an array of written files after processing declarations.
 	 */
-	@logPerformance('Bundle Declarations', true)
+	@logPerformance('Bundle Declarations')
 	async #processDeclarations() {
 		// If not bundling, just write declaration files to disk
 		if (!this.#buildConfiguration.bundle) { return this.#fileManager.writeFiles(this.#directory) }
@@ -583,7 +772,7 @@ export class TypeScriptProject implements Closable {
 		return bundleDeclarations({
 			currentDirectory: this.#directory,
 			declarationFiles: this.#fileManager.getDeclarationFiles(),
-			entryPoints: this.#fileManager.resolveEntryPoints(await this.#buildConfiguration.entryPoints, this.#buildConfiguration.dts.entryPoints),
+			entryPoints: this.#fileManager.resolveEntryPoints(await this.#currentEntryPoints(), this.#buildConfiguration.dts.entryPoints),
 			resolve: this.#buildConfiguration.dts.resolve,
 			external: this.#buildConfiguration.external ?? [],
 			noExternal: this.#buildConfiguration.noExternal,
@@ -600,32 +789,68 @@ export class TypeScriptProject implements Closable {
 		});
 	}
 
-	/** Triggers a rebuild after debouncing. */
-	@debounce(100)
-	async #triggerRebuild() {
+	/**
+	 * Triggers a rebuild from queued watcher events.
+	 * @param expectedRevision - Queue revision snapshot captured when the rebuild was scheduled
+	 */
+	async #triggerRebuild(expectedRevision: number) {
 		if (this.#pendingChanges.size === 0) { return }
+		if (this.#queueRevision !== expectedRevision) {
+			this.#requestRebuild();
+			return;
+		}
 
-		const pendingFileChanges = await this.#collectPendingFileChanges();
+		if (this.#rebuildInFlight) {
+			this.#rebuildPending = true;
+			return;
+		}
 
-		if (pendingFileChanges.length === 0) { return }
+		this.#rebuildInFlight = true;
+		let includesRenameChange = false;
 
-		Logger.clear();
-		Logger.info(`Rebuilding project: ${pendingFileChanges.length} file changes detected.`);
+		try {
+			const pendingFileChanges = await this.#collectPendingFileChanges();
+			includesRenameChange = hasRenameChanges(pendingFileChanges);
+			if (includesRenameChange) { this.#activateRenameCycle() }
+			const settledRevision = this.#queueRevision;
+			if (settledRevision !== expectedRevision && this.#pendingChanges.size > 0) {
+				this.#requestRebuild();
+				return;
+			}
 
-		const rootNames = [ ...this.#builderProgram.getProgram().getRootFileNames() ];
+			if (pendingFileChanges.length === 0) { return }
 
-		this.#applyPendingFileChanges(pendingFileChanges, rootNames);
+			if (!(await this.#awaitQueueStability(settledRevision))) {
+				this.#requestRebuild();
+				return;
+			}
 
-		// Ensure the previous build's .tsbuildinfo write has settled before TypeScript reads it
-		// during createIncrementalProgram(). persistCache() defers that write off the critical
-		// path; the @debounce(100) usually covers it, but flushing here removes the race entirely.
-		await this.#fileManager.flush();
+			Logger.clear();
+			Logger.info(`Rebuilding project: ${formatPendingChangeSummary(pendingFileChanges)}`);
 
-		// Recreate program with incremental support if configured
-		this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences: this.#configuration.projectReferences, configFileParsingDiagnostics: this.#configuration.configFileParsingDiagnostics });
+			const rootNames = [ ...this.#builderProgram.getProgram().getRootFileNames() ];
 
-		// build() handles its own errors - no need to catch here
-		await this.build();
+			this.#applyPendingFileChanges(pendingFileChanges, rootNames);
+
+			// Ensure the previous build's .tsbuildinfo write has settled before TypeScript reads it
+			// during createIncrementalProgram(). persistCache() defers that write off the critical
+			// path; the @debounce(100) usually covers it, but flushing here removes the race entirely.
+			await this.#fileManager.flush();
+
+			// Recreate program with incremental support if configured
+			this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences: this.#configuration.projectReferences, configFileParsingDiagnostics: this.#configuration.configFileParsingDiagnostics });
+
+			// build() handles its own errors - no need to catch here
+			await this.build();
+		} finally {
+			this.#rebuildInFlight = false;
+			if (includesRenameChange) { this.#activateRenameCycle() }
+			if (!this.#isRenameCycleActive()) { this.#renameCyclePaths.clear() }
+			if (this.#rebuildPending) {
+				this.#rebuildPending = false;
+				this.#requestRebuild();
+			}
+		}
 	}
 
 	/**
@@ -638,6 +863,7 @@ export class TypeScriptProject implements Closable {
 		while (this.#pendingChanges.size > 0) {
 			const queuedChanges = [ ...this.#pendingChanges.values() ];
 			this.#pendingChanges.clear();
+			this.#pendingChangeKeysByPath.clear();
 
 			for (const change of queuedChanges) {
 				if (await this.#isContentModified(change)) { pendingFileChanges.push(change) }
@@ -655,9 +881,10 @@ export class TypeScriptProject implements Closable {
 	#applyPendingFileChanges(pendingFileChanges: ReadonlyArray<QueuedPendingChange>, rootNames: string[]): void {
 		for (const { event, path, nextPath } of pendingFileChanges) {
 			// If a file or directory is renamed, update the path in the dependencies set
-			if (nextPath !== undefined && (event === 'rename' || event === 'renameDir')) {
-				this.#buildDependencies.delete(Paths.relative(this.#directory, path));
-				this.#buildDependencies.add(Paths.relative(this.#directory, nextPath));
+			if (nextPath !== undefined && isRenameEvent(event)) {
+				this.#buildDependencies.delete(this.#relativeToProject(path));
+				this.#buildDependencies.add(this.#relativeToProject(nextPath));
+				updateEntryPoints(this.#entryPoints, path, nextPath);
 				const previousState = this.#contentStates.get(path);
 				if (previousState !== undefined) {
 					this.#contentStates.delete(path);
@@ -714,11 +941,32 @@ export class TypeScriptProject implements Closable {
 			const digest = createHash('sha1').update(await Files.read(path)).digest('hex');
 			if (this.#pendingChangeVersions.get(path) !== version) { return false }
 
+			if (previousState === undefined) {
+				const sourceText = this.#builderProgram.getProgram().getSourceFile(path)?.text;
+				if (sourceText !== undefined) {
+					const programDigest = createHash('sha1').update(sourceText).digest('hex');
+					if (programDigest === digest) {
+						this.#contentStates.set(path, { digest, stats });
+						this.#pendingChangeStats.delete(path);
+						return false;
+					}
+				}
+			}
+
 			this.#contentStates.set(path, { digest, stats });
 			this.#pendingChangeStats.delete(path);
 
 			return previousState === undefined || previousState.digest !== digest;
-		} catch {
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			// A delayed "change" event can arrive after a rename/unlink and point to a
+			// path that no longer exists. Treat that as stale noise; the rename/unlink
+			// event already triggered the rebuild that reflects the new on-disk state.
+			if (code === 'ENOENT') {
+				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+				return false;
+			}
+
 			if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
 			return true;
 		}
@@ -769,7 +1017,7 @@ export class TypeScriptProject implements Closable {
 			packages: noExternal.length > 0 ? undefined : (platform === Platform.BROWSER ? 'bundle' : 'external'),
 			platform,
 			dts: { resolve: platform !== Platform.NODE, entryPoints: bundle ? undefined : [] },
-			watch: { enabled: false, recursive: true, ignoreInitial: true, persistent: true },
+			watch: { enabled: false, recursive: true, ignoreInitial: true, persistent: true, renameTimeout: 150 },
 			entryPoints: inferredEntryPoints ?? (bundle ? { [defaultEntryPoint]: defaultEntryFile } : { src: defaultSourceDirectory })
 		};
 

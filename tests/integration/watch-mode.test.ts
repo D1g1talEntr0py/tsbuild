@@ -1,10 +1,12 @@
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import { writeFile, readFile, stat } from 'node:fs/promises';
+import { writeFile, readFile, stat, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';
 import { processManager } from '../../src/process-manager';
 import { Files } from '../../src/files';
+import { Logger } from '../../src/logger';
 import { TestHelper } from '../scripts/test-helper';
+import type { AbsolutePath } from '../../src/@types';
 
 // When a watched path is removed (tmpdir cleanup after close(), or a rebuild's directory
 // re-scan racing teardown), watchr surfaces a "Path not found" condition two ways: as an
@@ -90,6 +92,28 @@ describe('TypeScriptProject - Watch Mode', () => {
 		expect(process.exitCode).toBeUndefined();
 	});
 
+	it('rebuilds when watchr reports a zero-size add for a tracked file', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version = 1;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>(resolve => setImmediate(resolve));
+
+		const infoSpy = vi.spyOn(Logger, 'info');
+		watchCallback?.('add', { size: 0, modifiedTimeMs: 0 }, join(dir, 'src/index.ts'));
+
+		await vi.waitFor(() => {
+			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
+			expect(rebuildLogs.length).toBeGreaterThan(0);
+		}, { timeout: 7_500, interval: 100 });
+
+		infoSpy.mockRestore();
+	});
+
 	it('keeps only the latest same-path change while async hashing is in flight', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
@@ -111,6 +135,49 @@ describe('TypeScriptProject - Watch Mode', () => {
 			expect(output.includes('version = 3') || output.includes('version=3')).toBe(true);
 			expect(process.exitCode).toBeUndefined();
 		}, { timeout: 7_500, interval: 100 });
+	});
+
+	it('rebuilds when duplicate same-file change events arrive during async hashing', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version = 1;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const indexPath = join(dir, 'src/index.ts');
+		await writeFile(indexPath, 'export const version = 2;');
+		const changedStats = await stat(indexPath);
+
+		const originalRead = Files.read.bind(Files);
+		let duplicateQueued = false;
+		let releaseRead: (() => void) | undefined;
+		const readBlocked = new Promise<void>((resolve) => {
+			releaseRead = resolve;
+		});
+
+		const readSpy = vi.spyOn(Files, 'read').mockImplementation(async (path) => {
+			if (!duplicateQueued && path === indexPath) {
+				duplicateQueued = true;
+				watchCallback?.('change', { size: changedStats.size, modifiedTimeMs: changedStats.mtimeMs }, indexPath);
+				await readBlocked;
+			}
+
+			return originalRead(path as AbsolutePath);
+		});
+
+		watchCallback?.('change', { size: changedStats.size, modifiedTimeMs: changedStats.mtimeMs }, indexPath);
+		releaseRead?.();
+
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('version = 2') || output.includes('version=2')).toBe(true);
+		}, { timeout: 7_500, interval: 100 });
+
+		readSpy.mockRestore();
 	});
 
 	it('drains watcher changes queued during async content hashing', { timeout: 15_000 }, async () => {
@@ -161,6 +228,99 @@ describe('TypeScriptProject - Watch Mode', () => {
 			expect(process.exitCode).toBeUndefined();
 		}, { timeout: 8_500, interval: 100 });
 
+		expect(process.exitCode).toBeUndefined();
+	});
+
+	it('coalesces rename follow-up events into a single rebuild', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export { value } from "./unused.js";',
+				'src/unused.ts': 'export const value = 1;'
+			},
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const infoSpy = vi.spyOn(Logger, 'info');
+		const oldPath = join(dir, 'src/unused.ts');
+		const newPath = join(dir, 'src/unused-renamed.ts');
+		await rename(oldPath, newPath);
+		const indexPath = join(dir, 'src/index.ts');
+		await writeFile(indexPath, 'export { value } from "./unused-renamed.js";');
+
+		await vi.waitFor(() => {
+			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
+			expect(rebuildLogs).toHaveLength(1);
+			expect(rebuildLogs[0]?.[0]).toBe('Rebuilding project: 1 file renamed detected.');
+		}, { timeout: 7_500, interval: 100 });
+
+		infoSpy.mockRestore();
+	});
+
+	it('rebuilds unrelated edits during rename suppression', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export { value } from "./unused.js"; export { other } from "./other.js";',
+				'src/unused.ts': 'export const value = 1;',
+				'src/other.ts': 'export const other = 1;'
+			},
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true, renameTimeout: 1_000 } } });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const infoSpy = vi.spyOn(Logger, 'info');
+		const oldPath = join(dir, 'src/unused.ts');
+		const newPath = join(dir, 'src/unused-renamed.ts');
+		await rename(oldPath, newPath);
+		await writeFile(join(dir, 'src/index.ts'), 'export { value } from "./unused-renamed.js"; export { other } from "./other.js";');
+
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output).toContain('unused-renamed');
+		}, { timeout: 7_500, interval: 100 });
+
+		await writeFile(join(dir, 'src/other.ts'), 'export const other = 2;');
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('other = 2') || output.includes('other=2')).toBe(true);
+			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
+			expect(rebuildLogs).toHaveLength(2);
+		}, { timeout: 7_500, interval: 100 });
+
+		infoSpy.mockRestore();
+	});
+
+	it('does not crash when watchr emits a rename without stats', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export const version = 1;',
+				'src/unused.ts': 'export const unused = 1;'
+			},
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const oldPath = join(dir, 'src/unused.ts');
+		const newPath = join(dir, 'src/unused-renamed.ts');
+		await rename(oldPath, newPath);
+
+		expect(() => {
+			watchCallback?.('rename', undefined as unknown as { size: number; modifiedTimeMs: number }, oldPath, newPath);
+		}).not.toThrow();
+
+		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(process.exitCode).toBeUndefined();
 	});
 
