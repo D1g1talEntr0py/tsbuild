@@ -1,6 +1,6 @@
-import { castError } from 'src/errors';
+import { castError } from '../errors';
 import { closeOnExit } from './close-on-exit';
-import type { Fn, Closable, MethodFunction, OptionalReturn, InferredFunction } from 'src/@types';
+import type { Fn, Closable, MethodFunction, OptionalReturn, InferredFunction } from '../@types';
 
 /**
  * Factory class to create debounced functions and ensure they are cleaned up on exit.

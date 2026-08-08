@@ -1,6 +1,6 @@
-import { Paths } from 'src/paths';
-import { createPatternMatcher } from 'src/pattern-matcher';
-import type { Pattern } from 'src/@types';
+import { Paths } from '../paths';
+import { createPatternMatcher } from '../pattern-matcher';
+import type { Pattern } from '../@types';
 import type { OnResolveResult, Plugin } from 'esbuild';
 
 type ExternalModulesPluginOptions = { dependencies?: Pattern[],	noExternal?: Pattern[] };

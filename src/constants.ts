@@ -21,7 +21,7 @@ const compilerOptionOverrides: CompilerOptionOverrides = {
 	// Ensure TS2742 errors are visible when `true`. TODO - Figure out how to have this work with a value of `true`
 	preserveSymlinks: false,
 	// Ensure we can parse the latest code
-	target: ScriptTarget.ESNext,
+	target: ScriptTarget.ESNext
 };
 
 /** Maps TypeScript ScriptTarget enum to esbuild-compatible EsTarget string */

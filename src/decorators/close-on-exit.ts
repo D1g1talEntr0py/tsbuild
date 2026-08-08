@@ -1,5 +1,5 @@
-import { processManager } from 'src/process-manager';
-import type { ClosableConstructor } from 'src/@types';
+import { processManager } from '../process-manager';
+import type { ClosableConstructor } from '../@types';
 
 /**
  * Decorator to automatically close the instance on process exit.
@@ -14,7 +14,6 @@ export function closeOnExit<T extends ClosableConstructor>(value: T, _context: C
 		constructor(...args: any[]) {
 			// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
 			super(...args);
-			// Classes that extend Closable will have their 'close' method called on process exit
 			processManager.addCloseable(this);
 		}
 	};

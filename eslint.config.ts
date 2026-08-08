@@ -49,6 +49,7 @@ export default defineConfig({ ignores: [ 'node_modules/**', 'tests/**', 'dist/**
 				}
 			}
 		],
+		'comma-dangle': ['error', 'never'],
 		indent:  ['error', 'tab', { SwitchCase: 1 } ],
 		'linebreak-style': ['error', 'unix'],
 		quotes: ['error', 'single'],

@@ -1,5 +1,5 @@
 import { TextFormat } from './text-formatter';
-import { dataUnits, newLine } from 'src/constants';
+import { dataUnits, newLine } from './constants';
 import type { LogEntryType, WrittenFile, PerformanceSubStep } from './@types';
 
 const LOG_1024 = Math.log(1024);

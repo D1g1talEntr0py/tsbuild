@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
-import { Paths } from 'src/paths';
-import { Logger } from 'src/logger';
-import { ConfigurationError } from 'src/errors';
+import { Paths } from '../paths';
+import { Logger } from '../logger';
+import { ConfigurationError } from '../errors';
 import type { Plugin } from 'esbuild';
-import type { PluginReference } from 'src/@types';
+import type { PluginReference } from '../@types';
 
 /**
  * Checks whether a value is an esbuild Plugin object (has `name` string and `setup` function).

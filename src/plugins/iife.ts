@@ -1,8 +1,8 @@
 import { mkdir } from 'node:fs/promises';
-import { Paths } from 'src/paths.js';
-import { FileExtension, format } from 'src/constants.js';
+import { Paths } from '../paths';
+import { FileExtension, format } from '../constants';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { AbsolutePath, IifeOptions } from '../@types/index.js';
+import type { AbsolutePath, IifeOptions } from '../@types/index';
 import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
 
 /** Result of creating an IIFE plugin, providing both the esbuild plugin and collected output file info */
