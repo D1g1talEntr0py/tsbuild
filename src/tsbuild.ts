@@ -43,6 +43,15 @@ if (help) {
 		const { TypeScriptProject } = await import('./type-script-project');
 		await new TypeScriptProject(args.project, typeScriptOptions).build();
 	} catch (error) {
-		process.exitCode = error instanceof BuildError ? error.code : 1;
+		if (error instanceof BuildError) {
+			console.error(error.message);
+			process.exitCode = error.code;
+		} else if (error instanceof Error) {
+			console.error(error);
+			process.exitCode = 1;
+		} else {
+			console.error(error);
+			process.exitCode = 1;
+		}
 	}
 }
