@@ -27,11 +27,11 @@ import ts, {
 	type ModuleDeclaration,
 	type FileReference,
 	type SourceFile,
-	type Declaration,
+	type Declaration
 } from 'typescript';
 import MagicString from 'magic-string';
-import { UnsupportedSyntaxError } from 'src/errors';
-import { FileExtension, newLine, typeMatcher } from 'src/constants';
+import { UnsupportedSyntaxError } from '../errors';
+import { FileExtension, newLine, typeMatcher } from '../constants';
 import type { NameRange, PreProcessOutput } from './@types';
 
 const commaCharacter = 44;

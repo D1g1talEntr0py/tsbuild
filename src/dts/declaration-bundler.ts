@@ -1,12 +1,12 @@
-import { Paths } from 'src/paths';
-import { createPatternMatcher } from 'src/pattern-matcher';
+import { Paths } from '../paths';
+import { createPatternMatcher } from '../pattern-matcher';
 import MagicString from 'magic-string';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, posix } from 'node:path';
-import { BundleError } from 'src/errors';
-import { Logger } from 'src/logger';
+import { BundleError } from '../errors';
+import { Logger } from '../logger';
 import { DeclarationProcessor } from './declaration-processor';
-import { defaultDirOptions, Encoding, sourceScriptExtensionExpression, FileExtension, newLine } from 'src/constants';
+import { defaultDirOptions, Encoding, sourceScriptExtensionExpression, FileExtension, newLine } from '../constants';
 import {
 	sys,
 	createSourceFile,
@@ -31,7 +31,7 @@ import {
 	forEachChild
 } from 'typescript';
 import type { SourceFile, Node, StringLiteral, ModuleResolutionHost } from 'typescript';
-import type { AbsolutePath, CachedDeclaration, WrittenFile } from 'src/@types';
+import type { AbsolutePath, CachedDeclaration, WrittenFile } from '../@types';
 import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, ExternalImport } from './@types';
 
 const nodeModules = '/node_modules/';
@@ -55,20 +55,14 @@ function mergeImports(imports: ExternalImport[]): string[] {
 			continue;
 		}
 
-		const key = `${imp.isType ? 'type:' : ''}${imp.specifier}`;
-		let entry = merged.get(key);
-		if (entry === undefined) {
-			entry = { specifier: imp.specifier, isType: imp.isType, names: new Set() };
-			merged.set(key, entry);
-		}
+		const { names } = merged.getOrInsert(`${imp.isType ? 'type:' : ''}${imp.specifier}`, { specifier: imp.specifier, isType: imp.isType, names: new Set() });
 
-		for (const name of imp.names) { entry.names.add(name) }
+		for (const name of imp.names) { names.add(name) }
 	}
 
 	const result: string[] = [];
 	for (const { specifier, isType, names } of merged.values()) {
-		const sorted = Array.from(names).sort();
-		result.push(`${isType ? 'import type' : 'import'} { ${sorted.join(', ')} } from "${specifier}";`);
+		result.push(`${isType ? 'import type' : 'import'} { ${Array.from(names).sort().join(', ')} } from "${specifier}";`);
 	}
 
 	for (const text of raw) { result.push(text) }
@@ -145,7 +139,7 @@ class DeclarationBundler {
 		},
 		getCurrentDirectory: () => this.#options.currentDirectory,
 		/* v8 ignore next */
-		getDirectories: () => [],
+		getDirectories: () => []
 	};
 
 	/**
@@ -254,13 +248,15 @@ class DeclarationBundler {
 		const cacheKey = `${importPath}|${containingFile}`;
 
 		// Check cache
-		if (this.#moduleResolutionCache.has(cacheKey)) { return this.#moduleResolutionCache.get(cacheKey) }
+		let resolvedFileName = this.#moduleResolutionCache.get(cacheKey);
+
+		if (resolvedFileName !== undefined) { return resolvedFileName }
 
 		const { resolvedModule } = resolveModuleName(importPath, containingFile, this.#options.compilerOptions, this.#moduleResolutionHost);
 
 		if (resolvedModule === undefined) { return }
 
-		let resolvedFileName = resolvedModule.resolvedFileName as AbsolutePath;
+		resolvedFileName = resolvedModule.resolvedFileName as AbsolutePath;
 
 		// If TypeScript resolved to a source file (.ts/.tsx), convert to the corresponding .d.ts file
 		// This handles cases where tsconfig paths point to source files instead of declarations
@@ -518,12 +514,11 @@ class DeclarationBundler {
 					if (importClause && !importClause.name && namedBindings && isNamedImports(namedBindings)) {
 						// Standard `import { A, B } from 'x'` or `import type { A } from 'x'`
 						const names: string[] = [];
-						for (const element of namedBindings.elements) {
-							const local = element.name.text;
-							const original = element.propertyName?.text;
+						for (const { name, propertyName, isTypeOnly } of namedBindings.elements) {
+							const original = propertyName?.text;
 							// Inline `type` markers (e.g. `import { type Foo }`) are preserved per-element
-							const prefix = element.isTypeOnly ? 'type ' : '';
-							names.push(original ? `${prefix}${original} as ${local}` : `${prefix}${local}`);
+							const prefix = isTypeOnly ? 'type ' : '';
+							names.push(original ? `${prefix}${original} as ${name.text}` : `${prefix}${name.text}`);
 						}
 						externalImports.push({ kind: 'named', specifier: moduleSpecifier, isType: isTypeOnly, names });
 					} else {
@@ -542,8 +537,10 @@ class DeclarationBundler {
 			} else if (isExportDeclaration(statement)) {
 				// Export from another module: export { X } from './module'
 				if (statement.moduleSpecifier) {
-					// Remove all export...from statements (re-exports are flattened during bundling)
-					magic.remove(statement.pos, statement.end);
+					// Keep external or unresolved re-exports verbatim so public APIs are preserved.
+					// Only strip re-exports that were actually bundled into the combined output.
+					if (bundledImportPaths.has((statement.moduleSpecifier as StringLiteral).text)) { magic.remove(statement.pos, statement.end) }
+
 					continue;
 				}
 
@@ -552,17 +549,15 @@ class DeclarationBundler {
 					// Check if this is an empty export (export {};). These are used by TypeScript to mark a file as a module
 					// Collect exported names
 					if (statement.exportClause.elements.length > 0) {
-						for (const { name, propertyName } of statement.exportClause.elements) {
-							const localName = propertyName?.text ?? name.text;
-
+						for (const { name, propertyName: { text = name.text } = {} } of statement.exportClause.elements) {
 							// Categorize as type or value. Values take precedence (classes/enums are both)
-							if (valueIdentifiers.has(localName)) {
-								valueExports.push(localName);
-							} else if (typeIdentifiers.has(localName)) {
-								typeExports.push(localName);
+							if (valueIdentifiers.has(text)) {
+								valueExports.push(text);
+							} else if (typeIdentifiers.has(text)) {
+								typeExports.push(text);
 							} else {
 								// Unknown, assume value (safer default)
-								valueExports.push(localName);
+								valueExports.push(text);
 							}
 						}
 
@@ -638,15 +633,11 @@ class DeclarationBundler {
 		// First pass: collect all declarations and detect conflicts
 		for (const { path, identifiers: { types, values } } of sortedModules) {
 			for (const name of types) {
-				let set = declarationSources.get(name);
-				if (set === undefined) { declarationSources.set(name, set = new Set()) }
-				set.add(path);
+				declarationSources.getOrInsert(name, new Set()).add(path);
 			}
 
 			for (const name of values) {
-				let set = declarationSources.get(name);
-				if (set === undefined) { declarationSources.set(name, set = new Set()) }
-				set.add(path);
+				declarationSources.getOrInsert(name, new Set()).add(path);
 			}
 		}
 
@@ -670,8 +661,8 @@ class DeclarationBundler {
 		// Collect all references and code
 		for (const { path, typeReferences, fileReferences, sourceFile, code, identifiers: { types, values } } of sortedModules) {
 			// Collect references — Sets dedupe as we go
-			for (const r of typeReferences) { typeReferencesSet.add(r) }
-			for (const r of fileReferences) { fileReferencesSet.add(r) }
+			for (const typeReference of typeReferences) { typeReferencesSet.add(typeReference) }
+			for (const fileReference of fileReferences) { fileReferencesSet.add(fileReference) }
 
 			// Strip import/export statements, preserving external imports.
 			// Use cached identifiers and sourceFile (both always present after buildModuleGraph).
@@ -718,17 +709,13 @@ class DeclarationBundler {
 
 		// Add file references
 		if (fileReferencesSet.size > 0) {
-			for (const ref of fileReferencesSet) {
-				outputParts.push(`/// <reference path="${ref}" />`);
-			}
+			for (const ref of fileReferencesSet) { outputParts.push(`/// <reference path="${ref}" />`) }
 			outputParts.push('');
 		}
 
 		// Add type references
 		if (typeReferencesSet.size > 0) {
-			for (const ref of typeReferencesSet) {
-				outputParts.push(`/// <reference types="${ref}" />`);
-			}
+			for (const ref of typeReferencesSet) { outputParts.push(`/// <reference types="${ref}" />`) }
 			outputParts.push('');
 		}
 

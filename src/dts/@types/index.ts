@@ -1,4 +1,4 @@
-import type { AbsolutePath, Brand, CachedDeclaration, EntryPoints, Pattern } from '../../@types/index.js';
+import type { AbsolutePath, Brand, CachedDeclaration, EntryPoints, Pattern } from '../../@types/index';
 import type { ModuleResolutionKind, SourceFile } from 'typescript';
 
 declare const NameRangeBrand: unique symbol;

@@ -226,6 +226,21 @@ describe('bundleDeclarations', () => {
 			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
 			expect(content).toContain("import 'some-side-effect-module';");
 		});
+
+		it('preserves external re-exports', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'export { extFn } from "ext-lib";'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			});
+
+			const result = await bundleDeclarations(options);
+			expect(result).toHaveLength(1);
+
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).toContain('export { extFn } from "ext-lib";');
+		});
 	});
 
 	describe('references', () => {

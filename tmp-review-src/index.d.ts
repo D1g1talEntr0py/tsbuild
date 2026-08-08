@@ -1,0 +1,1 @@
+export { extFn } from "ext-lib";
