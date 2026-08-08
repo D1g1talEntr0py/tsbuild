@@ -2,8 +2,26 @@ import { Files } from '../files';
 import { Paths } from '../paths';
 import { FileExtension } from '../constants';
 import type { WriteFileOptions } from 'node:fs';
-import type { AbsolutePath, WrittenFile } from '../@types';
+import type { AbsolutePath, WrittenFile, SourceFile } from '../@types';
 import type { Metafile, OutputFile, Plugin } from 'esbuild';
+
+const relativeSpecifierPredicate = ({ path: importPath }: { path: string }) =>
+	(importPath.startsWith('./') || importPath.startsWith('../')) && !importPath.endsWith('/') && !hasExtension(importPath);
+
+const hasExtension = (specifier: string) => {
+	const hashIndex = specifier.indexOf('#');
+	const queryIndex = specifier.indexOf('?');
+	let suffixStart = specifier.length;
+
+	if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
+	if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
+
+	const path = specifier.slice(0, suffixStart);
+	const lastSlashIndex = path.lastIndexOf('/');
+
+	// Determines if the last segment of the path contains a dot, indicating a file extension.
+	return (lastSlashIndex === -1 ? path : path.slice(lastSlashIndex + 1)).includes('.');
+};
 
 /**
  * Writes output files to disk, rewriting relative specifiers in JS files and setting executable permissions for entry points with shebangs.
@@ -14,64 +32,45 @@ import type { Metafile, OutputFile, Plugin } from 'esbuild';
  * @returns Array of written files with their relative paths and sizes.
  */
 async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs'], directory: AbsolutePath, iifeFiles: OutputFile[] | undefined): Promise<WrittenFile[]> {
-	const hasExtension = (specifier: string): boolean => {
-		const hashIndex = specifier.indexOf('#');
-		const queryIndex = specifier.indexOf('?');
-		let suffixStart = specifier.length;
-
-		if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
-		if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
-
-		const path = specifier.slice(0, suffixStart);
-		const lastSlashIndex = path.lastIndexOf('/');
-		const fileName = lastSlashIndex === -1 ? path : path.slice(lastSlashIndex + 1);
-		return fileName.includes('.');
-	};
-
+	const outputMetadata = new Map<AbsolutePath, Metafile['outputs'][string]>();
 	const entryPoints = new Set<string>();
-	for (const [ outputPath, { entryPoint } ] of Object.entries(outputs)) {
-		if (entryPoint && outputPath.endsWith(FileExtension.JS)) { entryPoints.add(Paths.absolute(directory, outputPath)) }
+	for (const [ outputPath, metadata ] of Object.entries(outputs)) {
+		const absolutePath = Paths.absolute(directory, outputPath);
+		outputMetadata.set(absolutePath, metadata);
+		if (metadata.entryPoint && absolutePath.endsWith(FileExtension.JS)) { entryPoints.add(absolutePath) }
 	}
 
-	const writtenFiles: WrittenFile[] = [];
-	const writeEntries: Array<{ path: AbsolutePath; data: string | NodeJS.ArrayBufferView; options?: WriteFileOptions }> = [];
-
-	const processOutput = (file: OutputFile): void => {
-		const { path, contents } = file;
-		const absolutePath = Paths.absolute(directory, path);
+	const processOutput = (file: OutputFile): SourceFile => {
+		const { contents } = file;
+		const path = Paths.absolute(directory, file.path);
 		let data: string | NodeJS.ArrayBufferView = contents;
 		let size = contents.byteLength;
 		let options: WriteFileOptions | undefined;
 
-		if (absolutePath.endsWith(FileExtension.JS)) {
-			const hasRelativeSpecifierImport = outputs[path]?.imports?.some(({ path: importPath }) =>
-				(importPath.startsWith('./') || importPath.startsWith('../'))
-				&& !importPath.endsWith('/')
-				&& !hasExtension(importPath)) ?? false;
-
-			if (hasRelativeSpecifierImport) {
+		if (path.endsWith(FileExtension.JS)) {
+			if (outputMetadata.get(path)?.imports.some(relativeSpecifierPredicate) ?? false) {
 				// `OutputFile.text` is a lazily decoded getter — only touch it for files that actually need rewriting.
-				const rawText = typeof file.text === 'string' ? file.text : Buffer.from(contents).toString('utf8');
-				const rewritten = Files.rewriteRelativeSpecifiers(rawText);
-				if (rewritten !== rawText) {
+				const text = file.text;
+				const rewritten = Files.rewriteRelativeSpecifiers(text);
+				if (rewritten !== text) {
 					data = rewritten;
 					size = Buffer.byteLength(rewritten);
 				}
 			}
 
-			if (entryPoints.has(absolutePath) && Files.hasShebang(contents)) { options = { mode: 0o755 } }
+			if (entryPoints.has(path) && Files.hasShebang(contents)) { options = { mode: 0o755 } }
 		}
 
-		writeEntries.push({ path: absolutePath, data, options });
-		writtenFiles.push({ path: Paths.relative(directory, absolutePath), size });
+		return { path, data, size, options };
 	};
 
-	for (const file of outputFiles) { processOutput(file) }
-	for (const file of iifeFiles ?? []) { processOutput(file) }
+	const writeEntries: SourceFile[] = [];
 
-	await Files.writeFiles(writeEntries);
+	for (const file of outputFiles) { writeEntries.push(processOutput(file)) }
 
-	return writtenFiles;
+	for (const file of iifeFiles ?? []) { writeEntries.push(processOutput(file)) }
+
+	return Files.writeFiles(directory, writeEntries);
 }
 
 export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (writtenFiles: WrittenFile[]) => void, iifeFiles?: OutputFile[]): Plugin => ({
@@ -81,14 +80,10 @@ export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (wri
 	 * @param build The esbuild build context.
 	 */
 	setup(build) {
-		build.onEnd(async (result) => {
-			if (result.errors.length > 0) { return }
+		build.onEnd(async ({ outputFiles, metafile: { outputs } = {}, errors }) => {
+			if (errors.length > 0 || outputs === undefined) { return }
 
-			const outputs = result.metafile?.outputs;
-			if (outputs === undefined) { return }
-
-			const writtenFiles = await writeOutput(result.outputFiles ?? [], outputs, directory, iifeFiles);
-			onWritten(writtenFiles);
+			onWritten(await writeOutput(outputFiles ?? [], outputs, directory, iifeFiles));
 		});
 	}
 });

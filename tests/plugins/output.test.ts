@@ -13,9 +13,14 @@ vi.mock('node:fs/promises', async () => {
 import { vol, fs as memfs } from 'memfs';
 import { join } from 'node:path';
 import { createWriteOutputPlugin } from 'src/plugins/output';
+import type { AbsolutePath, WrittenFile } from 'src/@types';
 import type { BuildResult, Metafile, OutputFile, PluginBuild } from 'esbuild';
 
-const outputDir = '/test-output';
+const outputDir = '/test-output' as AbsolutePath;
+
+function outputImport(path: string): Metafile['outputs'][string]['imports'][number] {
+	return { path, kind: 'import-statement' as Metafile['outputs'][string]['imports'][number]['kind'] };
+}
 
 function buildResultWith(outputFiles: OutputFile[], outputs: Record<string, Partial<Metafile['outputs'][string]>>): BuildResult {
 	const full: Metafile['outputs'] = {};
@@ -28,21 +33,27 @@ function buildResultWith(outputFiles: OutputFile[], outputs: Record<string, Part
 		warnings: [],
 		outputFiles,
 		metafile: { inputs: {}, outputs: full },
-	} as BuildResult;
+	} as unknown as BuildResult;
 }
 
 function outputFile(path: string, text: string): OutputFile {
-	return { path, contents: Buffer.from(text), text };
+	return { path, contents: Buffer.from(text), hash: 'hash', text };
+}
+
+function lazyOutputFile(path: string, text: string, onText: () => void): OutputFile {
+	const file = { path, contents: Buffer.from(text), hash: 'hash' } as OutputFile;
+	Object.defineProperty(file, 'text', { enumerable: true, get: () => { onText(); return text } });
+	return file;
 }
 
 describe('outputPlugin', () => {
 	let onEndCallback: (result: BuildResult) => Promise<void>;
-	let onWritten: ReturnType<typeof vi.fn>;
+	let onWritten: (writtenFiles: WrittenFile[]) => void;
 
 	beforeEach(() => {
 		vol.reset();
 		vol.mkdirSync(outputDir, { recursive: true });
-		onWritten = vi.fn();
+		onWritten = vi.fn() as unknown as typeof onWritten;
 
 		const build: Partial<PluginBuild> = {
 			onEnd: vi.fn((callback) => { onEndCallback = callback }),
@@ -75,6 +86,17 @@ describe('outputPlugin', () => {
 			expect(onWritten).toHaveBeenCalledWith([
 				{ path: 'cli.js', size: Buffer.byteLength('#!/usr/bin/env node\nconsole.log("hi");') },
 			]);
+		});
+
+		it('handles relative metafile output keys from esbuild', async () => {
+			const filePath = join(outputDir, 'cli.js');
+			await onEndCallback(buildResultWith(
+				[outputFile(filePath, '#!/usr/bin/env node\nconsole.log("hi");')],
+				{ 'cli.js': { entryPoint: 'src/cli.ts' } },
+			));
+
+			const stats = await memfs.promises.stat(filePath);
+			expect(Number(stats.mode) & 0o777).toBe(0o755);
 		});
 
 		it('does not change permissions for JS entry points without shebang', async () => {
@@ -152,17 +174,29 @@ describe('outputPlugin', () => {
 		});
 
 		it('handles empty metafile', async () => {
-			await onEndCallback({ errors: [], warnings: [] } as BuildResult);
+			await onEndCallback({ errors: [], warnings: [] } as unknown as BuildResult);
 			expect(onWritten).not.toHaveBeenCalled();
 		});
 
 		it('handles missing metafile', async () => {
-			await onEndCallback({ errors: [], warnings: [] } as BuildResult);
+			await onEndCallback({ errors: [], warnings: [] } as unknown as BuildResult);
 			expect(onWritten).not.toHaveBeenCalled();
 		});
 	});
 
 	describe('specifier rewriting', () => {
+		it('does not decode output text when no rewrite is needed', async () => {
+			const filePath = join(outputDir, 'index.js');
+			const onText = vi.fn();
+			await onEndCallback(buildResultWith(
+				[lazyOutputFile(filePath, 'export const value = 1;', onText)],
+				{ 'index.js': { entryPoint: 'src/index.ts' } },
+			));
+
+			expect(onText).not.toHaveBeenCalled();
+			expect(await memfs.promises.readFile(filePath, 'utf8')).toBe('export const value = 1;');
+		});
+
 		it('adds .js to extension-less relative from/side-effect/dynamic imports', async () => {
 			const filePath = join(outputDir, 'index.js');
 			await onEndCallback(buildResultWith(
@@ -172,11 +206,11 @@ describe('outputPlugin', () => {
 					'import "./setup";\n' +
 					'const m = await import("./lazy/module");\n'
 				)],
-				{ [filePath]: { entryPoint: 'src/index.ts', imports: [
-					{ path: './dep' },
-					{ path: '../pkg/item' },
-					{ path: './setup' },
-					{ path: './lazy/module' },
+				{ 'index.js': { entryPoint: 'src/index.ts', imports: [
+					outputImport('./dep'),
+					outputImport('../pkg/item'),
+					outputImport('./setup'),
+					outputImport('./lazy/module'),
 				] } },
 			));
 
@@ -197,10 +231,10 @@ describe('outputPlugin', () => {
 					'const d = await import("./chunk.mjs");\n'
 				)],
 				{ [filePath]: { entryPoint: 'src/index.ts', imports: [
-					{ path: 'pkg' },
-					{ path: './dep.js' },
-					{ path: './style.css' },
-					{ path: './chunk.mjs' },
+					outputImport('pkg'),
+					outputImport('./dep.js'),
+					outputImport('./style.css'),
+					outputImport('./chunk.mjs'),
 				] } },
 			));
 
@@ -215,7 +249,7 @@ describe('outputPlugin', () => {
 			const chunkPath = join(outputDir, 'ABC123.js');
 			await onEndCallback(buildResultWith(
 				[outputFile(chunkPath, 'import { x } from "./shared";\n')],
-				{ [chunkPath]: { imports: [{ path: './shared' }] } },
+				{ [chunkPath]: { imports: [outputImport('./shared')] } },
 			));
 
 			const rewritten = await memfs.promises.readFile(chunkPath, 'utf8');

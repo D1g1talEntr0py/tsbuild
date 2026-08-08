@@ -85,7 +85,7 @@ describe('Files', () => {
 			expect(vol.readFileSync('/output/file.txt', 'utf8')).toBe('hello world');
 		});
 
-		it('reuses an already ensured directory for repeated writes', async () => {
+		it('ensures the target directory for each write', async () => {
 			const fsp = await import('node:fs/promises');
 			const mkdirSpy = vi.spyOn(fsp, 'mkdir');
 			const directory = `/cached-${Date.now().toString(36)}`;
@@ -95,7 +95,7 @@ describe('Files', () => {
 
 			expect(vol.readFileSync(`${directory}/first.txt`, 'utf8')).toBe('one');
 			expect(vol.readFileSync(`${directory}/second.txt`, 'utf8')).toBe('two');
-			expect(mkdirSpy.mock.calls.filter(([path]) => path === directory).length).toBe(1);
+			expect(mkdirSpy.mock.calls.filter(([path]) => path === directory).length).toBe(2);
 			mkdirSpy.mockRestore();
 		});
 
@@ -108,17 +108,29 @@ describe('Files', () => {
 
 	describe('writeFiles', () => {
 		it('writes multiple files in parallel', async () => {
-			await Files.writeFiles([
+			const fsp = await import('node:fs/promises');
+			const mkdirSpy = vi.spyOn(fsp, 'mkdir');
+			const written = await Files.writeFiles('/' as AbsolutePath, [
 				{ path: '/batch/a.txt' as Path, data: 'a' },
 				{ path: '/batch/b.txt' as Path, data: Buffer.from('b') },
+				{ path: '/batch/nested/c.txt' as Path, data: 'c' },
 			]);
 
 			expect(vol.readFileSync('/batch/a.txt', 'utf8')).toBe('a');
 			expect(vol.readFileSync('/batch/b.txt', 'utf8')).toBe('b');
+			expect(vol.readFileSync('/batch/nested/c.txt', 'utf8')).toBe('c');
+			expect(written).toEqual([
+				{ path: 'batch/a.txt', size: 1 },
+				{ path: 'batch/b.txt', size: 1 },
+				{ path: 'batch/nested/c.txt', size: 1 },
+			]);
+			expect(mkdirSpy.mock.calls.filter(([path]) => path === '/batch')).toHaveLength(1);
+			expect(mkdirSpy.mock.calls.filter(([path]) => path === '/batch/nested')).toHaveLength(1);
+			mkdirSpy.mockRestore();
 		});
 
 		it('does nothing for empty write sets', async () => {
-			await expect(Files.writeFiles([])).resolves.toBeUndefined();
+			await expect(Files.writeFiles('/' as AbsolutePath, [])).resolves.toEqual([]);
 		});
 
 		it('limits concurrency for large write sets', async () => {
@@ -128,7 +140,8 @@ describe('Files', () => {
 			let releaseWrites!: () => void;
 			const gate = new Promise<void>((resolve) => { releaseWrites = resolve });
 
-			const writeSpy = vi.spyOn(Files, 'write').mockImplementation(async () => {
+			const fsp = await import('node:fs/promises');
+			const writeSpy = vi.spyOn(fsp, 'writeFile').mockImplementation(async () => {
 				activeWrites += 1;
 				maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
 				await gate;
@@ -140,14 +153,15 @@ describe('Files', () => {
 				data: `${index.toString()}`,
 			}));
 
-			const pendingWriteFiles = Files.writeFiles(writes);
-			await Promise.resolve();
-
-			expect(maxActiveWrites).toBe(concurrencyCap);
-			releaseWrites();
-			await pendingWriteFiles;
-
-			writeSpy.mockRestore();
+			const pendingWriteFiles = Files.writeFiles('/' as AbsolutePath, writes);
+			try {
+				await vi.waitFor(() => { expect(maxActiveWrites).toBe(concurrencyCap) });
+				releaseWrites();
+				await pendingWriteFiles;
+			} finally {
+				releaseWrites();
+				writeSpy.mockRestore();
+			}
 		});
 	});
 

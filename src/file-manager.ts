@@ -1,9 +1,8 @@
-import { Files } from 'src/files';
-import { Paths } from 'src/paths';
-import { defaultEntryPoint } from 'src/constants';
+import { Files } from './files';
+import { defaultEntryPoint } from './constants';
 import { DeclarationProcessor } from './dts/declaration-processor';
 import { createSourceFile, ScriptTarget } from 'typescript';
-import type { AbsolutePath, BuildCacheManager, CachedDeclaration, Closable, WrittenFile } from 'src/@types';
+import type { AbsolutePath, BuildCacheManager, CachedDeclaration, Closable, WrittenFile } from './@types';
 
 const localFileIdentifier = /\.[a-z]+$/i;
 const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
@@ -53,14 +52,14 @@ function rewriteRelativeSpecifiers(code: string): string {
  */
 export class FileManager implements Closable {
 	#hasEmittedFiles: boolean = false;
-	readonly #declarationFiles = new Map<AbsolutePath, CachedDeclaration>();
-	readonly #cache: BuildCacheManager | undefined;
-	/** Raw declaration text captured during emit, pending pre-processing */
-	readonly #pendingFiles: { path: AbsolutePath; text: string }[] = [];
 	/** Buffered .tsbuildinfo content for async write (avoids sync I/O during emit) */
 	#pendingBuildInfo: { path: string; text: string } | undefined;
 	/** Background cache save promise — awaited in initialize() and close() */
 	#pendingSave: Promise<void> | undefined;
+	readonly #declarationFiles = new Map<AbsolutePath, CachedDeclaration>();
+	readonly #cache: BuildCacheManager | undefined;
+	/** Raw declaration text captured during emit, pending pre-processing */
+	readonly #pendingFiles: { path: AbsolutePath; text: string }[] = [];
 
 	/**
 	 * Creates a new file manager.
@@ -120,7 +119,7 @@ export class FileManager implements Closable {
 		this.#processEmittedFiles();
 
 		// NOTE: neither the .tsbuildinfo write nor the dts cache Brotli compression are started here.
-		// Both are libuv-threadpool work (libuv worker for fs writes, libuv worker for zlib_brotli)
+		// Both are libuv-thread pool work (libuv worker for fs writes, libuv worker for zlib_brotli)
 		// that competes with esbuild's output writes and dts bundling I/O. Starting them during
 		// finalize() — i.e. immediately before the parallel transpile + dts phases — caused esbuild's
 		// `await build()` wall time to inflate by 50-90ms on incremental rebuilds. Caller must invoke
@@ -134,7 +133,7 @@ export class FileManager implements Closable {
 	/**
 	 * Persists the .tsbuildinfo file and the dts cache to disk in the background. Call this
 	 * AFTER the build's parallel phases (transpile + dts bundling) have completed so the writes
-	 * (and Brotli compression for the dts cache) don't compete with esbuild for libuv threadpool slots.
+	 * (and Brotli compression for the dts cache) don't compete with esbuild for libuv thread pool slots.
 	 * @param fingerprint Build configuration fingerprint for cache invalidation on config change
 	 * @param configChanged True when the build configuration fingerprint changed — forces the new
 	 *   fingerprint to be saved even when TypeScript did not re-emit any files, preventing the
@@ -175,13 +174,16 @@ export class FileManager implements Closable {
 	async writeFiles(projectDirectory: AbsolutePath): Promise<WrittenFile[]> {
 		if (this.#declarationFiles.size === 0) { return [] }
 
-		const writeTasks: Promise<WrittenFile>[] = [];
+		const writeEntries: Array<{ path: AbsolutePath; data: string; size: number }> = [];
 		for (const [ filePath, { code } ] of this.#declarationFiles) {
 			// Skip writing empty declaration files
-			if (code.length > 0) { writeTasks.push(this.#writeFile(projectDirectory, filePath, code)) }
+			if (code.length > 0) {
+				const rewritten = rewriteRelativeSpecifiers(code);
+				writeEntries.push({ path: filePath, data: rewritten, size: rewritten.length });
+			}
 		}
 
-		return Promise.all(writeTasks);
+		return Files.writeFiles(projectDirectory, writeEntries);
 	}
 
 	/**
@@ -233,20 +235,6 @@ export class FileManager implements Closable {
 			await this.#pendingSave;
 			this.#pendingSave = undefined;
 		}
-	}
-
-	/**
-	 * Writes a single declaration file to disk.
-	 * @param projectDirectory - Project root for calculating relative paths
-	 * @param filePath - The full path of the declaration file to write
-	 * @param content - The pre-processed content of the declaration file
-	 * @returns Metadata of the written file
-	 */
-	async #writeFile(projectDirectory: AbsolutePath, filePath: AbsolutePath, content: string): Promise<WrittenFile> {
-		const rewritten = rewriteRelativeSpecifiers(content);
-		await Files.write(filePath, rewritten);
-
-		return { path: Paths.relative(projectDirectory, filePath), size: rewritten.length };
 	}
 
 	/**

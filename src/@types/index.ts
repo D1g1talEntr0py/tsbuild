@@ -1,3 +1,4 @@
+import type { WriteFileOptions } from 'node:fs';
 import type { Plugin, TsconfigRaw } from 'esbuild';
 import type { FileSystemEvent, WatchrOptions } from '@d1g1tal/watchr';
 import type { CompilerOptions, Diagnostic, ProjectReference, ScriptTarget } from 'typescript';
@@ -236,6 +237,13 @@ type WrittenFile = {
 	readonly size: number;
 };
 
+type SourceFile = {
+	readonly path: AbsolutePath;
+	readonly data: string | NodeJS.ArrayBufferView;
+	readonly size: number;
+	readonly options?: WriteFileOptions;
+};
+
 // Compiler option overrides type
 type CompilerOptionOverrides = Readonly<{
 	noEmitOnError: true;
@@ -282,6 +290,7 @@ export type {
 	BuildCache,
 	BuildCacheManager,
 	WrittenFile,
+	SourceFile,
 	Pattern,
 	Closable,
 	ClosableConstructor,

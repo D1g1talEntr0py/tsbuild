@@ -68,9 +68,9 @@ describe('TypeScriptProject', () => {
 
 			const originalWriteFiles = Files.writeFiles.bind(Files);
 			let capturedEntries: Array<{ path: string; data: string | NodeJS.ArrayBufferView; options?: { mode?: number } }> = [];
-			const writeFilesSpy = vi.spyOn(Files, 'writeFiles').mockImplementation(async (entries) => {
+			const writeFilesSpy = vi.spyOn(Files, 'writeFiles').mockImplementation(async (projectDirectory, entries) => {
 				capturedEntries = entries as Array<{ path: string; data: string | NodeJS.ArrayBufferView; options?: { mode?: number } }>;
-				return await originalWriteFiles(entries);
+				return await originalWriteFiles(projectDirectory, entries);
 			});
 			const chmodSpy = vi.spyOn(Files, 'chmod').mockImplementation(async () => {
 				throw new Error('chmod should not be used for shebang writes');
