@@ -131,27 +131,55 @@ describe('logPerformance', () => {
 			expect(marks.length).toBeGreaterThan(0);
 		});
 
-		it('creates performance measures', async () => {
+		it('clears performance measures and marks after flushing', async () => {
+			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
 			class Test {
 				@logPerformance('measure test')
 				method(): void {}
 			}
 
-			performance.clearMeasures();
 			new Test().method();
+			expect(performance.getEntriesByName('method', 'measure')).toHaveLength(1);
+			expect(performance.getEntriesByName('method', 'mark')).toHaveLength(2);
 
-			// Wait for PerformanceObserver to process
-			await new Promise(resolve => setTimeout(resolve, 50));
+			flushPerformanceLog();
 
-			const measures = performance.getEntriesByType('measure');
-			expect(measures.length).toBeGreaterThan(0);
+			expect(performance.getEntriesByName('method', 'measure')).toHaveLength(0);
+			expect(performance.getEntriesByName('method', 'mark')).toHaveLength(0);
+		});
+	});
+
+	describe('flushPerformanceLog', () => {
+		it('logs queued measurements synchronously without waiting for observer delivery', async () => {
+			const { Logger } = await import('src/logger');
+			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
+
+			class Test {
+				@logPerformance('flush test')
+				method(): void {}
+			}
+
+			new Test().method();
+			flushPerformanceLog();
+
+			expect(vi.mocked(Logger.step)).toHaveBeenCalledWith(expect.stringContaining('flush test'));
+		});
+
+		it('is a no-op when nothing is queued', async () => {
+			const { Logger } = await import('src/logger');
+			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
+
+			vi.mocked(Logger.step).mockClear();
+			flushPerformanceLog();
+
+			expect(vi.mocked(Logger.step)).not.toHaveBeenCalled();
 		});
 	});
 
 	describe('logResult option', () => {
 		it('passes result when logResult is true', () => {
 			class Test {
-				@logPerformance('result op', true)
+				@logPerformance('result op')
 				method(): number[] { return [1, 2, 3] }
 			}
 

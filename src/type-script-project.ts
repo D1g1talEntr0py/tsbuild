@@ -296,8 +296,8 @@ export class TypeScriptProject implements Closable {
 	 *
 	 * @returns True if files were emitted (or non-incremental build), false if no changes detected
 	 */
-	@logPerformance('Type-checking/Emit', true)
-	async #typeCheck() {
+	@logPerformance('Type-checking/Emit')
+	async #typeCheck(): Promise<boolean> {
 		await this.#fileManager.initialize();
 
 		const allDiagnostics = this.#collectTypeCheckDiagnostics();
@@ -364,12 +364,12 @@ export class TypeScriptProject implements Closable {
 	 * Transpiles the project using esbuild.
 	 * @returns A promise that resolves to an array of written files after transpilation.
 	 */
-	@logPerformance('Transpile', true)
+	@logPerformance('Transpile')
 	async #transpile() {
 		const { build: esbuild, formatMessages } = await import('esbuild');
 		const { plugins, iifeFiles, define } = await this.#configureTranspileOptions();
 		const writtenFiles: WrittenFile[] = [];
-		plugins.push(createWriteOutputPlugin(this.#directory, (files) => { writtenFiles.push(...files) }, iifeFiles));
+		plugins.push(createWriteOutputPlugin(this.#directory, (files) => writtenFiles.push(...files), iifeFiles));
 
 		try {
 			const { warnings, errors, metafile: { outputs } = {} } = await esbuild({
