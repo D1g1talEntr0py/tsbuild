@@ -13,11 +13,7 @@ const ansiEscapePattern = /\x1b\[[0-9;]*m/g;
  * @internal
  */
 export const isWrittenFiles = (data: unknown[]): data is WrittenFile[] => {
-	if (!Array.isArray(data)) { return false }
-
-	return data.every((writtenFile): boolean => {
-		return writtenFile !== null && typeof writtenFile === 'object' && 'path' in writtenFile && 'size' in writtenFile;
-	});
+	return Array.isArray(data) ? data.every((writtenFile): boolean => writtenFile !== null && typeof writtenFile === 'object' && 'path' in writtenFile && 'size' in writtenFile) : false;
 };
 
 /**
@@ -96,8 +92,7 @@ export class Logger {
 	 * @param indent Whether to indent the message (tree structure).
 	 */
 	static step(message: string, indent: boolean = false): void {
-		const prefix = indent ? '  └─' : '✓';
-		console.log(TextFormat.green(`${prefix} ${message}`));
+		console.log(TextFormat.green(`${indent ? '  └─' : '✓'} ${message}`));
 	}
 
 	/**
@@ -118,8 +113,7 @@ export class Logger {
 
 		for (let i = 0, length = visible.length; i < length; i++) {
 			const { name, duration } = visible[i];
-			const prefix = i === length - 1 ? '  └─' : '  ├─';
-			console.log(`${TextFormat.dim(prefix)} ${TextFormat.bold(name.padEnd(maxNameLength))} ${TextFormat.cyan(duration.padStart(maxDurationLength))}`);
+			console.log(`${TextFormat.dim(i === length - 1 ? '  └─' : '  ├─')} ${TextFormat.bold(name.padEnd(maxNameLength))} ${TextFormat.cyan(duration.padStart(maxDurationLength))}`);
 		}
 	}
 
@@ -173,9 +167,7 @@ export class Logger {
 		if (data.length) {
 			if (isWrittenFiles(data)) {
 				// Only log the message if it's not empty
-				if (message) {
-					console.log(colorize(type, message, true));
-				}
+				if (message) { console.log(colorize(type, message, true)) }
 				Logger.#files(data);
 			} else {
 				console.log(colorize(type, message, true), ...data);
@@ -199,20 +191,20 @@ export class Logger {
 		for (let i = 0, length = files.length; i < length; i++) {
 			const { path, size } = files[i];
 			const { value, unit } = prettyBytes(size);
+
 			if (path.length > maxPathLength) { maxPathLength = path.length }
 			if (value.length > maxValueLength) { maxValueLength = value.length }
 			if (unit.length > maxUnitLength) { maxUnitLength = unit.length }
+
 			formatted.push({ path, value, unit });
 		}
 
 		for (let i = 0, length = formatted.length; i < length; i++) {
 			const { path, value, unit } = formatted[i];
-			const paddedPath = path.padEnd(maxPathLength);
-			const paddedValue = value.padStart(maxValueLength);
-			const paddedUnit = unit.padEnd(maxUnitLength);
 			// Determine the prefix based on the file's position in the array. Last file gets '└─', others get '├─'.
 			const prefix = i === length - 1 ? '  └─' : '  ├─';
-			console.log(`${TextFormat.dim(prefix)} ${TextFormat.bold(paddedPath)} ${TextFormat.cyan(paddedValue)} ${TextFormat.dim(paddedUnit)}`);
+
+			console.log(`${TextFormat.dim(prefix)} ${TextFormat.bold(path.padEnd(maxPathLength))} ${TextFormat.cyan(value.padStart(maxValueLength))} ${TextFormat.dim(unit.padEnd(maxUnitLength))}`);
 		}
 	}
 }

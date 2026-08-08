@@ -15,6 +15,7 @@ const isColorSupported = !('NO_COLOR' in env) && ('FORCE_COLOR' in env || (platf
  * @param head The part of the string before the current index.
  * @param tail The part of the string after the current index.
  * @param next The index of the next occurrence of `close` in `tail`.
+ * @returns The string with all occurrences of `close` replaced by `replace`.
  */
 const replaceClose = (index: number, string: string, close: string, replace: string, head = string.substring(0, index) + replace, tail = string.substring(index + close.length), next = tail.indexOf(close)): string => {
 	// This has too many parameters, but it's a private recursive function
@@ -28,6 +29,7 @@ const replaceClose = (index: number, string: string, close: string, replace: str
  * @param open The opening ANSI escape code.
  * @param close The closing ANSI escape code.
  * @param replace The ANSI escape code to replace `close` with.
+ * @returns The processed string with ANSI escape code bleed cleared.
  */
 const clearBleed = (index: number, string: string, open: string, close: string, replace: string) => {
 	return index < 0 ? `${open}${string}${close}` : `${open}${replaceClose(index, string, close, replace)}${close}`;
@@ -40,6 +42,7 @@ const clearBleed = (index: number, string: string, open: string, close: string, 
  * @param close The ANSI escape code to end the formatting.
  * @param replace The ANSI escape code to use for replacing `close` within the text.
  * @param at The position in the text to start looking for `close`.
+ * @returns A FormatSupplier function that applies the formatting.
  */
 const filterEmpty = (open: string, close: string, replace: string = open, at: number = open.length + 1): FormatSupplier => {
 	return (text: string): string => text.length ? clearBleed(text.indexOf(close, at), text, open, close, replace) : '';

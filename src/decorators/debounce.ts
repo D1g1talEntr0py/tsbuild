@@ -57,6 +57,11 @@ class DebounceManager implements Closable {
 		for (const timer of DebounceManager.#timers) { clearTimeout(timer) }
 		DebounceManager.#timers.clear();
 	}
+
+	/** Returns the string tag of the DebounceManager class. */
+	get[Symbol.toStringTag](): string {
+		return 'DebounceManager';
+	}
 }
 
 const debounceManager: DebounceManager = new DebounceManager();
@@ -82,7 +87,8 @@ export function debounce(wait: number) {
 
 		type DebouncedMethod = (...args: unknown[]) => Promise<unknown>;
 		const debouncedMethodKey = Symbol(String(context.name));
-		const createDebouncedMethod = (instance: object): DebouncedMethod => debounceManager.debounce((...args: unknown[]) => targetMethod.apply(instance, args) as unknown, wait) as DebouncedMethod;
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+		const createDebouncedMethod = (instance: object): DebouncedMethod => debounceManager.debounce((...args: unknown[]) => targetMethod.apply(instance, args), wait);
 		context.addInitializer(function(this: ThisParameterType<MethodFunction>) {
 			Object.defineProperty(this, debouncedMethodKey, { configurable: true, value: createDebouncedMethod(this as object) });
 		});

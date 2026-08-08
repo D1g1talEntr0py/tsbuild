@@ -79,7 +79,7 @@ type BuildFinalizeContext = {
  * @returns A deterministic JSON string representing the build configuration
  */
 function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOptions: CompilerOptions): string {
-	return JSON.stringify({
+	return Json.serialize({
 		minify: buildConfig.minify,
 		iife: buildConfig.iife,
 		declaration: compilerOptions.declaration,
@@ -993,10 +993,10 @@ export class TypeScriptProject implements Closable {
 		// When no entry points are explicitly configured, try to infer them from package.json
 		let inferredEntryPoints: EntryPoints<RelativePath> | undefined;
 		if (!hasExplicitEntryPoints && bundle) {
-			const packageJsonContent = sys.readFile(Paths.join(directory, 'package.json'));
+			const packageJsonContent = sys.readFile(Paths.join(directory, 'package.json')) as JsonString<PackageJson>;
 			if (packageJsonContent) {
 				try {
-					const pkgJson = JSON.parse(packageJsonContent) as PackageJson;
+					const pkgJson = Json.parse<PackageJson>(packageJsonContent);
 					const outDir = typeScriptOptions.compilerOptions?.outDir ?? configResult.config.compilerOptions?.outDir ?? defaultOutDirectory;
 					const hasExportFields = pkgJson.exports !== undefined || pkgJson.bin !== undefined || pkgJson.main !== undefined || pkgJson.module !== undefined;
 					inferredEntryPoints = inferEntryPoints(pkgJson, outDir);

@@ -1,6 +1,9 @@
 import { lstat } from 'node:fs/promises';
 import { relative, resolve, join, type ParsedPath, parse } from 'node:path';
-import type { Path, AbsolutePath, RelativePath, ConditionalPath } from 'src/@types';
+import type { Path, AbsolutePath, RelativePath, ConditionalPath } from './@types';
+
+const windowsDrivePathPattern = /^[A-Z]:[\\/]/;
+const isMissingPathError = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === 'ENOENT';
 
 /**
  * Class for path manipulations.
@@ -40,7 +43,7 @@ export class Paths {
 	 */
 	static async isDirectory<T extends Path>(path: T | string): Promise<boolean> {
 		try { return (await lstat(path)).isDirectory() } catch (error) {
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return false }
+			if (isMissingPathError(error)) { return false }
 			throw error;
 		}
 	}
@@ -52,7 +55,7 @@ export class Paths {
 	 */
 	static async isFile<T extends Path>(path: T | string): Promise<boolean> {
 		try { return (await lstat(path)).isFile() } catch (error) {
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return false }
+			if (isMissingPathError(error)) { return false }
 			throw error;
 		}
 	}
@@ -65,34 +68,11 @@ export class Paths {
 	 */
 	static isPath<T extends Path>(path: T | string): path is T {
 		if (path.length === 0) { return false }
+		if (path.startsWith('/')) { return true }
+		if (path === '.' || path === '..') { return true }
+		if (path.startsWith('./') || path.startsWith('../')) { return true }
 
-		const firstCharacter = path.charCodeAt(0);
-
-		// Check '/' (absolute path)
-		if (firstCharacter === 47) { return true }
-
-		// Check '.' (relative path: ., .., ./, ../)
-		if (firstCharacter === 46) {
-			// "."
-			if (path.length === 1) { return true }
-
-			const c1 = path.charCodeAt(1);
-			// "./"
-			if (c1 === 47) { return true }
-			// ".." or "../"
-			if (c1 === 46) { return path.length === 2 || path.charCodeAt(2) === 47 }
-
-			return false;
-		}
-
-		// Check Windows drive letter (A-Z): followed by ":\" or ":/"
-		if (firstCharacter >= 65 && firstCharacter <= 90 && path.length >= 3 && path.charCodeAt(1) === 58) {
-			const c2 = path.charCodeAt(2);
-			// "/" or "\"
-			return c2 === 47 || c2 === 92;
-		}
-
-		return false;
+		return windowsDrivePathPattern.test(path);
 	}
 
 	/**

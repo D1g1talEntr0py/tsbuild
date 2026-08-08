@@ -1,9 +1,10 @@
 import { Files } from './files';
 import { Paths } from './paths';
+import { Json } from './json';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { cacheDirectory, defaultCleanOptions, defaultDirOptions, dtsCacheFile, dtsCacheVersion as version, outputManifestFile } from './constants';
-import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration } from './@types';
+import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration, JsonString } from './@types';
 
 /**
  * Handles persistent caching of pre-processed declaration files for incremental builds.
@@ -103,8 +104,8 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	static #loadOutputsSync(manifestPath: AbsolutePath): readonly string[] | undefined {
 		try {
-			const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
-			return Array.isArray(parsed) ? parsed as string[] : undefined;
+			const parsed = Json.parse(readFileSync(manifestPath, 'utf8') as JsonString<readonly string[]>);
+			return Array.isArray(parsed) ? parsed : undefined;
 		} catch {
 			return undefined;
 		}
@@ -128,7 +129,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	async saveOutputs(outputs: readonly string[]): Promise<void> {
 		this.#outputsSnapshot = outputs.slice();
 		await mkdir(this.#cacheDirectoryPath, defaultDirOptions);
-		await writeFile(this.#outputsManifestPath, JSON.stringify(this.#outputsSnapshot), 'utf8');
+		await writeFile(this.#outputsManifestPath, Json.serialize(this.#outputsSnapshot), 'utf8');
 	}
 
 	/**

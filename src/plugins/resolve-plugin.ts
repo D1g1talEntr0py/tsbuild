@@ -74,11 +74,8 @@ async function resolveReference(reference: PluginReference, projectDir: string):
 export async function resolvePlugins(plugins: (Plugin | PluginReference)[], projectDir: string): Promise<Plugin[]> {
 	const resolved: Plugin[] = [];
 	for (const entry of plugins) {
-		if (isPlugin(entry)) {
-			resolved.push(entry);
-		} else {
-			resolved.push(await resolveReference(entry, projectDir));
-		}
+		resolved.push(isPlugin(entry) ? entry : await resolveReference(entry, projectDir));
 	}
+
 	return resolved;
 }
