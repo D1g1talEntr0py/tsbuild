@@ -1,3 +1,52 @@
+## [2.3.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.4...v2.3.0) (2026-08-08)
+* **watch:** coalesce rename bursts into stable rebuilds (a1931c37ab330645c99d9e0e0f19847e4bd7b135)
+- introduces queue revision tracking to avoid stale rebuild dispatches
+- coalesces rename-related event bursts and suppresses duplicate follow-up noise
+- waits for watcher readiness so immediate post-build edits are not missed
+- keeps dependency and entry mappings synchronized across rename events
+
+* **cli:** print errors before setting exit code (3044b67e7404945e1caeb4f136c488e8825a23cc)
+- surfaces typed build failures with readable terminal output
+- reports unexpected failures before assigning fallback nonzero status
+- improves diagnosis for command-line build failures
+
+* **dts:** preserve external re-exports in bundled types (c6670c6c493ad5e2b51cf77ec202a8819ec9aa8c)
+- keeps externally sourced re-exports instead of removing them unconditionally
+- strips only re-exports that are actually flattened into bundled output
+- adds regression coverage to protect public api forwarding behavior
+
+* **io:** batch writes and return file metadata (db6efa67de3e70ba001e9b80ed8893872ed6a6e6)
+- consolidates declaration and build output writes into bounded batched operations
+- returns written-file metadata from shared write paths to remove duplicate bookkeeping
+- avoids unnecessary text decoding when rewrite work is not required
+- preserves executable-bit handling for entry outputs with shebangs
+
+* **logging:** flush performance records synchronously (4db809e0653d4117cca89cb3e4b8ea863c331b3d)
+- adds explicit synchronous flush support for queued performance observer records
+- clears marks and measures after logging to avoid long-run accumulation
+- simplifies decorator usage by always attaching measured results
+
+* oops, forgot that I need to at least support Node 24 and removed the getOrInsert() calls (73da20688e5c1ec6b78134dcd846ff77db949c6b)
+* **process:** treat sigint as graceful cancellation (2c887725a687500fcf6eea71948ad7c95bc0bd44)
+- routes process exit and interrupt handling through one cleanup path
+- removes interrupt warning noise during intentional user cancellation
+- exits with success status to avoid false lifecycle failures in watch mode
+
+* **imports:** normalize internal module paths (fdfdf37049e0c0700dcf7bc31446b6e41aeec696)
+- replaces mixed alias-style internal imports with consistent relative imports
+- aligns nearby formatting with stricter lint expectations
+- trims redundant local comments and minor expression noise
+
+* **utils:** centralize json usage and helpers (d89d30c12a710fa1e83a8e65c175bab394fb0c23)
+- routes manifest and config serialization through shared typed json helpers
+- extends json parse and serialize helpers with optional transform hooks
+- simplifies utility branches and async return paths for readability
+
+* **deps:** refresh watcher and toolchain versions (9a7673866c8bb2882e4b9b05eb53cc338202b758)
+- updates runtime and lint-related package versions for stability and compatibility
+- removes obsolete transitive tooling that is no longer required after upgrades
+- refreshes lock data and workspace release-age exceptions for reproducible installs
+
 ## [2.2.4](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.3...v2.2.4) (2026-08-01)
 * update TypeScript project transpilation and output handling (2d512d1a48f284bcf6c378562fc3bdc3918f3905)
 - Refactored transpilation process in TypeScriptProject to improve plugin handling and output file management.
