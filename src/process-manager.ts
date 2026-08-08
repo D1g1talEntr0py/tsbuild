@@ -1,11 +1,11 @@
-import { Logger } from 'src/logger';
+import { Logger } from './logger';
 import type { Closable } from './@types';
 
 const ProcessEvent = {
 	exit: 'exit',
 	sigint: 'SIGINT',
 	uncaughtException: 'uncaughtException'
-} as const;
+};
 
 /** Manages process events and allows registering closeable classes to be closed on exit */
 class ProcessManager implements Closable {
@@ -37,27 +37,23 @@ class ProcessManager implements Closable {
 	/** Handles normal process exit */
 	#handleExit = () => {
 		if (this.#hasHandledExit) { return }
-
-		// Perform cleanup for all registered closeable classes
-		for (const closeable of this.#closeableClasses) { closeable.close() }
-
-		this.close();
+		this.#runCleanup();
 	};
 
 	/** Handles SIGINT (ctrl+c) */
 	#consoleExit = () => {
-		Logger.warn('\nProcess terminated by user');
 		this.#hasHandledExit = true;
+		this.#runCleanup();
 
-		// Perform cleanup immediately
-		for (const closeable of this.#closeableClasses) { closeable.close() }
-
-		this.close();
-
-		// Exit with standard SIGINT exit code (128 + 2 = 130)
-		// This is the conventional exit code for processes terminated by SIGINT
-		process.exit(130);
+		// Exit gracefully so package managers do not report a failed lifecycle when a user stops watch mode.
+		process.exit(0);
 	};
+
+	/** Performs closeable cleanup and detaches process listeners. */
+	#runCleanup(): void {
+		for (const closeable of this.#closeableClasses) { closeable.close() }
+		this.close();
+	}
 
 	/**
 	 * Handles uncaught exceptions and exits the process.

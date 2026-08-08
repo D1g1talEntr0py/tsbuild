@@ -16,7 +16,7 @@ describe('ProcessManager', () => {
 		vi.resetModules();
 		exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
-		const { Logger } = await import('../src/logger');
+			const { Logger } = await import('../src/logger');
 		warnSpy = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
 		errorSpy = vi.spyOn(Logger, 'error').mockImplementation(() => {});
 
@@ -94,9 +94,9 @@ describe('ProcessManager', () => {
 	});
 
 	describe('SIGINT handling', () => {
-		it('logs termination message', () => {
+		it('does not log a termination message', () => {
 			for (const listener of processManagerSigintListeners) { listener() }
-			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Process terminated by user'));
+			expect(warnSpy).not.toHaveBeenCalled();
 		});
 
 		it('calls close on all closeables', () => {
@@ -107,9 +107,9 @@ describe('ProcessManager', () => {
 			expect(closable.close).toHaveBeenCalledOnce();
 		});
 
-		it('exits with code 130', () => {
+		it('exits with code 0 for user cancellation', () => {
 			for (const listener of processManagerSigintListeners) { listener() }
-			expect(exitSpy).toHaveBeenCalledWith(130);
+			expect(exitSpy).toHaveBeenCalledWith(0);
 		});
 
 		it('sets hasHandledExit flag to prevent double-close', () => {
