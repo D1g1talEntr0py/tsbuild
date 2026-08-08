@@ -740,7 +740,12 @@ export class TypeScriptProject implements Closable {
 
 		if (this.#pendingChanges.size === 0) { return }
 
-		if (this.#rebuildDispatch !== undefined) { return }
+		if (this.#rebuildDispatch !== undefined) {
+			if (!this.#isRenameCycleActive()) { return }
+
+			clearTimeout(this.#rebuildDispatch);
+			this.#rebuildDispatch = undefined;
+		}
 
 		const renameTimeoutMs = this.#buildConfiguration.watch.renameTimeout ?? 150;
 		this.#rebuildDispatch = setTimeout(() => {
