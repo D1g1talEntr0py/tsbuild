@@ -55,9 +55,14 @@ function mergeImports(imports: ExternalImport[]): string[] {
 			continue;
 		}
 
-		const { names } = merged.getOrInsert(`${imp.isType ? 'type:' : ''}${imp.specifier}`, { specifier: imp.specifier, isType: imp.isType, names: new Set() });
+		const key = `${imp.isType ? 'type:' : ''}${imp.specifier}`;
+		let entry = merged.get(key);
+		if (entry === undefined) {
+			entry = { specifier: imp.specifier, isType: imp.isType, names: new Set() };
+			merged.set(key, entry);
+		}
 
-		for (const name of imp.names) { names.add(name) }
+		for (const name of imp.names) { entry.names.add(name) }
 	}
 
 	const result: string[] = [];
@@ -633,11 +638,15 @@ class DeclarationBundler {
 		// First pass: collect all declarations and detect conflicts
 		for (const { path, identifiers: { types, values } } of sortedModules) {
 			for (const name of types) {
-				declarationSources.getOrInsert(name, new Set()).add(path);
+				let set = declarationSources.get(name);
+				if (set === undefined) { declarationSources.set(name, set = new Set()) }
+				set.add(path);
 			}
 
 			for (const name of values) {
-				declarationSources.getOrInsert(name, new Set()).add(path);
+				let set = declarationSources.get(name);
+				if (set === undefined) { declarationSources.set(name, set = new Set()) }
+				set.add(path);
 			}
 		}
 
