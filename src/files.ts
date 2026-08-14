@@ -14,8 +14,6 @@ type WriteEntry = { path: AbsolutePath | string; data: WritableData; options?: W
 const removalBatchSize = 32;
 const writeBatchSize = 32;
 const windowsDrivePathRegex = /^[A-Za-z]:[\\/]/;
-const fileExtensionPattern = /\.[^./]+$/i;
-const relativeSpecifierCandidatePattern = /(?:\bfrom\s*['"]\.\.?\/|\bimport\s*['"]\.\.?\/|\bimport\s*\(\s*['"`]\.\.?\/)/;
 const makeDirMapper = (directory: string) => mkdir(directory, defaultDirOptions);
 
 /**
@@ -78,6 +76,7 @@ export class Files {
 	 */
 	static async write(filePath: Path | string, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }): Promise<void> {
 		await mkdir(dirname(filePath), defaultDirOptions);
+
 		return writeFile(filePath, data, options);
 	}
 
@@ -93,19 +92,13 @@ export class Files {
 	static async writeFiles(projectDirectory: AbsolutePath, entries: ReadonlyArray<WriteEntry>): Promise<WrittenFile[]> {
 		if (entries.length === 0) { return [] }
 
-		const resolveSize = ({ data, size }: WriteEntry): number => {
-			switch (true) {
-				case size !== undefined: return size;
-				case typeof data === 'string': return Buffer.byteLength(data);
-				case ArrayBuffer.isView(data): return data.byteLength;
-				default: return 0;
-			}
-		};
-
+		const writtenFiles: WrittenFile[] = [];
 		const directories = new Set<string>();
-		const writtenFiles: WrittenFile[] = entries.map((entry) => ({ path: Paths.relative(projectDirectory, entry.path), size: resolveSize(entry) }));
 
-		for (const { path } of entries) { directories.add(dirname(path)) }
+		for (const { path, data, size } of entries) {
+			writtenFiles.push({ path: Paths.relative(projectDirectory, path), size: Files.#resolveFileSize(data, size) });
+			directories.add(dirname(path));
+		}
 
 		const uniqueDirectories = Array.from(directories);
 
@@ -115,10 +108,10 @@ export class Files {
 
 		for (let i = 0, length = entries.length; i < length; i += writeBatchSize) {
 			const writes: Promise<void>[] = [];
-			for (const { path, data, options } of entries.slice(i, i + writeBatchSize)) {
+			for (let j = i; j < Math.min(i + writeBatchSize, length); j++) {
+				const { path, data, options } = entries[j];
 				writes.push(writeFile(path, data, options ?? { encoding: Encoding.utf8 }));
 			}
-
 			await Promise.all(writes);
 		}
 
@@ -131,14 +124,6 @@ export class Files {
 	 */
 	static rewriteRelativeSpecifiers(code: string): string {
 		type Replacement = { start: number; end: number; content: string };
-
-		// Fast paths for the common case where no relative module specifier rewrite is needed.
-		if (!code.includes('./') && !code.includes('../') || (!code.includes('import') && !code.includes('export')) || !relativeSpecifierCandidatePattern.test(code)) { return code }
-
-		const hasExtension = (path: string) => {
-			const index = path.lastIndexOf('/');
-			return fileExtensionPattern.test(index === -1 ? path : path.slice(index + 1));
-		};
 
 		const appendJsExtension = (specifier: string) => {
 			const hashIndex = specifier.indexOf('#');
@@ -365,5 +350,20 @@ export class Files {
 		const normalizedPath = this.normalizePath(path);
 		await mkdir(dirname(normalizedPath), defaultDirOptions);
 		return writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
+	}
+
+	/**
+	 * Resolves the size of the data to be written to a file.
+	 * @param data The data to be written.
+	 * @param size Optional size of the data. If provided, it will be used directly.
+	 * @returns The resolved size of the data.
+	 */
+	static #resolveFileSize(data: WritableData, size?: number): number {
+		switch (true) {
+			case size !== undefined: return size;
+			case typeof data === 'string': return Buffer.byteLength(data);
+			case ArrayBuffer.isView(data): return data.byteLength;
+			default: return 0;
+		}
 	}
 }

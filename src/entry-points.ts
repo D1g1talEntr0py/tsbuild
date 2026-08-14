@@ -1,6 +1,22 @@
 import { FileExtension } from './constants';
 import type { AbsolutePath, EntryPoints, RelativePath } from './@types/index';
 
+interface PackageJsonConditionalExport { [key: string]: string | PackageJsonConditionalExport | undefined }
+type PackageJsonExports = string | Record<string, string | PackageJsonConditionalExport>;
+
+/** Minimal package.json shape for entry point inference */
+type PackageJson = {
+	name?: string;
+	main?: string;
+	module?: string;
+	exports?: PackageJsonExports;
+	bin?: string | Record<string, string>;
+	dependencies?: Record<string, string>;
+	devDependencies?: Record<string, string>;
+	peerDependencies?: Record<string, string>;
+	optionalDependencies?: Record<string, string>;
+};
+
 /** Conditional export keys tried in priority order */
 const importConditions = [ 'import', 'node', 'module', 'default' ] as const;
 const endsWithSlash = /\/$/;
@@ -23,22 +39,6 @@ const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
 	[ FileExtension.JSX, FileExtension.TSX ],
 	[ FileExtension.DTS, FileExtension.TS ]
 ]);
-
-interface PackageJsonConditionalExport { [key: string]: string | PackageJsonConditionalExport | undefined }
-type PackageJsonExports = string | Record<string, string | PackageJsonConditionalExport>;
-
-/** Minimal package.json shape for entry point inference */
-type PackageJson = {
-	name?: string;
-	main?: string;
-	module?: string;
-	exports?: PackageJsonExports;
-	bin?: string | Record<string, string>;
-	dependencies?: Record<string, string>;
-	devDependencies?: Record<string, string>;
-	peerDependencies?: Record<string, string>;
-	optionalDependencies?: Record<string, string>;
-};
 
 /**
  * Strips the npm scope prefix from a package name (e.g., `'@scope/pkg'` → `'pkg'`).
@@ -164,15 +164,6 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 }
 
 /**
- * Creates a mutable snapshot of resolved entry points.
- * @param entryPoints - Resolved entry points to clone
- * @returns A shallow copy that can be updated in place
- */
-function cloneEntryPoints(entryPoints: EntryPoints<AbsolutePath>): EntryPoints<AbsolutePath> {
-	return { ...entryPoints };
-}
-
-/**
  * Updates a cached entry-point map when a source file is renamed.
  * @param entryPoints - Mutable entry point snapshot
  * @param path - Previous absolute path
@@ -186,5 +177,5 @@ function updateEntryPoints(entryPoints: EntryPoints<AbsolutePath> | undefined, p
 	}
 }
 
-export { cloneEntryPoints, inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName, updateEntryPoints };
+export { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName, updateEntryPoints };
 export type { PackageJson, PackageJsonExports, PackageJsonConditionalExport };

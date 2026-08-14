@@ -16,7 +16,7 @@ import { BuildError, ConfigurationError, TypeCheckError } from './errors';
 import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
 import { processManager } from './process-manager';
-import { cloneEntryPoints, inferEntryPoints, updateEntryPoints, type PackageJson } from './entry-points';
+import { inferEntryPoints, updateEntryPoints, type PackageJson } from './entry-points';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from './constants';
 import type { Message, OutputFile } from 'esbuild';
@@ -497,7 +497,7 @@ export class TypeScriptProject implements Closable {
 	 * @returns Mutable entry point map for the current build cycle
 	 */
 	async #currentEntryPoints(): Promise<EntryPoints<AbsolutePath>> {
-		return this.#entryPoints ??= cloneEntryPoints(await this.#buildConfiguration.entryPoints);
+		return this.#entryPoints ??= { ...(await this.#buildConfiguration.entryPoints) };
 	}
 
 	/**

@@ -1,9 +1,8 @@
 import { Files } from '../files';
 import { Paths } from '../paths';
 import { FileExtension } from '../constants';
-import type { WriteFileOptions } from 'node:fs';
-import type { AbsolutePath, WrittenFile, SourceFile } from '../@types';
 import type { Metafile, OutputFile, Plugin } from 'esbuild';
+import type { AbsolutePath, WrittenFile, Mutable, SourceFile } from '../@types';
 
 const relativeSpecifierPredicate = ({ path: importPath }: { path: string }) =>
 	(importPath.startsWith('./') || importPath.startsWith('../')) && !importPath.endsWith('/') && !hasExtension(importPath);
@@ -31,44 +30,41 @@ const hasExtension = (specifier: string) => {
  * @param iifeFiles - Array of IIFE output files, if any.
  * @returns Array of written files with their relative paths and sizes.
  */
-async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs'], directory: AbsolutePath, iifeFiles: OutputFile[] | undefined): Promise<WrittenFile[]> {
+async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs'], directory: AbsolutePath, iifeFiles: OutputFile[] = []): Promise<WrittenFile[]> {
 	const outputMetadata = new Map<AbsolutePath, Metafile['outputs'][string]>();
 	const entryPoints = new Set<string>();
+
 	for (const [ outputPath, metadata ] of Object.entries(outputs)) {
 		const absolutePath = Paths.absolute(directory, outputPath);
 		outputMetadata.set(absolutePath, metadata);
+
 		if (metadata.entryPoint && absolutePath.endsWith(FileExtension.JS)) { entryPoints.add(absolutePath) }
 	}
 
 	const processOutput = (file: OutputFile): SourceFile => {
 		const { contents } = file;
 		const path = Paths.absolute(directory, file.path);
-		let data: string | NodeJS.ArrayBufferView = contents;
-		let size = contents.byteLength;
-		let options: WriteFileOptions | undefined;
+		const sourceFile: Mutable<SourceFile> = { path, data: contents, size: contents.byteLength, options: undefined };
 
 		if (path.endsWith(FileExtension.JS)) {
 			if (outputMetadata.get(path)?.imports.some(relativeSpecifierPredicate) ?? false) {
 				// `OutputFile.text` is a lazily decoded getter — only touch it for files that actually need rewriting.
-				const text = file.text;
-				const rewritten = Files.rewriteRelativeSpecifiers(text);
-				if (rewritten !== text) {
-					data = rewritten;
-					size = Buffer.byteLength(rewritten);
-				}
+				const rewritten = Files.rewriteRelativeSpecifiers(file.text);
+				sourceFile.data = rewritten;
+				sourceFile.size = Buffer.byteLength(rewritten);
 			}
 
-			if (entryPoints.has(path) && Files.hasShebang(contents)) { options = { mode: 0o755 } }
+			if (entryPoints.has(path) && Files.hasShebang(contents)) { sourceFile.options = { mode: 0o755 } }
 		}
 
-		return { path, data, size, options };
+		return sourceFile;
 	};
 
 	const writeEntries: SourceFile[] = [];
 
 	for (const file of outputFiles) { writeEntries.push(processOutput(file)) }
 
-	for (const file of iifeFiles ?? []) { writeEntries.push(processOutput(file)) }
+	for (const file of iifeFiles) { writeEntries.push(processOutput(file)) }
 
 	return Files.writeFiles(directory, writeEntries);
 }

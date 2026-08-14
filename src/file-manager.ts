@@ -4,6 +4,7 @@ import { DeclarationProcessor } from './dts/declaration-processor';
 import { createSourceFile, ScriptTarget } from 'typescript';
 import type { AbsolutePath, BuildCacheManager, CachedDeclaration, Closable, WrittenFile } from './@types';
 
+const noop = (): void => { /* no-op */ };
 const localFileIdentifier = /\.[a-z]+$/i;
 const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
 
@@ -141,16 +142,21 @@ export class FileManager implements Closable {
 	 */
 	persistCache(fingerprint: string, configChanged = false): void {
 		const tasks: Promise<void>[] = [];
+
 		if (this.#pendingBuildInfo) {
 			tasks.push(Files.write(this.#pendingBuildInfo.path, this.#pendingBuildInfo.text));
 			this.#pendingBuildInfo = undefined;
 		}
+
 		if (this.#cache !== undefined && (this.#hasEmittedFiles || configChanged)) {
 			tasks.push(this.#cache.save(this.#declarationFiles, fingerprint));
 		}
+
 		if (tasks.length === 0) { return }
-		const save = tasks.length === 1 ? tasks[0].then(() => {}, () => {}) : Promise.all(tasks).then(() => {}, () => {});
-		this.#pendingSave = this.#pendingSave === undefined ? save : Promise.all([ this.#pendingSave, save ]).then(() => {}, () => {});
+
+		const save = tasks.length === 1 ? tasks[0].then(noop, noop) : Promise.all(tasks).then(noop, noop	);
+
+		this.#pendingSave = this.#pendingSave === undefined ? save : Promise.all([ this.#pendingSave, save ]).then(noop, noop);
 	}
 
 	/**
@@ -218,7 +224,7 @@ export class FileManager implements Closable {
 		// Await any in-flight cache save to prevent data loss on exit.
 		// ProcessManager calls close() synchronously, so we can only best-effort here.
 		// The pendingSave promise is lightweight (already running), so this is safe.
-		this.#pendingSave?.then(() => {}, () => {});
+		this.#pendingSave?.then(noop, noop);
 		this.#pendingSave = undefined;
 		this.#pendingFiles.length = 0;
 		this.#pendingBuildInfo = undefined;

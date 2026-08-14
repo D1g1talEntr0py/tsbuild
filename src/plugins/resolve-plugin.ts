@@ -3,7 +3,7 @@ import { Paths } from '../paths';
 import { Logger } from '../logger';
 import { ConfigurationError } from '../errors';
 import type { Plugin } from 'esbuild';
-import type { PluginReference } from '../@types';
+import type { PluginReference, PluginFactory } from '../@types';
 
 /**
  * Checks whether a value is an esbuild Plugin object (has `name` string and `setup` function).
@@ -14,8 +14,6 @@ function isPlugin(value: unknown): value is Plugin {
 	if (typeof value !== 'object' || value === null) { return false }
 	return 'name' in value && typeof value.name === 'string' && 'setup' in value && typeof value.setup === 'function';
 }
-
-type PluginFactory = (options: Record<string, unknown> | undefined) => unknown;
 
 /**
  * Checks whether a value is a function that can be called as a plugin factory.

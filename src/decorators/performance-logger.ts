@@ -1,7 +1,7 @@
 import { TextFormat } from '../text-formatter';
 import { Logger } from '../logger';
 import { closeOnExit } from './close-on-exit';
-import { PerformanceObserver, performance } from 'perf_hooks';
+import { PerformanceObserver, performance, type PerformanceEntryList } from 'perf_hooks';
 import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction } from '../@types';
 
 const type = 'measure';
@@ -12,10 +12,7 @@ class PerformanceLogger implements Closable {
 	readonly #performanceObserver: PerformanceObserver;
 
 	constructor() {
-		this.#performanceObserver = new PerformanceObserver((list) => {
-			this.#logEntries(list.getEntriesByType(type) as DetailedPerformanceEntry<WrittenFile[]>[]);
-		});
-
+		this.#performanceObserver = new PerformanceObserver((list) => this.#logEntries(list.getEntriesByType(type)));
 		this.#performanceObserver.observe({ type });
 	}
 
@@ -23,9 +20,9 @@ class PerformanceLogger implements Closable {
 	 * Logs measurement entries, most recent first.
 	 * @param entries - Chronologically ordered measure entries
 	 */
-	#logEntries(entries: DetailedPerformanceEntry<WrittenFile[]>[]): void {
+	#logEntries(entries: PerformanceEntryList): void {
 		// Reverse the list to display the most recent entries first
-		for (const { name, duration, detail: { message, result = [], steps } } of entries.reverse()) {
+		for (const { name, duration, detail: { message, result = [], steps } } of entries.reverse() as DetailedPerformanceEntry<WrittenFile[]>[]) {
 			// Special formatting for top-level "Build" step ⚡
 			if (message === 'Build') {
 				Logger.separator();
@@ -50,7 +47,7 @@ class PerformanceLogger implements Closable {
 
 	/** Synchronously logs any measurements still queued for async observer delivery. */
 	flush(): void {
-		this.#logEntries(this.#performanceObserver.takeRecords() as DetailedPerformanceEntry<WrittenFile[]>[]);
+		this.#logEntries(this.#performanceObserver.takeRecords());
 	}
 
 	/**

@@ -22,6 +22,10 @@ type Modify<T, R extends Partial<Record<keyof T, unknown>>> = Omit<T, keyof R> &
 type Optional<T> = T | undefined | void;
 type OptionalReturn<T extends (...args: any[]) => any> = Optional<ReturnType<T>>;
 
+type Mutable<T> = Prettify<{
+  -readonly [K in keyof T]: T[K];
+}>;
+
 type Fn<P = any, R = any> = (...args: P[]) => R;
 type TypedFunction<T extends (...args: any[]) => any> = (...args: Parameters<T>) => ReturnType<T>;
 type InferredFunction<T = Fn> = T extends (...args: infer P) => infer R ? (...args: P) => R : never;
@@ -145,6 +149,8 @@ type BuildOptions = {
  * - `[string, Record<string, unknown>]` — module specifier with options passed to the factory function
  */
 type PluginReference = string | [string, Record<string, unknown>];
+
+type PluginFactory = (options: Record<string, unknown> | undefined) => unknown;
 
 type BuildConfiguration = PrettyModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'minify' | 'bundle' | 'noExternal' | 'sourceMap'>, { watch: WatchConfiguration, dts: DtsConfiguration }>;
 
@@ -276,6 +282,7 @@ export type {
 	Brand,
 	MethodFunction,
 	OptionalReturn,
+	Mutable,
 	JsonString,
 	DetailedPerformanceMeasureOptions as PerformanceMeasureOptions,
 	DetailedPerformanceEntry,
@@ -308,6 +315,7 @@ export type {
 	EsTarget,
 	CachedDeclaration,
 	PluginReference,
+	PluginFactory,
 	IifeOptions,
 	Plugin,
 }
