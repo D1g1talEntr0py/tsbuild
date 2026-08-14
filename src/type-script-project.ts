@@ -709,8 +709,8 @@ export class TypeScriptProject implements Closable {
 	 * VS Code rename operation are coalesced into the same rebuild.
 	 */
 	#activateRenameCycle(): void {
-		const timeoutMs = this.#buildConfiguration.watch.renameTimeout ?? 150;
-		this.#renameCycleDeadline = Date.now() + timeoutMs;
+		const timeoutMs = this.#buildConfiguration.watch['renameTimeout'] ?? 150;
+		this.#renameCycleDeadline = performance.now() + timeoutMs;
 
 		if (this.#renameCycleTimer !== undefined) {
 			clearTimeout(this.#renameCycleTimer);
@@ -728,7 +728,7 @@ export class TypeScriptProject implements Closable {
 	 * Returns true while rename-cycle suppression is active.
 	 */
 	#isRenameCycleActive(): boolean {
-		return Date.now() <= this.#renameCycleDeadline;
+		return performance.now() <= this.#renameCycleDeadline;
 	}
 
 	/** Queues one rebuild after Watchr's rename-pairing window. */
@@ -747,7 +747,7 @@ export class TypeScriptProject implements Closable {
 			this.#rebuildDispatch = undefined;
 		}
 
-		const renameTimeoutMs = this.#buildConfiguration.watch.renameTimeout ?? 150;
+		const renameTimeoutMs = this.#buildConfiguration.watch['renameTimeout'] ?? 150;
 		this.#rebuildDispatch = setTimeout(() => {
 			this.#rebuildDispatch = undefined;
 			this.#dispatchRevision = this.#queueRevision;
