@@ -206,9 +206,10 @@ export class FileManager implements Closable {
 			return defaultEntryPoint in projectEntryPoints ? { [defaultEntryPoint]: projectEntryPoints[defaultEntryPoint] } : projectEntryPoints;
 		}
 
-		// Filter to only the specified entry points
 		const result: Record<string, AbsolutePath> = {};
 		const allowedEntryPoints = new Set(dtsEntryPoints);
+
+		// Filter to only the specified entry points
 		for (const [ name, path ] of Object.entries(projectEntryPoints)) {
 			if (allowedEntryPoints.has(name)) { result[name] = path }
 		}

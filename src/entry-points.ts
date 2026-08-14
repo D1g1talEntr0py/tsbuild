@@ -30,6 +30,7 @@ const startsWithDotSlash = /^\.\//;
 function stemOf(filePath: string) {
 	const base = filePath.split('/').at(-1) ?? '';
 	const dot = base.indexOf('.');
+
 	return dot === -1 ? base : base.slice(0, dot);
 }
 
@@ -47,6 +48,7 @@ const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
  */
 function unscope(name: string): string {
 	const slash = name.indexOf('/');
+
 	return slash === -1 ? name : name.slice(slash + 1);
 }
 
@@ -85,8 +87,11 @@ function resolveConditionalExport(exportValue: string | PackageJsonConditionalEx
 
 	for (const condition of importConditions) {
 		const value: string | PackageJsonConditionalExport | undefined = exportValue[condition];
+
 		if (value === undefined) { continue }
+
 		const resolved = resolveConditionalExport(value);
+
 		if (resolved !== undefined) { return resolved }
 	}
 

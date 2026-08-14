@@ -180,7 +180,6 @@ export class Logger {
 	/**
 	 * Logs an array of WrittenFile objects in a formatted manner.
 	 * @param files - The array of WrittenFile objects to log.
-	 * @internal
 	 */
 	static #files(files: WrittenFile[]): void {
 		let maxPathLength = 0;

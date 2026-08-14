@@ -24,33 +24,9 @@ import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
 import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern, Plugin } from './@types';
 
-const globCharacters = /[*?\\[\]!].*$/;
-const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
-const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
-const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
-const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
-const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string => `${event}:${path}`;
-const isRenameEvent = (event: FileSystemEvent): boolean => event === 'rename' || event === 'renameDir';
-const isRenameSuppressedEvent = (event: FileSystemEvent): boolean => event === 'change' || event === 'add' || event === 'addDir' || event === 'unlink' || event === 'unlinkDir';
-const hasRenameChanges = (pendingFileChanges: ReadonlyArray<PendingFileChange>): boolean => pendingFileChanges.some(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event));
-
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
 type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
 type QueuedPendingChange = PendingFileChange & { version: number };
-
-/**
- * Formats the observed watcher-change summary for rebuild logging.
- * @param pendingFileChanges - Filtered watcher changes that will be applied to the rebuild
- * @returns Human-readable rebuild summary text
- */
-function formatPendingChangeSummary(pendingFileChanges: ReadonlyArray<PendingFileChange>): string {
-	const renamedFiles = pendingFileChanges.filter(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event)).length;
-	if (renamedFiles > 0) {
-		return `${renamedFiles} file${renamedFiles === 1 ? '' : 's'} renamed detected.`;
-	}
-
-	return `${pendingFileChanges.length} file change${pendingFileChanges.length === 1 ? '' : 's'} detected.`;
-}
 
 type BuildPlan = {
 	buildCache: TypeScriptConfiguration['buildCache'];
@@ -70,6 +46,16 @@ type BuildFinalizeContext = {
 	previousOutputs: readonly string[] | undefined;
 	newOutputs: readonly string[];
 };
+
+const globCharacters = /[*?\\[\]!].*$/;
+const domPredicate = (lib: string) => lib.toUpperCase() === 'DOM';
+const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
+const diagnosticsHost: FormatDiagnosticsHost = { getNewLine: () => sys.newLine, getCurrentDirectory: sys.getCurrentDirectory, getCanonicalFileName: (fileName) => fileName };
+const serializePattern = (p: Pattern): string => p instanceof RegExp ? `/${p.source}/${p.flags}` : p;
+const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string => `${event}:${path}`;
+const isRenameEvent = (event: FileSystemEvent): boolean => event === 'rename' || event === 'renameDir';
+const isRenameSuppressedEvent = (event: FileSystemEvent): boolean => event === 'change' || event === 'add' || event === 'addDir' || event === 'unlink' || event === 'unlinkDir';
+const hasRenameChanges = (pendingFileChanges: ReadonlyArray<PendingFileChange>): boolean => pendingFileChanges.some(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event));
 
 /**
  * Computes a deterministic fingerprint of the build configuration.
@@ -97,6 +83,19 @@ function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOption
 		dtsEntryPoints: buildConfig.dts.entryPoints,
 		env: buildConfig.env
 	});
+}
+
+/**
+ * Formats the observed watcher-change summary for rebuild logging.
+ * @param pendingFileChanges - Filtered watcher changes that will be applied to the rebuild
+ * @returns Human-readable rebuild summary text
+ */
+function formatPendingChangeSummary(pendingFileChanges: ReadonlyArray<PendingFileChange>): string {
+	const renamedFiles = pendingFileChanges.filter(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event)).length;
+
+	if (renamedFiles > 0) { return `${renamedFiles} file${renamedFiles === 1 ? '' : 's'} renamed detected.` }
+
+	return `${pendingFileChanges.length} file change${pendingFileChanges.length === 1 ? '' : 's'} detected.`;
 }
 
 /** Class representing a TypeScript project */
@@ -800,6 +799,7 @@ export class TypeScriptProject implements Closable {
 	 */
 	async #triggerRebuild(expectedRevision: number) {
 		if (this.#pendingChanges.size === 0) { return }
+
 		if (this.#queueRevision !== expectedRevision) {
 			this.#requestRebuild();
 			return;
@@ -816,7 +816,9 @@ export class TypeScriptProject implements Closable {
 		try {
 			const pendingFileChanges = await this.#collectPendingFileChanges();
 			includesRenameChange = hasRenameChanges(pendingFileChanges);
+
 			if (includesRenameChange) { this.#activateRenameCycle() }
+
 			const settledRevision = this.#queueRevision;
 			if (settledRevision !== expectedRevision && this.#pendingChanges.size > 0) {
 				this.#requestRebuild();
@@ -850,7 +852,9 @@ export class TypeScriptProject implements Closable {
 		} finally {
 			this.#rebuildInFlight = false;
 			if (includesRenameChange) { this.#activateRenameCycle() }
+
 			if (!this.#isRenameCycleActive()) { this.#renameCyclePaths.clear() }
+
 			if (this.#rebuildPending) {
 				this.#rebuildPending = false;
 				this.#requestRebuild();
@@ -889,7 +893,9 @@ export class TypeScriptProject implements Closable {
 			if (nextPath !== undefined && isRenameEvent(event)) {
 				this.#buildDependencies.delete(this.#relativeToProject(path));
 				this.#buildDependencies.add(this.#relativeToProject(nextPath));
+
 				updateEntryPoints(this.#entryPoints, path, nextPath);
+
 				const previousState = this.#contentStates.get(path);
 				if (previousState !== undefined) {
 					this.#contentStates.delete(path);
@@ -899,6 +905,7 @@ export class TypeScriptProject implements Closable {
 				// If a root file was renamed, update it in the root names array
 				const index = rootNames.indexOf(path);
 				if (index !== -1) { rootNames.splice(index, 1, nextPath) }
+
 				continue;
 			}
 
@@ -922,6 +929,7 @@ export class TypeScriptProject implements Closable {
 	 */
 	async #isContentModified(change: QueuedPendingChange): Promise<boolean> {
 		const { event, path, nextPath, version } = change;
+
 		if (nextPath !== undefined || event !== 'change') { return true }
 
 		try {
@@ -933,13 +941,16 @@ export class TypeScriptProject implements Closable {
 			// Fast path: unchanged size/mtime means the event is metadata churn only.
 			if (stats?.size !== undefined && stats.modifiedTimeMs !== undefined && previousState?.stats?.size === stats.size && previousState.stats.modifiedTimeMs === stats.modifiedTimeMs) {
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 				return false;
 			}
 
 			// Fast path: size changes are always meaningful content changes, so skip hashing.
 			if (stats?.size !== undefined && previousState?.stats?.size !== undefined && previousState.stats.size !== stats.size) {
 				this.#contentStates.set(path, { digest: previousState.digest, stats });
+
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 				return true;
 			}
 
@@ -949,10 +960,10 @@ export class TypeScriptProject implements Closable {
 			if (previousState === undefined) {
 				const sourceText = this.#builderProgram.getProgram().getSourceFile(path)?.text;
 				if (sourceText !== undefined) {
-					const programDigest = createHash('sha1').update(sourceText).digest('hex');
-					if (programDigest === digest) {
+					if (digest === createHash('sha1').update(sourceText).digest('hex')) {
 						this.#contentStates.set(path, { digest, stats });
 						this.#pendingChangeStats.delete(path);
+
 						return false;
 					}
 				}
@@ -969,10 +980,12 @@ export class TypeScriptProject implements Closable {
 			// event already triggered the rebuild that reflects the new on-disk state.
 			if (code === 'ENOENT') {
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 				return false;
 			}
 
 			if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 			return true;
 		}
 	}
@@ -992,7 +1005,6 @@ export class TypeScriptProject implements Closable {
 		const bundle = typeScriptOptions.tsbuild?.bundle ?? configResult.config.tsbuild?.bundle ?? true;
 		const platform = configResult.config.compilerOptions?.lib?.some(domPredicate) ? Platform.BROWSER : Platform.NODE;
 		const noExternal = typeScriptOptions.tsbuild?.noExternal ?? configResult.config.tsbuild?.noExternal ?? [];
-
 		const hasExplicitEntryPoints = typeScriptOptions.tsbuild?.entryPoints !== undefined || configResult.config.tsbuild?.entryPoints !== undefined;
 
 		// When no entry points are explicitly configured, try to infer them from package.json
@@ -1045,7 +1057,9 @@ export class TypeScriptProject implements Closable {
 				// listing 'node' explicitly in their tsconfig types array.
 				types: (() => {
 					const typesSet = new Set<string>();
+
 					if (platform === Platform.NODE) { typesSet.add('node') }
+
 					for (const t of configResult.config.compilerOptions?.types ?? []) { typesSet.add(t) }
 					for (const t of typeScriptOptions.compilerOptions?.types ?? []) { typesSet.add(t) }
 
@@ -1081,8 +1095,7 @@ export class TypeScriptProject implements Closable {
 		const expandedEntryPoints: EntryPoints<AbsolutePath> = {};
 
 		for (const [ name, entryPoint ] of Object.entries(entryPoints)) {
-			const resolved = await this.#resolveEntryPoint(name, entryPoint);
-			for (const [ resolvedName, resolvedPath ] of Object.entries(resolved)) {
+			for (const [ resolvedName, resolvedPath ] of Object.entries(await this.#resolveEntryPoint(name, entryPoint))) {
 				expandedEntryPoints[resolvedName] = resolvedPath;
 			}
 		}
@@ -1099,13 +1112,9 @@ export class TypeScriptProject implements Closable {
 	async #resolveEntryPoint(name: string, entryPoint: string): Promise<EntryPoints<AbsolutePath>> {
 		const resolvedPath = Paths.absolute(this.#directory, entryPoint);
 
-		if (await Paths.isDirectory(resolvedPath)) {
-			return this.#expandDirectoryEntryPoints(resolvedPath);
-		}
+		if (await Paths.isDirectory(resolvedPath)) { return this.#expandDirectoryEntryPoints(resolvedPath) }
 
-		if (await Paths.isFile(resolvedPath)) {
-			return { [name]: resolvedPath };
-		}
+		if (await Paths.isFile(resolvedPath)) { return { [name]: resolvedPath } }
 
 		throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
 	}
@@ -1117,6 +1126,7 @@ export class TypeScriptProject implements Closable {
 	 */
 	async #expandDirectoryEntryPoints(directory: AbsolutePath): Promise<EntryPoints<AbsolutePath>> {
 		const entries: EntryPoints<AbsolutePath> = {};
+
 		for (const file of await Files.readDirectory(directory)) {
 			const filePath = Paths.join(directory, file);
 			if (await Paths.isFile(filePath)) { entries[Paths.parse(file).name] = filePath }
@@ -1135,13 +1145,16 @@ export class TypeScriptProject implements Closable {
 		// ConfigurationError is not logged before being thrown, so log it here
 		if (error instanceof ConfigurationError) {
 			Logger.error(error.message);
+
 			if (!this.#buildConfiguration.watch.enabled) { process.exitCode = error.code }
+
 			return;
 		}
 
 		// TypeCheckError and BundleError are already logged when they occur - just set the exit code
 		if (error instanceof BuildError) {
 			if (!this.#buildConfiguration.watch.enabled) { process.exitCode = error.code }
+
 			return;
 		}
 
@@ -1163,16 +1176,17 @@ export class TypeScriptProject implements Closable {
 
 		// Build error summary by file (single pass)
 		const filesWithErrors = new Map<string, { count: number; line: number }>();
+
 		for (const { file, start } of diagnostics) {
-			if (file !== undefined) {
-				const { line } = file.getLineAndCharacterOfPosition(start ?? 0);
-				const existing = filesWithErrors.get(file.fileName);
-				if (existing !== undefined) {
-					existing.count++;
-					existing.line = Math.min(existing.line, line);
-				} else {
-					filesWithErrors.set(file.fileName, { count: 1, line });
-				}
+			if (file === undefined) { continue }
+
+			const { line } = file.getLineAndCharacterOfPosition(start ?? 0);
+			const existing = filesWithErrors.get(file.fileName);
+			if (existing !== undefined) {
+				existing.count++;
+				existing.line = Math.min(existing.line, line);
+			} else {
+				filesWithErrors.set(file.fileName, { count: 1, line });
 			}
 		}
 
@@ -1189,6 +1203,7 @@ export class TypeScriptProject implements Closable {
 		} else {
 			Logger.error(`Found ${errorCount} errors in ${fileCount} files.${sys.newLine}`);
 			Logger.error('Errors  Files');
+
 			for (const [fileName, { count, line }] of filesWithErrors) { Logger.error(`     ${count}  ${fileName}:${line + 1}`) }
 		}
 

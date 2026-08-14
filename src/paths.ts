@@ -68,8 +68,9 @@ export class Paths {
 	 */
 	static isPath<T extends Path>(path: T | string): path is T {
 		if (path.length === 0) { return false }
-		if (path.startsWith('/')) { return true }
-		if (path === '.' || path === '..') { return true }
+
+		if (path.startsWith('/') || path === '.' || path === '..') { return true }
+
 		if (path.startsWith('./') || path.startsWith('../')) { return true }
 
 		return windowsDrivePathPattern.test(path);
