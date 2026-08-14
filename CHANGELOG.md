@@ -1,3 +1,11 @@
+## [2.3.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.3.0...v2.3.1) (2026-08-14)
+* **files:** preserve suffixes in relative module specifiers (69f202a7bfc26b7129e7f4faaf0576783660061f)
+* **watch:** use high-resolution timing for rename detection (cd3da0cf454b74778c58587a4c256376bd9b0de6)
+* enhance core infrastructure and type system (44bdd7dd0b680da1da5afecc16260d9cb1323a1f)
+* **project:** reorganize project structure and cleanup (7731a819579bed16e47bd6ac2b0b320b6551087b)
+* **deps:** update dependencies and tooling configuration (3ca746d9867df56a289e45dea08f9db7a6d703d7)
+* **compat:** Updated the watcher’s rebuild scheduling so a pending rebuild timer is restarted when new events arrive during an active rename cycle. This fixes compatibility with TypeScript 5.6.3 and 5.7 (a2e1d5e27fa2b77f5f55fd88811d17b0eb2a9f4a)
+
 ## [2.3.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.2.4...v2.3.0) (2026-08-08)
 * **watch:** coalesce rename bursts into stable rebuilds (a1931c37ab330645c99d9e0e0f19847e4bd7b135)
 - introduces queue revision tracking to avoid stale rebuild dispatches
