@@ -133,27 +133,16 @@ export class Files {
 			if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
 			if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
 
-			const path = specifier.slice(0, suffixStart);
-			if (path.endsWith('/') || hasExtension(path)) { return specifier }
-
-			return `${path}${FileExtension.JS}${specifier.slice(suffixStart)}`;
+			return `${specifier.slice(0, suffixStart)}${FileExtension.JS}${specifier.slice(suffixStart)}`;
 		};
 
-		const isRelativeSpecifier = (specifier: string) => specifier.startsWith('./') || specifier.startsWith('../');
 		const scanner = createScanner(ScriptTarget.Latest, true, LanguageVariant.Standard, code);
 
 		const replacements: Replacement[] = [];
 		const addSpecifierRewrite = (start: number, end: number, tokenText: string) => {
-			if (tokenText.length < 2) { return }
-
 			const quote = tokenText[0];
 			const specifier = tokenText.slice(1, -1);
-			if (!isRelativeSpecifier(specifier)) { return }
-
-			const rewritten = appendJsExtension(specifier);
-			if (rewritten === specifier) { return }
-
-			replacements.push({ start, end, content: `${quote}${rewritten}${quote}` });
+			replacements.push({ start, end, content: `${quote}${appendJsExtension(specifier)}${quote}` });
 		};
 
 		let seenImportOrExport = false;

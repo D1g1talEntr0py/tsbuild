@@ -191,20 +191,20 @@ describe('Files', () => {
 			expect(rewritten).toContain('import("./lazy/module.js")');
 		});
 
-		it('leaves already extended relative imports and bare specifiers alone', () => {
+		it('rewrites scanned module specifiers and preserves their suffixes', () => {
 			const code = [
-				'import { a } from "pkg";',
-				'import { b } from "./dep.js";',
-				'import { c } from "./style.css";',
-				'const lazy = await import("./chunk.mjs");'
+				'import { a } from "./dep?raw";',
+				'import { b } from "../pkg/item#fragment";',
+				'import "./setup";',
+				'const lazy = await import("./lazy/module");'
 			].join('\n');
 
 			const rewritten = Files.rewriteRelativeSpecifiers(code);
 
-			expect(rewritten).toContain('from "pkg"');
-			expect(rewritten).toContain('from "./dep.js"');
-			expect(rewritten).toContain('from "./style.css"');
-			expect(rewritten).toContain('import("./chunk.mjs")');
+			expect(rewritten).toContain('from "./dep.js?raw"');
+			expect(rewritten).toContain('from "../pkg/item.js#fragment"');
+			expect(rewritten).toContain('import "./setup.js"');
+			expect(rewritten).toContain('import("./lazy/module.js")');
 		});
 
 		it('does not rewrite import-like text inside comments or string literals', () => {
