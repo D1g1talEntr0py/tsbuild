@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=22.6.0"
   },
-  "packageManager": "pnpm@11.20.0",
+  "packageManager": "pnpm@11.21.0",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
@@ -56,24 +56,22 @@
     "test:compat": "tsnode tests/scripts/test-ts-compat.ts --versions 5"
   },
   "dependencies": {
-    "@d1g1tal/watchr": "^3.1.0",
-    "esbuild": "^0.28.1",
-    "magic-string": "^1.1.0"
+    "@d1g1tal/watchr": "^3.2.1",
+    "esbuild": "^0.28.2",
+    "magic-string": "^1.2.0"
   },
   "devDependencies": {
-    "@d1g1tal/tsnode": "^1.2.0",
+    "@d1g1tal/tsnode": "^1.3.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",
-    "@typescript-eslint/eslint-plugin": "^8.66.0",
-    "@typescript-eslint/parser": "^8.66.0",
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.8.0",
-    "eslint-plugin-jsdoc": "^63.3.3",
-    "memfs": "^4.68.0",
+    "eslint": "^10.8.1",
+    "eslint-plugin-jsdoc": "^64.1.0",
+    "memfs": "^4.68.1",
     "mitata": "^1.0.34",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.66.0",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
