@@ -1,3 +1,10 @@
+## [2.3.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.3.1...v2.3.2) (2026-08-23)
+
+
+### Bug Fixes
+
+* **release:** update release configuration and dependencies ([b7112db](https://github.com/D1g1talEntr0py/tsbuild/commit/b7112db71616b22a7ea8a25673bc111260e7666e))
+
 ## [2.3.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.3.0...v2.3.1) (2026-08-14)
 * **files:** preserve suffixes in relative module specifiers (69f202a7bfc26b7129e7f4faaf0576783660061f)
 * **watch:** use high-resolution timing for rename detection (cd3da0cf454b74778c58587a4c256376bd9b0de6)
