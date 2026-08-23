@@ -27,7 +27,7 @@ jobs:
       - run: sudo npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - id: semantic_release
-        run: npx -y -p semantic-release -p @semantic-release/commit-analyzer -p @semantic-release/release-notes-generator -p @semantic-release/changelog -p @semantic-release/npm -p @semantic-release/exec -p @semantic-release/git -p @semantic-release/github -p conventional-changelog-conventionalcommits semantic-release
+        run: npx -y -p semantic-release -p @semantic-release/changelog -p @semantic-release/git -p @semantic-release/exec semantic-release
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
