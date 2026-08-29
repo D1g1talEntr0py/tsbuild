@@ -1,3 +1,23 @@
+# [2.4.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.3.2...v2.4.0) (2026-08-29)
+
+
+### Bug Fixes
+
+* **bundler:** improves errors and alias bundling ([fdf9892](https://github.com/D1g1talEntr0py/tsbuild/commit/fdf98925701390f20b531ea843606e2e7480f807))
+* **files:** normalizes file urls and brotli ([b003d1d](https://github.com/D1g1talEntr0py/tsbuild/commit/b003d1dcf96e2d03d969f521a2f39122d4840769))
+* **process:** hardens cleanup and deregisters ([3bb1312](https://github.com/D1g1talEntr0py/tsbuild/commit/3bb1312f0bbb61c3a10d1081b5793c734b56b90a))
+
+
+### Features
+
+* **config:** documents iife plugins and exits ([9427af9](https://github.com/D1g1talEntr0py/tsbuild/commit/9427af9f0bf906634a70d099330f06e32445315a))
+
+
+### Performance Improvements
+
+* **docs:** refreshes performance baselines ([223c825](https://github.com/D1g1talEntr0py/tsbuild/commit/223c82535cd62e01fef02e8def6d09067c336f0f))
+* **format:** migrates ansi styling to styletext ([662455b](https://github.com/D1g1talEntr0py/tsbuild/commit/662455bcde200babbf743685a529d4bd7cdfc1d0))
+
 ## [2.3.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.3.1...v2.3.2) (2026-08-23)
 
 
