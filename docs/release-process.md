@@ -57,7 +57,7 @@ BREAKING CHANGE: Minimum Node.js version is now 20.16.0.
 git push -u origin feat/my-feature
 ```
 
-Open a PR targeting `main`. The CI workflow runs lint, type-check, tests, and build across Node.js 20, 22, and 24. All checks must pass.
+Open a PR targeting `main`. The CI workflow runs lint, type-check, tests, and build across Node.js 24 and 26. All checks must pass.
 
 ### 4. Merge to `main`
 

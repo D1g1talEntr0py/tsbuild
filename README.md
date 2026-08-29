@@ -8,7 +8,7 @@
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript->=5.6.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-A TypeScript build tool that combines two tools into one workflow: **TypeScript's type system** for correctness and **esbuild** for speed. Built for modern ESM-only projects on Node.js 22+.
+A TypeScript build tool that combines two tools into one workflow: **TypeScript's type system** for correctness and **esbuild** for speed. Built for modern ESM-only projects on Node.js 24+.
 
 TC39 standard decorators are supported natively — no additional dependencies needed.
 
@@ -76,8 +76,8 @@ yarn add -D @d1g1tal/tsbuild
 
 ### Requirements
 
-- **Node.js**: >=22.0.0
-- **pnpm**: >=10.13.0 (if using corepack)
+- **Node.js**: >=24.0.0
+- **pnpm**: >=12.0.0 (for development)
 
 ## Quick Start
 
@@ -580,9 +580,9 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 ## Limitations
 
 - **ESM Only** - No CommonJS support by design
-- **Node.js 22+** - Requires a modern Node.js version
+- **Node.js 24+** - Requires a modern Node.js version
 - **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
-- **Plugins are programmatic only** - Custom esbuild plugins can't be declared in `tsconfig.json`; they require using the `TypeScriptProject` API directly
+- **Config plugins need a default export** - Plugins referenced in `tsconfig.json` must be modules whose default export is a plugin factory or esbuild `Plugin` object; anything else requires the programmatic API
 - **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed
 
 ## Comparison with Other Tools
@@ -626,9 +626,9 @@ pnpm test:coverage
 pnpm lint
 ```
 
-### Self-hosting loader
+### Self-hosting
 
-tsbuild bootstraps itself using a minimal custom Node.js module hook (`scripts/loader.ts`). It registers resolve and load hooks via `node:module`'s `registerHooks` API and uses esbuild's `transformSync` to compile TypeScript on-the-fly. Transformed files are cached in `node_modules/.cache/tsbuild-loader`, keyed by file path hash, mtime, byte size, and the running Node.js + esbuild versions, so warm starts pay only a `readFileSync` per file. The cache directory is intentionally kept out of `.tsbuild/` so that `--clearCache` does not blow it away.
+tsbuild builds itself. Development scripts run the TypeScript sources directly via [`@d1g1tal/tsnode`](https://github.com/D1g1talEntr0py/tsnode), which registers `node:module` resolve/load hooks and transpiles TypeScript on the fly with esbuild (with an on-disk transform cache for warm starts).
 
 ## Contributing
 

@@ -11,8 +11,8 @@
 - When using the terminal, NEVER prefix the cd command when you are already in the correct directory.
 
 ## Project Snapshot
-- `tsbuild` = TypeScript type-check + `.d.ts` emit, esbuild bundling, optional SWC decorator metadata.
-- Runtime/tooling: Node 22+, pnpm 10+.
+- `tsbuild` = TypeScript type-check + `.d.ts` emit, esbuild bundling, TC39 standard decorators only (legacy `experimentalDecorators`/`emitDecoratorMetadata` are rejected with a `ConfigurationError`).
+- Runtime/tooling: Node >=24.0 (engines; CI tests 24/26), pnpm 12+.
 - Build pipeline: type-check -> transpile -> declaration bundle.
 
 ## Core Architecture
