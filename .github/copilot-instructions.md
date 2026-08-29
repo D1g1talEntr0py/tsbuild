@@ -23,8 +23,8 @@
 - Plugins (`src/plugins/`):
   - `external-modules.ts`: bare specifiers external by default; `noExternal` forces bundling.
   - `output.ts`: applies `0o755` to shebang entry outputs.
-  - `decorator-metadata.ts`: lazy-loads SWC only when `emitDecoratorMetadata: true`; throws helpful error if `@swc/core` is missing.
-  - `resolve-plugin.ts`, `iife.ts`: resolution/format behavior.
+  - `resolve-plugin.ts`: loads user plugins from config references (default export = factory or Plugin).
+  - `iife.ts`: secondary IIFE build from in-memory ESM outputs.
 
 ## Behavioral Invariants
 - `FileManager.initialize()` restores cache before emission; `finalize()` persists after.
@@ -40,14 +40,14 @@
 - Supported options: `-h/--help`, `-v/--version`, `-f/--force`, `-w/--watch`, `-p/--project`, `-n/--noEmit`, `-c/--clearCache`, `-m/--minify`.
 - Error formatting: TS via `formatDiagnosticsWithColorAndContext()`, esbuild via `formatMessages()`.
 - Never call `process.exit()` directly; use `ProcessManager`.
-- Exit behavior: build/type-check 1, bundle 2, config 3, uncaught 99, SIGINT 130.
+- Exit behavior: build/type-check 1, bundle 2, config 3, uncaught 99, SIGINT 0 (graceful — deliberate, so package managers don't report a failed lifecycle).
 
 ## Testing & Quality Bar
 - Test public contracts; only mock external boundaries.
 - File-system tests use `memfs`.
 - Plugin tests: mock esbuild with `vi.fn()` and test callbacks directly.
-- Coverage target: 100%; excluded from coverage: `src/@types/**`, `src/dts/@types/**`, `src/index.ts`, `src/dts/index.ts`.
-- Vitest pool: `vmForks`.
+- Coverage target: 100%; excluded from coverage: `src/@types`, `src/dts/@types`, `src/tsbuild.ts`.
+- Vitest pool: `forks`.
 - Standard verification commands: `pnpm type-check`, `pnpm lint`, `pnpm test`, `pnpm build`.
 
 ## TS/Build Conventions

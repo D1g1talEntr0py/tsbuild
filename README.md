@@ -260,6 +260,18 @@ tsbuild --version  # or -v
 
 > **Note**: `--watch` and `--force` are CLI-only runtime options. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default. `--minify` uses an explicit CLI default (`false`).
 
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (also used when stopping watch mode with <kbd>Ctrl</kbd>+<kbd>C</kbd>, so package managers don't report a failed lifecycle) |
+| `1` | Type-check or build failure |
+| `2` | Bundling error (e.g. declaration bundling failure) |
+| `3` | Configuration error |
+| `99` | Uncaught exception |
+
+In watch mode, build failures are reported but do not set a non-zero exit code — the watcher keeps running and rebuilds on the next change.
+
 ### Package.json Scripts
 
 ```json
@@ -451,12 +463,64 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
     "env": {                     // Environment variables (accessible via import.meta.env)
       "API_URL": "https://api.example.com"
     },
-    "plugins": []                // Custom esbuild plugins (programmatic API only)
+    "iife": false,               // Also produce IIFE bundles (boolean | { "globalName": "MyLib" })
+    "plugins": []                // esbuild plugins — module specifiers or [specifier, options] tuples
   }
 }
 ```
 
 **Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--force` and `--watch` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape.
+
+### Environment Variables
+
+Values in `env` are exposed to your code as `import.meta.env.*` at build time. References to `${process.env.VAR}` inside a value are expanded when the build runs, which lets you inject dynamic values (esbuild's `define` only accepts static strings):
+
+```jsonc
+{
+  "tsbuild": {
+    "env": {
+      "version": "${process.env.npm_package_version}",  // expanded at build time
+      "API_URL": "https://api.example.com"              // static value
+    }
+  }
+}
+```
+
+```typescript
+console.log(`v${import.meta.env.version}`); // inlined by esbuild
+```
+
+### IIFE Output
+
+Set `iife` to produce self-contained IIFE bundles alongside the primary ESM output. The IIFE build reuses the ESM output in memory (no re-transpilation), inlines all dynamic imports, and writes to an `iife/` subdirectory of `outDir`:
+
+```jsonc
+{
+  "tsbuild": {
+    "iife": true                          // exports assigned to globalThis
+    // "iife": { "globalName": "MyLib" }  // exports assigned to globalThis.MyLib
+  }
+}
+```
+
+With `globalName`, `export { Foo, Bar }` becomes `globalThis.MyLib = { Foo, Bar }`; without it, exports are merged onto `globalThis` directly. Useful for CDN/`<script>` consumption of a library that is otherwise ESM-only.
+
+### Watch Options
+
+Watch mode is enabled with the `--watch` CLI flag. Fine-tuning lives under `tsbuild.watch`:
+
+```jsonc
+{
+  "tsbuild": {
+    "watch": {
+      "ignore": ["fixtures", "tmp"],  // directory/file names to ignore (in addition to tsconfig "exclude")
+      "renameTimeout": 150            // ms window for pairing rename events and coalescing follow-up edits
+    }
+  }
+}
+```
+
+Rebuilds are content-aware: metadata-only churn (e.g. a save that doesn't change bytes) is detected via size/mtime fast paths and content hashing, and skipped without rebuilding.
 
 ## Advanced Features
 
@@ -495,10 +559,25 @@ Standard decorators work out of the box — just use them in your code. No confi
 
 ### Custom Plugins
 
-tsbuild supports custom esbuild plugins:
+Custom esbuild plugins can be declared in `tsconfig.json` or passed programmatically.
+
+**In `tsconfig.json`** — reference a module by bare npm specifier or relative path. The module's default export must be a plugin factory function or an esbuild `Plugin` object. Use the `[specifier, options]` tuple form to pass options to a factory:
+
+```jsonc
+{
+  "tsbuild": {
+    "plugins": [
+      "esbuild-plugin-copy",                          // default export used as-is (or called if it's a factory)
+      ["./build/my-plugin.js", { "verbose": true }],  // factory called with the options object
+    ]
+  }
+}
+```
+
+**Programmatically** — pass `Plugin` objects directly:
 
 ```typescript
-import { TypeScriptProject } from 'tsbuild';
+import { TypeScriptProject } from '@d1g1tal/tsbuild';
 
 const myPlugin = {
   name: 'my-plugin',
@@ -507,9 +586,10 @@ const myPlugin = {
   }
 };
 
-// In tsconfig.json, plugins aren't directly supported
-// You'll need to use the TypeScriptProject API directly
+await new TypeScriptProject(process.cwd(), { tsbuild: { plugins: [myPlugin] } }).build();
 ```
+
+Plugin registration order is significant — user plugins run after tsbuild's built-in plugins.
 
 ### Lifecycle Management
 
