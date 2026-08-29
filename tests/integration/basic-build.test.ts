@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';

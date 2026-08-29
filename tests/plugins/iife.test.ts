@@ -41,6 +41,38 @@ describe('iifePlugin', () => {
 			plugin.setup(build as PluginBuild);
 			expect(called).toBe(false);
 		});
+
+		it('produces no files when onEnd receives an empty output list', async () => {
+			const { plugin, files } = createIifePluginHandle();
+			let onEndCallback: ((result: BuildResult) => Promise<void> | void) | undefined;
+			const build: Partial<PluginBuild> = {
+				initialOptions: { outdir: '/tmp/out', entryPoints: { index: '/tmp/src/index.ts' } } as PluginBuild['initialOptions'],
+				onEnd: (callback) => { onEndCallback = callback },
+			};
+			plugin.setup(build as PluginBuild);
+
+			await onEndCallback?.({ outputFiles: [], errors: [], warnings: [] } as unknown as BuildResult);
+
+			expect(files).toEqual([]);
+		});
+
+		it('produces no files when there are no configured entry points', async () => {
+			const { plugin, files } = createIifePluginHandle();
+			let onEndCallback: ((result: BuildResult) => Promise<void> | void) | undefined;
+			const build: Partial<PluginBuild> = {
+				initialOptions: { outdir: '/tmp/out' } as PluginBuild['initialOptions'],
+				onEnd: (callback) => { onEndCallback = callback },
+			};
+			plugin.setup(build as PluginBuild);
+
+			await onEndCallback?.({
+				outputFiles: [{ path: '/tmp/out/index.js', text: 'export {};', contents: new Uint8Array(), hash: '' }],
+				errors: [],
+				warnings: []
+			} as unknown as BuildResult);
+
+			expect(files).toEqual([]);
+		});
 	});
 
 	describe('real esbuild integration', () => {
@@ -128,6 +160,33 @@ describe('iifePlugin', () => {
 			});
 
 			expect(instance.files.some(({ path }) => path.endsWith('dist/iife/index.js.map'))).toBe(true);
+
+			// Non-JS outputs (source maps) must pass through untouched, not run through wrapAsIife.
+			const mapFile = instance.files.find(({ path }) => path.endsWith('dist/iife/index.js.map'));
+			expect(mapFile?.text).not.toContain('(() => {');
+		});
+
+		it('leaves output unwrapped when the entry point has no exports', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'console.log("side effect only");' }
+			});
+			cleanup = c;
+
+			const instance = createIifePluginHandle();
+			await build({
+				entryPoints: { index: join(dir, 'src/index.ts') },
+				outdir: join(dir, 'dist'),
+				format: 'esm',
+				bundle: true,
+				platform: 'node',
+				packages: 'external',
+				plugins: [instance.plugin],
+				logLevel: 'silent',
+			});
+
+			const iife = getOutputText(instance, 'dist/iife/index.js');
+			expect(iife).not.toContain('(() => {');
+			expect(iife).toContain('side effect only');
 		});
 
 		it('produces minified IIFE output when minify is true', async () => {

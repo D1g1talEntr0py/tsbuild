@@ -139,4 +139,59 @@ describe('tsbuild CLI', () => {
 			expect(process.exitCode).toBeUndefined();
 		});
 	});
+
+	describe('flag pass-through', () => {
+		afterEach(() => {
+			vi.doUnmock('../src/type-script-project');
+		});
+
+		it('passes --watch flag to TypeScriptProject', async () => {
+			const buildSpy = vi.fn().mockResolvedValue(undefined);
+			let capturedDirectory: unknown;
+			let capturedOptions: unknown;
+
+			vi.doMock('../src/type-script-project', () => ({
+				TypeScriptProject: class {
+					constructor(directory: unknown, options: unknown) {
+						capturedDirectory = directory;
+						capturedOptions = options;
+					}
+					build = buildSpy;
+				}
+			}));
+
+			process.argv = ['node', 'tsbuild', '-p', '/tmp/tsbuild-watch-test', '--watch'];
+			process.exitCode = undefined;
+
+			// @ts-expect-error - temp module created at runtime for cache busting
+			await import('../src/tsbuild.temp');
+
+			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(capturedDirectory).toBe('/tmp/tsbuild-watch-test');
+			expect(capturedOptions).toMatchObject({ tsbuild: { watch: { enabled: true } } });
+		});
+
+		it('passes --clearCache flag to TypeScriptProject', async () => {
+			const buildSpy = vi.fn().mockResolvedValue(undefined);
+			let capturedOptions: unknown;
+
+			vi.doMock('../src/type-script-project', () => ({
+				TypeScriptProject: class {
+					constructor(_directory: unknown, options: unknown) {
+						capturedOptions = options;
+					}
+					build = buildSpy;
+				}
+			}));
+
+			process.argv = ['node', 'tsbuild', '-p', '/tmp/tsbuild-clear-cache-test', '--clearCache'];
+			process.exitCode = undefined;
+
+			// @ts-expect-error - temp module created at runtime for cache busting
+			await import('../src/tsbuild.temp');
+
+			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(capturedOptions).toMatchObject({ clearCache: true });
+		});
+	});
 });

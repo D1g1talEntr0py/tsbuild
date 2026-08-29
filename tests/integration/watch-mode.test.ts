@@ -261,6 +261,57 @@ describe('TypeScriptProject - Watch Mode', () => {
 		infoSpy.mockRestore();
 	});
 
+	it('coalesces a rapid triple-rename chain into a single rebuild', { timeout: 15_000 }, async () => {
+		// noEmit mode bypasses the build-dependency gate in the watcher's rebuild closure, so every
+		// rename in the chain reaches #queuePendingChange even though only the original path was a
+		// known build dependency — isolating the rename-cycle coalescing logic under test.
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export { value } from "./unused.js";',
+				'src/unused.ts': 'export const value = 1;'
+			},
+			tsconfig: { compilerOptions: { noEmit: true }, tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const pathA = join(dir, 'src/unused.ts');
+		const pathB = join(dir, 'src/unused-renamed-1.ts');
+		const pathC = join(dir, 'src/unused-renamed-2.ts');
+		const pathD = join(dir, 'src/unused-renamed-3.ts');
+		const indexPath = join(dir, 'src/index.ts');
+
+		// Apply the full rapid rename chain and the dependent edit on disk first, so the
+		// synthetic watcher events fired below aren't racing real fs completion.
+		await rename(pathA, pathB);
+		await rename(pathB, pathC);
+		await rename(pathC, pathD);
+		await writeFile(indexPath, 'export { value } from "./unused-renamed-3.js";');
+
+		const infoSpy = vi.spyOn(Logger, 'info');
+
+		// Fire the corresponding watcher events back-to-back, as VS Code / editors may emit them.
+		watchCallback?.('rename', { size: 0, modifiedTimeMs: 0 }, pathA, pathB);
+		watchCallback?.('rename', { size: 0, modifiedTimeMs: 0 }, pathB, pathC);
+		watchCallback?.('rename', { size: 0, modifiedTimeMs: 0 }, pathC, pathD);
+		const indexStats = await stat(indexPath);
+		watchCallback?.('change', { size: indexStats.size, modifiedTimeMs: indexStats.mtimeMs }, indexPath);
+
+		await vi.waitFor(() => {
+			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
+			expect(rebuildLogs).toHaveLength(1);
+			expect(rebuildLogs[0]?.[0]).toContain('renamed detected.');
+		}, { timeout: 7_500, interval: 100 });
+
+		// No missing-module error should surface once the chain settles on the final path.
+		expect(process.exitCode).toBeUndefined();
+
+		infoSpy.mockRestore();
+	});
+
 	it('rebuilds unrelated edits during rename suppression', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: {

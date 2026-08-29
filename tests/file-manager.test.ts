@@ -341,6 +341,25 @@ describe('FileManager', () => {
 			await expect(manager.flush()).resolves.toBeUndefined();
 		});
 
+		it('allows a new save cycle after the previous flush completes', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager = new FileManager(cache);
+			await manager.initialize();
+			manager.fileWriter('test.d.ts', 'export const hello: string;');
+			manager.finalize();
+			manager.persistCache('fingerprint-1', false);
+			await manager.flush();
+
+			manager.fileWriter('test2.d.ts', 'export const goodbye: string;');
+			manager.finalize();
+			manager.persistCache('fingerprint-2', false);
+			await expect(manager.flush()).resolves.toBeUndefined();
+			expect(manager.getDeclarationFiles().size).toBe(2);
+		});
+
 		it('is a no-op when no pending save exists', async () => {
 			const manager = new FileManager();
 			await expect(manager.flush()).resolves.toBeUndefined();
