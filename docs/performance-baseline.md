@@ -1,21 +1,22 @@
 # tsbuild Performance Baseline Log
 
 **Created:** 2026-04-12
-**Version:** 1.8.3
-**Node.js:** 22+
+**Updated:** 2026-08-27 (re-baselined after regression fixes + Node 24 baseline + Brotli params restored + styleText migration)
+**Version:** 2.3.2
+**Node.js:** 24+
 **Purpose:** Track performance metrics to identify regressions and optimize critical paths.
 
 ---
 
 ## Executive Summary
 
-tsbuild is a three-phase build system orchestrated by `TypeScriptProject`:
+tsbuild's `TypeScriptProject.build()` runs in three stages, the middle one parallelized:
 
-1. **Type Checking Phase** — TypeScript API validates types and emits `.d.ts` to memory
-2. **Transpile Phase** — esbuild bundles JavaScript with custom plugin pipeline
-3. **DTS Bundle Phase** — Custom minimal bundler consolidates declarations
+1. **Type Checking Phase** (`#typeCheck()`, sequential, always first) — TypeScript API validates types and emits `.d.ts`/`.js` to memory via `FileManager`. Transpile and declaration bundling both depend on this phase's output, so it cannot overlap with them.
+2. **Declaration Bundling + Transpile Phase** (parallel) — `#processDeclarations()` (custom dts bundler) and `#transpile()` (esbuild) are both pushed onto a `processes` array and awaited together via `Promise.allSettled(processes)`. Each only runs if emission is required for that artifact (`compilerOptions.declaration` / `!compilerOptions.emitDeclarationOnly`).
+3. **Finalize Phase** (`#finalizeBuildArtifacts()`) — persists the Brotli-compressed `.tsbuildinfo`/dts cache. This is deliberately deferred until *after* the parallel phase completes (compressing during transpile was measured to inflate esbuild's wall time by 50-70ms via libuv threadpool contention). Stale-output cleanup and manifest persistence are fire-and-forget here and never inflate the critical path.
 
-Performance optimization focuses on the critical path: **total build time**. Secondary metrics track allocation efficiency and incremental build effectiveness.
+Performance optimization focuses on the critical path: **total build time**, with type-checking as the dominant, unavoidable cost and the parallel phase as the main tuning lever (see `docs/repo` notes on the 2026-07 sequential-vs-parallel CPU contention experiment, which concluded parallel is the current, retained design).
 
 ---
 
@@ -25,50 +26,52 @@ Performance optimization focuses on the critical path: **total build time**. Sec
 
 All major phases are already instrumented with decorators that use Node.js `perf_hooks`:
 
-| Phase | Method | Decorator | Sub-Steps | Result Logging |
-|-------|--------|-----------|-----------|-----------------|
-| **Build** | `TypeScriptProject.build()` | `@logPerformance('Build')` | Diagnostics, Emit, Finalize | No |
-| **Type-checking** | `TypeScriptProject.typeCheck()` | `@logPerformance('Type-checking')` | Yes (Diagnostics, Emit, Finalize) | No |
-| **Transpile** | `TypeScriptProject.transpile()` | `@logPerformance('Transpile', true)` | No | Yes (written files) |
-| **Bundle Declarations** | `TypeScriptProject.processDeclarations()` | `@logPerformance('Bundle Declarations', true)` | No | Yes (written files) |
+| Phase | Method | Decorator | Runs | Result Logging |
+|-------|--------|-----------|------|-----------------|
+| **Build** | `TypeScriptProject.build()` | `@logPerformance('Build')` | Always (top-level) | No |
+| **Type-checking/Emit** | `TypeScriptProject.#typeCheck()` | `@logPerformance('Type-checking/Emit')` | Sequential, always first | No |
+| **Bundle Declarations** | `TypeScriptProject.#processDeclarations()` | `@logPerformance('Bundle Declarations')` | Parallel (only if `compilerOptions.declaration`) | Yes, when written files exist |
+| **Transpile** | `TypeScriptProject.#transpile()` | `@logPerformance('Transpile')` | Parallel (only if `!compilerOptions.emitDeclarationOnly`) | Yes, when written files exist |
 
-### Sub-Step Tracking
+`@logPerformance` takes a single message argument; result-file logging is automatic whenever the measured method resolves with a non-empty `WrittenFile[]`, not a second decorator flag.
 
-Via `addPerformanceStep()` in type-check phase:
-- **Diagnostics** — Collection of all TS diagnostic levels (syntactic, semantic, global, etc.)
-- **Emit** — TypeScript emission to in-memory `FileManager` via `fileWriter` callback
-- **Finalize** — Cache processing and disk write of declaration files
+### No Sub-Step Tracking
+
+The previously-documented `addPerformanceStep()` breakdown (Diagnostics/Emit/Finalize sub-steps inside type-checking) no longer exists in the codebase — `#typeCheck()` is measured as a single unified phase. Diagnostics collection and TypeScript's `emit()` call happen inline inside `#typeCheck()`/`#collectTypeCheckDiagnostics()` with no separate timing marks reported to the logger.
 
 ---
 
 ## Baseline Metrics (tsbuild Self-Hosting)
 
-These are typical execution times for **self-hosting tsbuild** (building itself):
+Measured 2026-08-27 on this machine (AMD Ryzen 9 9950X, Node 26.7.0, quiet system) by running `pnpm build` against tsbuild's own `src/` (real numbers — not a synthetic project; see below for the multi-tool synthetic-project comparison via `pnpm bench`). Take these as a single-run reference point, not an average.
 
-### Cold Build (no cache)
+### Cold Build (`rm -rf .tsbuild dist && pnpm build`)
 ```
-Build Total:          ~800-1200ms
-├─ Type-checking:     ~400-600ms
-│  ├─ Diagnostics:    ~200-300ms
-│  ├─ Emit:           ~100-150ms
-│  └─ Finalize:       ~50-80ms
-├─ Transpile:         ~300-500ms (esbuild + plugins)
-└─ Bundle Declarations: ~100-150ms (if bundling enabled)
+Build Total:            486ms
+├─ Type-checking/Emit:  453ms  (93%)
+├─ Bundle Declarations:  15ms  (3%, parallel with Transpile)
+└─ Transpile:            30ms  (6%, parallel with Bundle Declarations)
 ```
 
-### Incremental Build (with cache)
+### Incremental Build, no changes (`pnpm build` again)
 ```
-Build Total:          ~200-400ms
-├─ Type-checking:     ~100-200ms (TypeScript incremental optimization)
-├─ Transpile:         ~100-200ms (rebuilds only touched entry points)
-└─ (skip if no changes)
+Build Total:            9ms
+└─ Type-checking/Emit:  1ms  (TypeScript incremental short-circuit; transpile/dts skipped entirely)
 ```
 
-### Watch Mode Single File Change
+### Incremental Build, one-file change (append a comment to `src/logger.ts`, a non-entry-point file)
 ```
-Rebuild Triggered:    ~150-300ms
-└─ Focused re-emit:   TypeScript only re-processes changed file + dependents
+Build Total:            445ms  (8% faster than cold — type-checking dominates either way)
+├─ Type-checking/Emit:  415ms  (93%)
+├─ Bundle Declarations:  16ms  (4%, parallel with Transpile)
+└─ Transpile:            24ms  (5%, parallel with Bundle Declarations)
 ```
+
+### CLI `--help` Path
+```
+~20ms  (3 runs: 22.8ms, 19.3ms, 20.0ms)
+```
+This stays fast only because `src/errors.ts` avoids a top-level `import ... from 'typescript'` — see the "Known Performance Sensitivities" section below. If `--help` regresses toward ~150ms, that import likely came back.
 
 ### Notes on Baselines
 - **Actual times vary by:**
@@ -76,12 +79,12 @@ Rebuild Triggered:    ~150-300ms
   - Number of type errors to diagnose
   - Entry point configuration and bundling strategy
   - System load and disk I/O stalls
-  - Plugin execution overhead (e.g., `@swc/core` for decorator metadata)
+  - Plugin execution overhead (e.g., decorator metadata plugins, if enabled)
 
-- **These are NOT hard targets** — they reflect typical single-file TypeScript projects.
-  - Larger codebases will have proportionally longer times
-  - Cache hits should show >50% speedup in cold→incremental transition
-  - Watch mode rebuilds should be <75% of cold build time for single-file changes
+- **These are NOT hard targets** — tsbuild's own `src/` is a small, single-package project.
+  - Larger codebases will have proportionally longer type-checking (the dominant cost)
+  - Incremental no-op builds should be near-instant (TypeScript's own incremental short-circuit)
+  - The parallel phase (bundle declarations + transpile) is small relative to type-checking on this codebase; it becomes more significant on projects with many entry points or a large declaration graph
 
 ---
 

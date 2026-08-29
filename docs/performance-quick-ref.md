@@ -2,7 +2,7 @@
 
 **For:** tsbuild development team
 **Purpose:** Quick checks for performance regressions
-**Last Updated:** 2026-06-13
+**Last Updated:** 2026-08-27 (re-baselined after regression fixes + Node 24 baseline + Brotli params restored + styleText migration)
 
 ---
 
@@ -10,9 +10,9 @@
 
 | Scenario | Time | Status | Notes |
 |----------|------|--------|-------|
-| Cold build (fresh .tsbuild) | **528ms** | ✓ Baseline | Type-checking dominates (80%) |
-| Incremental (no changes) | **5ms** | ✓ Baseline | Instant exit via TS incremental |
-| Incremental (source change) | **460ms** | ✓ Baseline | 13% faster than cold |
+| Cold build (fresh .tsbuild) | **486ms** | ✓ Baseline | Type-checking dominates (93%) |
+| Incremental (no changes) | **9ms** | ✓ Baseline | Instant exit via TS incremental |
+| Incremental (source change) | **445ms** | ✓ Baseline | 8% faster than cold |
 | Watch rebuild (single file) | **~300-500ms** | Estimated | Not yet measured |
 
 **Regression Threshold:** Any single phase >20% slower = investigate immediately.
@@ -25,13 +25,13 @@
 ```bash
 rm -rf .tsbuild dist
 pnpm build
-# Expected: ~520-550ms total
+# Expected: ~470-500ms total
 ```
 
 ### Incremental Build (No Changes)
 ```bash
 pnpm build
-# Expected: ~5ms total
+# Expected: ~10ms total
 ```
 
 ### Incremental Build (With Changes)
@@ -39,7 +39,7 @@ pnpm build
 echo "// Change" >> src/logger.ts
 pnpm build
 git checkout src/logger.ts
-# Expected: ~450-480ms total (≈13% faster than cold)
+# Expected: ~430-460ms total (≈8% faster than cold)
 ```
 
 ### Watch Mode Rebuild
