@@ -1,7 +1,6 @@
 import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
-import { DeclarationProcessor } from 'src/dts/declaration-processor';
-import { UnsupportedSyntaxError } from 'src/errors';
+import { DeclarationProcessor, UnsupportedSyntaxError } from 'src/dts/declaration-processor';
 
 const parse = (text: string): ts.SourceFile => ts.createSourceFile('test.d.ts', text, ts.ScriptTarget.ESNext, true);
 

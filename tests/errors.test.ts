@@ -1,6 +1,17 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { BuildError, TypeCheckError, BundleError, ConfigurationError, UnsupportedSyntaxError, castError } from 'src/errors';
+import { BuildError, TypeCheckError, BundleError, ConfigurationError, castError } from 'src/errors';
+import { UnsupportedSyntaxError } from 'src/dts/declaration-processor';
 import ts from 'typescript';
+
+const errorsSource = readFileSync(new URL('../src/errors.ts', import.meta.url), 'utf8');
+
+describe('module boundaries', () => {
+	it('keeps the errors module TypeScript-free', () => {
+		expect(errorsSource).not.toMatch(/from\s+['"]typescript['"]/);
+		expect(errorsSource).not.toContain('UnsupportedSyntaxError');
+	});
+});
 
 describe('castError', () => {
 	it('returns Error as-is', () => {

@@ -67,4 +67,11 @@ export default defineConfig({ ignores: [ 'node_modules/**', 'tests/**', 'dist/**
 			ignoreRestSiblings: true
 		}]
 	}
+}, {
+	files: [ 'src/errors.ts', 'src/tsbuild.ts' ],
+	rules: {
+		'no-restricted-imports': ['error', {
+			patterns: [{ group: ['typescript'], message: 'This module must not import TypeScript directly.' }]
+		}]
+	}
 });

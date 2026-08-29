@@ -1,5 +1,3 @@
-import { SyntaxKind, type Node } from 'typescript';
-
 /**
  * Custom error classes for tsbuild
  * Provides standardized error handling with exit codes
@@ -43,14 +41,6 @@ export class ConfigurationError extends BuildError {
 	constructor(message: string) {
 		super(message, 3);
 		this.name = 'ConfigurationError';
-	}
-}
-
-/** Error thrown when encountering unsupported syntax during DTS processing */
-export class UnsupportedSyntaxError extends BundleError {
-	constructor(node: Node, message: string = 'Syntax not yet supported') {
-		super(`${message}: ${SyntaxKind[node.kind] ?? `Unknown(${node.kind})`} - "${node.getText ? node.getText().slice(0, 100) : '<no text>'}"`);
-		this.name = 'UnsupportedSyntaxError';
 	}
 }
 

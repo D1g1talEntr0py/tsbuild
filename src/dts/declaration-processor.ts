@@ -30,11 +30,19 @@ import ts, {
 	type Declaration
 } from 'typescript';
 import MagicString from 'magic-string';
-import { UnsupportedSyntaxError } from '../errors';
+import { BundleError } from '../errors';
 import { FileExtension, newLine, typeMatcher } from '../constants';
 import type { NameRange, PreProcessOutput } from './@types';
 
 const commaCharacter = 44;
+
+/** Error thrown when encountering unsupported syntax during DTS processing */
+export class UnsupportedSyntaxError extends BundleError {
+	constructor(node: Node, message: string = 'Syntax not yet supported') {
+		super(`${message}: ${SyntaxKind[node.kind] ?? `Unknown(${node.kind})`} - "${node.getText ? node.getText().slice(0, 100) : '<no text>'}"`);
+		this.name = 'UnsupportedSyntaxError';
+	}
+}
 
 /**
  * Processes TypeScript declaration files before and after bundling.
