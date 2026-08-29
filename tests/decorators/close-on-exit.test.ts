@@ -1,15 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Closable } from 'src/@types';
 
-vi.mock('src/logger', () => ({
-	Logger: {
-		info: vi.fn(), error: vi.fn(), log: vi.fn(), clear: vi.fn(),
-		warn: vi.fn(), success: vi.fn(), header: vi.fn(), separator: vi.fn(),
-		step: vi.fn(), subSteps: vi.fn(),
-		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
-	}
-}));
-
 describe('closeOnExit', () => {
 	let processManager: Awaited<typeof import('src/process-manager')>['processManager'];
 

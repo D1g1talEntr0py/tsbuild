@@ -26,6 +26,16 @@ class ProcessManager implements Closable {
 		this.#closeableClasses.push(closeable);
 	}
 
+	/**
+	 * Removes a previously added closeable so it is no longer retained or closed on exit.
+	 * No-op if the closeable was not registered.
+	 * @param closeable The closeable class to remove.
+	 */
+	removeCloseable(closeable: Closable): void {
+		const index = this.#closeableClasses.indexOf(closeable);
+		if (index !== -1) { this.#closeableClasses.splice(index, 1) }
+	}
+
 	/** Closes the process manager and removes all listeners */
 	close(): void {
 		this.#closeableClasses.length = 0;
@@ -51,7 +61,13 @@ class ProcessManager implements Closable {
 
 	/** Performs closeable cleanup and detaches process listeners. */
 	#runCleanup(): void {
-		for (const closeable of this.#closeableClasses) { closeable.close() }
+		for (const closeable of [ ...this.#closeableClasses ]) {
+			try {
+				closeable.close();
+			} catch (error) {
+				Logger.error('Error while closing resource...', error instanceof Error ? error.stack : error);
+			}
+		}
 		this.close();
 	}
 

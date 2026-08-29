@@ -392,6 +392,37 @@ describe('TypeScriptProject', () => {
 			expect(() => project.close()).not.toThrow();
 			expect(() => project.close()).not.toThrow();
 		});
+
+		it('removes itself from the process manager so it is not retained after close', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' }
+			});
+			cleanup = c;
+
+			const removeSpy = vi.spyOn(processManager, 'removeCloseable');
+			const project = new TypeScriptProject(dir);
+			project.close();
+
+			expect(removeSpy).toHaveBeenCalledWith(project);
+			removeSpy.mockRestore();
+		});
+
+		it('does not leave closed projects registered for process-exit cleanup (no unbounded growth)', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' }
+			});
+			cleanup = c;
+
+			const closeSpy = vi.spyOn(TypeScriptProject.prototype, 'close');
+			const projects = Array.from({ length: 5 }, () => new TypeScriptProject(dir));
+			for (const project of projects) { project.close() }
+			closeSpy.mockClear();
+
+			// If closed projects were still retained by the process manager, this would re-invoke close() on each.
+			process.emit('exit', 0);
+			expect(closeSpy).not.toHaveBeenCalled();
+			closeSpy.mockRestore();
+		});
 	});
 
 	describe('incremental builds', () => {

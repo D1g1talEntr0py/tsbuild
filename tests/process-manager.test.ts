@@ -50,6 +50,48 @@ describe('ProcessManager', () => {
 		});
 	});
 
+	describe('removeCloseable', () => {
+		it('removes a closeable so it is not called on subsequent exit', () => {
+			const closable: Closable = { close: vi.fn() };
+			processManager.addCloseable(closable);
+
+			processManager.removeCloseable(closable);
+			process.emit('exit', 0);
+			expect(closable.close).not.toHaveBeenCalled();
+		});
+
+		it('only removes the targeted closeable, leaving others intact', () => {
+			const closable1: Closable = { close: vi.fn() };
+			const closable2: Closable = { close: vi.fn() };
+			processManager.addCloseable(closable1);
+			processManager.addCloseable(closable2);
+
+			processManager.removeCloseable(closable1);
+			process.emit('exit', 0);
+			expect(closable1.close).not.toHaveBeenCalled();
+			expect(closable2.close).toHaveBeenCalledOnce();
+		});
+
+		it('is a no-op when the closeable was never added', () => {
+			const closable: Closable = { close: vi.fn() };
+			expect(() => processManager.removeCloseable(closable)).not.toThrow();
+
+			process.emit('exit', 0);
+			expect(closable.close).not.toHaveBeenCalled();
+		});
+
+		it('is idempotent when called multiple times for the same closeable', () => {
+			const closable: Closable = { close: vi.fn() };
+			processManager.addCloseable(closable);
+
+			processManager.removeCloseable(closable);
+			expect(() => processManager.removeCloseable(closable)).not.toThrow();
+
+			process.emit('exit', 0);
+			expect(closable.close).not.toHaveBeenCalled();
+		});
+	});
+
 	describe('close', () => {
 		it('clears all closeables so they are not called on subsequent exit', () => {
 			const closable: Closable = { close: vi.fn() };
@@ -66,6 +108,31 @@ describe('ProcessManager', () => {
 			processManager.close();
 			const afterClose = process.listeners('SIGINT');
 			expect(afterClose).toEqual(beforeClose.filter((l) => !processManagerSigintListeners.includes(l as () => void)));
+		});
+	});
+
+	describe('cleanup resilience', () => {
+		it('continues closing remaining closeables when one removes itself during cleanup', () => {
+			const selfRemoving: Closable = { close: vi.fn(() => processManager.removeCloseable(selfRemoving)) };
+			const after: Closable = { close: vi.fn() };
+			processManager.addCloseable(selfRemoving);
+			processManager.addCloseable(after);
+
+			process.emit('exit', 0);
+			expect(selfRemoving.close).toHaveBeenCalledOnce();
+			expect(after.close).toHaveBeenCalledOnce();
+		});
+
+		it('continues closing remaining closeables when one throws during cleanup', () => {
+			const throwing: Closable = { close: vi.fn(() => { throw new Error('boom') }) };
+			const after: Closable = { close: vi.fn() };
+			processManager.addCloseable(throwing);
+			processManager.addCloseable(after);
+
+			expect(() => process.emit('exit', 0)).not.toThrow();
+			expect(throwing.close).toHaveBeenCalledOnce();
+			expect(after.close).toHaveBeenCalledOnce();
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Error while closing resource...'), expect.stringContaining('boom'));
 		});
 	});
 

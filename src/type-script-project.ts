@@ -680,6 +680,7 @@ export class TypeScriptProject implements Closable {
 
 	/** Closes the project and cleans up resources. */
 	close(): void {
+		processManager.removeCloseable(this);
 		this.#fileWatcher?.close();
 		if (this.#rebuildDispatch !== undefined) {
 			clearTimeout(this.#rebuildDispatch);
