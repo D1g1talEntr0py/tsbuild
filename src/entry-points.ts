@@ -183,4 +183,4 @@ function updateEntryPoints(entryPoints: EntryPoints<AbsolutePath> | undefined, p
 }
 
 export { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName, updateEntryPoints };
-export type { PackageJson, PackageJsonExports, PackageJsonConditionalExport };
+export type { PackageJson };

@@ -227,13 +227,6 @@ type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	projectReferences?: ProjectReference[];
 }>>;
 
-type ProjectDependencies = {
-	dependencies?: Record<string, string>;
-	devDependencies?: Record<string, string>;
-	peerDependencies?: Record<string, string>;
-	optionalDependencies?: Record<string, string>;
-};
-
 type ReadConfigSuccess = { config: TypeScriptOptions; error: undefined };
 type ReadConfigError = { config: undefined; error: Diagnostic };
 type ReadConfigResult = ReadConfigSuccess | ReadConfigError;
@@ -261,16 +254,6 @@ type CompilerOptionOverrides = Readonly<{
 	target: ScriptTarget.ESNext;
 }>;
 
-type SourceMap = {
-	version: number;
-	sources: string[];
-	names: string[];
-	mappings: string;
-	file?: string;
-	sourceRoot?: string;
-	sourcesContent?: string[];
-};
-
 // Text formatting function type
 type FormatSupplier = (text: string) => string;
 type LogEntryType = 'info' | 'success' | 'done' | 'error' | 'warn';
@@ -286,7 +269,6 @@ export type {
 	JsonString,
 	DetailedPerformanceMeasureOptions as PerformanceMeasureOptions,
 	DetailedPerformanceEntry,
-	ProjectDependencies,
 	ReadConfigResult,
 	EntryPoints,
 	AsyncEntryPoints,
@@ -303,7 +285,6 @@ export type {
 	ClosableConstructor,
 	CompilerOptionOverrides,
 	PerformanceSubStep,
-	SourceMap,
 	PendingFileChange,
 	JsxRenderingMode,
 	FormatSupplier,
