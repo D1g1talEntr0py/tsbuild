@@ -1,17 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { performance } from 'perf_hooks';
-
-vi.mock('src/logger', () => ({
-	Logger: {
-		info: vi.fn(), error: vi.fn(), log: vi.fn(), clear: vi.fn(),
-		warn: vi.fn(), success: vi.fn(), header: vi.fn(), separator: vi.fn(),
-		step: vi.fn(), subSteps: vi.fn(),
-		EntryType: { Info: 'info', Success: 'success', Done: 'done', Error: 'error', Warn: 'warn' }
-	}
-}));
+import type { MockInstance } from 'vitest';
 
 describe('logPerformance', () => {
 	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
+	let stepSpy: MockInstance;
+	let errorSpy: MockInstance;
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -19,6 +13,14 @@ describe('logPerformance', () => {
 		performance.clearMarks();
 		performance.clearMeasures();
 		({ logPerformance } = await import('src/decorators/performance-logger'));
+
+		// Spy on the real Logger to observe production-formatted call arguments while suppressing console noise.
+		const { Logger } = await import('src/logger');
+		stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
+		errorSpy = vi.spyOn(Logger, 'error').mockImplementation(() => {});
+		vi.spyOn(Logger, 'separator').mockImplementation(() => {});
+		vi.spyOn(Logger, 'success').mockImplementation(() => {});
+		vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
 	});
 
 	afterEach(async () => {
@@ -151,7 +153,6 @@ describe('logPerformance', () => {
 
 	describe('flushPerformanceLog', () => {
 		it('logs queued measurements synchronously without waiting for observer delivery', async () => {
-			const { Logger } = await import('src/logger');
 			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
 
 			class Test {
@@ -162,17 +163,16 @@ describe('logPerformance', () => {
 			new Test().method();
 			flushPerformanceLog();
 
-			expect(vi.mocked(Logger.step)).toHaveBeenCalledWith(expect.stringContaining('flush test'));
+			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('flush test'));
 		});
 
 		it('is a no-op when nothing is queued', async () => {
-			const { Logger } = await import('src/logger');
 			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
 
-			vi.mocked(Logger.step).mockClear();
+			stepSpy.mockClear();
 			flushPerformanceLog();
 
-			expect(vi.mocked(Logger.step)).not.toHaveBeenCalled();
+			expect(stepSpy).not.toHaveBeenCalled();
 		});
 	});
 
@@ -218,8 +218,6 @@ describe('logPerformance', () => {
 
 	describe('build-failed branch', () => {
 		it('logs error when process.exitCode is set for Build message', async () => {
-			const { Logger } = await import('src/logger');
-
 			class BuildRunner {
 				@logPerformance('Build')
 				run(): void {}
@@ -231,7 +229,7 @@ describe('logPerformance', () => {
 			// Wait for PerformanceObserver to fire
 			await new Promise(resolve => setTimeout(resolve, 50));
 
-			expect(Logger.error).toHaveBeenCalledWith(expect.stringContaining('Build failed'));
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Build failed'));
 			process.exitCode = undefined;
 		});
 	});

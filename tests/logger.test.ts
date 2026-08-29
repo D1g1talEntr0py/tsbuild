@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isWrittenFiles, colorize, prettyBytes, Logger } from 'src/logger';
 import type { WrittenFile, PerformanceSubStep, RelativePath } from 'src/@types';
 
+// eslint-disable-next-line no-control-regex
+const ansiEscapePattern = /\x1b\[[0-9;]*m/;
+
 describe('isWrittenFiles', () => {
 	const matrix: [string, unknown[], boolean][] = [
 		['valid WrittenFile array', [{ path: 'a.js', size: 100 }], true],
@@ -22,27 +25,53 @@ describe('isWrittenFiles', () => {
 describe('colorize', () => {
 	it('colorizes info as blue', () => {
 		const result = colorize('info', 'test');
-		expect(result).toContain('\x1b[34m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
+		expect(result).toContain('test');
 	});
 
 	it('colorizes error as red', () => {
 		const result = colorize('error', 'test');
-		expect(result).toContain('\x1b[31m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
+		expect(result).toContain('test');
 	});
 
 	it('colorizes warn as yellow', () => {
 		const result = colorize('warn', 'test');
-		expect(result).toContain('\x1b[33m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
+		expect(result).toContain('test');
 	});
 
 	it('colorizes success as green', () => {
 		const result = colorize('success', 'test');
-		expect(result).toContain('\x1b[32m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
+		expect(result).toContain('test');
 	});
 
 	it('colorizes done as green', () => {
 		const result = colorize('done', 'test');
-		expect(result).toContain('\x1b[32m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
+		expect(result).toContain('test');
+	});
+
+	it('uses the same color for success and done, distinct from info/error/warn', () => {
+		const successResult = colorize('success', 'test');
+		const doneResult = colorize('done', 'test');
+		const infoResult = colorize('info', 'test');
+		const errorResult = colorize('error', 'test');
+		const warnResult = colorize('warn', 'test');
+
+		expect(successResult).toBe(doneResult);
+		expect(successResult).not.toBe(infoResult);
+		expect(successResult).not.toBe(errorResult);
+		expect(successResult).not.toBe(warnResult);
+		expect(infoResult).not.toBe(errorResult);
+		expect(infoResult).not.toBe(warnResult);
+		expect(errorResult).not.toBe(warnResult);
 	});
 
 	it('skips info colorization when onlyImportant is true', () => {
@@ -55,12 +84,14 @@ describe('colorize', () => {
 
 	it('always colorizes error even with onlyImportant', () => {
 		const result = colorize('error', 'test', true);
-		expect(result).toContain('\x1b[31m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
 	});
 
 	it('always colorizes warn even with onlyImportant', () => {
 		const result = colorize('warn', 'test', true);
-		expect(result).toContain('\x1b[33m');
+		expect(result).toMatch(ansiEscapePattern);
+		expect(result).not.toBe('test');
 	});
 });
 

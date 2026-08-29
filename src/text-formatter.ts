@@ -1,4 +1,6 @@
 import { isatty } from 'node:tty';
+import { styleText } from 'node:util';
+import type { InspectColor } from 'node:util';
 import type { FormatSupplier } from './@types';
 
 const { env = {}, platform = '' } = process;
@@ -49,12 +51,28 @@ const filterEmpty = (open: string, close: string, replace: string = open, at: nu
 };
 
 /**
- * Generates a FormatSupplier for the given ANSI open and close codes.
- * @param open The ANSI open code number.
- * @param close The ANSI close code number.
+ * Derives the open/close ANSI escape sequences node:util's `styleText` applies for `format`.
+ * `validateStream: false` is required so the codes are always returned regardless of the current TTY - this project applies its own `isColorSupported` gating via `TextFormat.enabled`.
+ * @param format A format name recognized by node:util's `styleText` (see `util.inspect.colors`).
+ * @returns A tuple of the open and close ANSI escape sequences.
+ */
+const styleTextCodes = (format: InspectColor): [open: string, close: string] => {
+	const probe = '\0';
+	const wrapped = styleText(format, probe, { validateStream: false });
+	const index = wrapped.indexOf(probe);
+
+	return [ wrapped.slice(0, index), wrapped.slice(index + 1) ];
+};
+
+/**
+ * Generates a FormatSupplier sourcing its ANSI open/close codes from node:util's `styleText`.
+ * @param format The node:util `styleText` format name to source the open/close ANSI codes from.
  * @param replace Optional replacement ANSI code string.
  */
-const generateTextFormatter = (open: number, close: number, replace?: string): FormatSupplier => filterEmpty(`\x1b[${open}m`, `\x1b[${close}m`, replace);
+const generateTextFormatter = (format: InspectColor, replace?: string): FormatSupplier => {
+	const [open, close] = styleTextCodes(format);
+	return filterEmpty(open, close, replace);
+};
 
 /**
  * Utility class for formatting text with ANSI escape codes.
@@ -63,45 +81,46 @@ const generateTextFormatter = (open: number, close: number, replace?: string): F
  */
 export class TextFormat {
 	static readonly enabled: boolean | string | undefined = isColorSupported;
-	static readonly reset: FormatSupplier = generateTextFormatter(0, 0);
-	static readonly bold: FormatSupplier = generateTextFormatter(1, 22, '\x1b[22m\x1b[1m');
-	static readonly dim: FormatSupplier = generateTextFormatter(2, 22, '\x1b[22m\x1b[2m');
-	static readonly italic: FormatSupplier = generateTextFormatter(3, 23);
-	static readonly underline: FormatSupplier = generateTextFormatter(4, 24);
-	static readonly inverse: FormatSupplier = generateTextFormatter(7, 27);
-	static readonly hidden: FormatSupplier = generateTextFormatter(8, 28);
-	static readonly strikethrough: FormatSupplier = generateTextFormatter(9, 29);
-	static readonly black: FormatSupplier = generateTextFormatter(30, 39);
-	static readonly red: FormatSupplier = generateTextFormatter(31, 39);
-	static readonly green: FormatSupplier = generateTextFormatter(32, 39);
-	static readonly yellow: FormatSupplier = generateTextFormatter(33, 39);
-	static readonly blue: FormatSupplier = generateTextFormatter(34, 39);
-	static readonly magenta: FormatSupplier = generateTextFormatter(35, 39);
-	static readonly cyan: FormatSupplier = generateTextFormatter(36, 39);
-	static readonly white: FormatSupplier = generateTextFormatter(37, 39);
-	static readonly gray: FormatSupplier = generateTextFormatter(90, 39);
-	static readonly bgBlack: FormatSupplier = generateTextFormatter(40, 49);
-	static readonly bgRed: FormatSupplier = generateTextFormatter(41, 49);
-	static readonly bgGreen: FormatSupplier = generateTextFormatter(42, 49);
-	static readonly bgYellow: FormatSupplier = generateTextFormatter(43, 49);
-	static readonly bgBlue: FormatSupplier = generateTextFormatter(44, 49);
-	static readonly bgMagenta: FormatSupplier = generateTextFormatter(45, 49);
-	static readonly bgCyan: FormatSupplier = generateTextFormatter(46, 49);
-	static readonly bgWhite: FormatSupplier = generateTextFormatter(47, 49);
-	static readonly blackBright: FormatSupplier = generateTextFormatter(90, 39);
-	static readonly redBright: FormatSupplier = generateTextFormatter(91, 39);
-	static readonly greenBright: FormatSupplier = generateTextFormatter(92, 39);
-	static readonly yellowBright: FormatSupplier = generateTextFormatter(93, 39);
-	static readonly blueBright: FormatSupplier = generateTextFormatter(94, 39);
-	static readonly magentaBright: FormatSupplier = generateTextFormatter(95, 39);
-	static readonly cyanBright: FormatSupplier = generateTextFormatter(96, 39);
-	static readonly whiteBright: FormatSupplier = generateTextFormatter(97, 39);
-	static readonly bgBlackBright: FormatSupplier = generateTextFormatter(100, 49);
-	static readonly bgRedBright: FormatSupplier = generateTextFormatter(101, 49);
-	static readonly bgGreenBright: FormatSupplier = generateTextFormatter(102, 49);
-	static readonly bgYellowBright: FormatSupplier = generateTextFormatter(103, 49);
-	static readonly bgBlueBright: FormatSupplier = generateTextFormatter(104, 49);
-	static readonly bgMagentaBright: FormatSupplier = generateTextFormatter(105, 49);
-	static readonly bgCyanBright: FormatSupplier = generateTextFormatter(106, 49);
-	static readonly bgWhiteBright: FormatSupplier = generateTextFormatter(107, 49);
+	static readonly reset: FormatSupplier = generateTextFormatter('reset');
+	static readonly bold: FormatSupplier = generateTextFormatter('bold', '\x1b[22m\x1b[1m');
+	static readonly dim: FormatSupplier = generateTextFormatter('dim', '\x1b[22m\x1b[2m');
+	static readonly italic: FormatSupplier = generateTextFormatter('italic');
+	static readonly underline: FormatSupplier = generateTextFormatter('underline');
+	static readonly inverse: FormatSupplier = generateTextFormatter('inverse');
+	static readonly hidden: FormatSupplier = generateTextFormatter('hidden');
+	static readonly strikethrough: FormatSupplier = generateTextFormatter('strikethrough');
+	static readonly black: FormatSupplier = generateTextFormatter('black');
+	static readonly red: FormatSupplier = generateTextFormatter('red');
+	static readonly green: FormatSupplier = generateTextFormatter('green');
+	static readonly yellow: FormatSupplier = generateTextFormatter('yellow');
+	static readonly blue: FormatSupplier = generateTextFormatter('blue');
+	static readonly magenta: FormatSupplier = generateTextFormatter('magenta');
+	static readonly cyan: FormatSupplier = generateTextFormatter('cyan');
+	static readonly white: FormatSupplier = generateTextFormatter('white');
+	static readonly gray: FormatSupplier = generateTextFormatter('gray');
+	static readonly bgBlack: FormatSupplier = generateTextFormatter('bgBlack');
+	static readonly bgRed: FormatSupplier = generateTextFormatter('bgRed');
+	static readonly bgGreen: FormatSupplier = generateTextFormatter('bgGreen');
+	static readonly bgYellow: FormatSupplier = generateTextFormatter('bgYellow');
+	static readonly bgBlue: FormatSupplier = generateTextFormatter('bgBlue');
+	static readonly bgMagenta: FormatSupplier = generateTextFormatter('bgMagenta');
+	static readonly bgCyan: FormatSupplier = generateTextFormatter('bgCyan');
+	static readonly bgWhite: FormatSupplier = generateTextFormatter('bgWhite');
+	// 'blackBright'/'bgBlackBright' have no matching key in node:util's InspectColor union; 'gray'/'bgGray' produce identical codes (90/39, 100/49).
+	static readonly blackBright: FormatSupplier = generateTextFormatter('gray');
+	static readonly redBright: FormatSupplier = generateTextFormatter('redBright');
+	static readonly greenBright: FormatSupplier = generateTextFormatter('greenBright');
+	static readonly yellowBright: FormatSupplier = generateTextFormatter('yellowBright');
+	static readonly blueBright: FormatSupplier = generateTextFormatter('blueBright');
+	static readonly magentaBright: FormatSupplier = generateTextFormatter('magentaBright');
+	static readonly cyanBright: FormatSupplier = generateTextFormatter('cyanBright');
+	static readonly whiteBright: FormatSupplier = generateTextFormatter('whiteBright');
+	static readonly bgBlackBright: FormatSupplier = generateTextFormatter('bgGray');
+	static readonly bgRedBright: FormatSupplier = generateTextFormatter('bgRedBright');
+	static readonly bgGreenBright: FormatSupplier = generateTextFormatter('bgGreenBright');
+	static readonly bgYellowBright: FormatSupplier = generateTextFormatter('bgYellowBright');
+	static readonly bgBlueBright: FormatSupplier = generateTextFormatter('bgBlueBright');
+	static readonly bgMagentaBright: FormatSupplier = generateTextFormatter('bgMagentaBright');
+	static readonly bgCyanBright: FormatSupplier = generateTextFormatter('bgCyanBright');
+	static readonly bgWhiteBright: FormatSupplier = generateTextFormatter('bgWhiteBright');
 }
