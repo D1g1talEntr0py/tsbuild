@@ -1,9 +1,10 @@
 import { dirname, join } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
 import { defaultCleanOptions, defaultDirOptions, Encoding, FileExtension } from './constants';
-import { brotliDecompress, brotliCompress } from 'node:zlib';
+import { brotliDecompress, brotliCompress, constants as brotliConstants } from 'node:zlib';
 import { Paths } from './paths';
-import { access, chmod, constants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { access, chmod, constants as fsConstants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { LanguageVariant, ScriptTarget, SyntaxKind, createScanner } from 'typescript';
 import type { WriteFileOptions } from 'node:fs';
 import type { AbsolutePath, Path, WrittenFile } from './@types';
@@ -28,7 +29,7 @@ export class Files {
 	 */
 	static async exists(filePath: Path | string): Promise<boolean> {
 		try {
-			await access(filePath, constants.F_OK);
+			await access(filePath, fsConstants.F_OK);
 			return true;
 		} catch (error) {
 			// File does not exist - check for any error with ENOENT code
@@ -292,7 +293,8 @@ export class Files {
 	 * @throws {TypeError} if path is relative and not a valid URL
 	 */
 	static normalizePath(path: Path): AbsolutePath {
-		if (path.startsWith('/') || path.startsWith('file://') || windowsDrivePathRegex.test(path)) { return path as AbsolutePath }
+		if (path.startsWith('file://')) { return fileURLToPath(path) as AbsolutePath }
+		if (path.startsWith('/') || windowsDrivePathRegex.test(path)) { return path as AbsolutePath }
 		// Paths that don't start with /, file://, or a Windows drive letter must be valid URLs
 		// or else they're invalid relative paths
 		if (!path.includes('://')) { throw new TypeError(`Files.normalizePath requires an absolute path, got: ${path}`) }
@@ -316,7 +318,17 @@ export class Files {
 	 * @returns The compressed buffer.
 	 */
 	static compressBuffer(buffer: Buffer): Promise<Buffer> {
-		return new Promise<Buffer>((resolve, reject) => brotliCompress(buffer, (error, result) => error ? reject(error) : resolve(result)));
+		const params: Record<number, number> = {
+			[brotliConstants.BROTLI_PARAM_QUALITY]: 5
+		};
+		const sizeHintParam = brotliConstants.BROTLI_PARAM_SIZE_HINT;
+		if (sizeHintParam !== undefined) { params[sizeHintParam] = buffer.length }
+
+		return new Promise<Buffer>((resolve, reject) => brotliCompress(
+			buffer,
+			{ params },
+			(error, result) => error ? reject(error) : resolve(result)
+		));
 	}
 
 	/**

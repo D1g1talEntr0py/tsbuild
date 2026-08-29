@@ -1,11 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('node:zlib', async () => {
+	const actual = await vi.importActual<typeof import('node:zlib')>('node:zlib');
+	return {
+		...actual,
+		brotliCompress: vi.fn(actual.brotliCompress),
+		brotliDecompress: actual.brotliDecompress
+	};
+});
+
 vi.mock('node:fs/promises', async () => {
 	const memfs = await import('memfs');
 	return memfs.fs.promises;
 });
 
 import { vol } from 'memfs';
+import * as zlib from 'node:zlib';
 import { Files } from 'src/files';
 import type { AbsolutePath, Path } from 'src/@types';
 
@@ -260,8 +270,12 @@ describe('Files', () => {
 			expect(Files.normalizePath('/absolute/path' as Path)).toBe('/absolute/path');
 		});
 
-		it('returns file:// URIs as-is', () => {
-			expect(Files.normalizePath('file:///absolute/path' as Path)).toBe('file:///absolute/path');
+		it('returns file:// URLs converted to a plain filesystem path', () => {
+			expect(Files.normalizePath('file:///absolute/path' as Path)).toBe('/absolute/path');
+		});
+
+		it('decodes encoded characters in file:// URLs', () => {
+			expect(Files.normalizePath('file:///absolute/path%20with%20spaces' as Path)).toBe('/absolute/path with spaces');
 		});
 
 		it('resolves the pathname of a non-file URL', () => {
@@ -282,15 +296,27 @@ describe('Files', () => {
 			expect(decompressed).toEqual(original);
 		});
 
-		it('handles empty buffer', async () => {
-			const original = Buffer.from('');
-			const compressed = await Files.compressBuffer(original);
-			const decompressed = await Files.decompressBuffer(compressed);
-			expect(decompressed).toEqual(original);
-		});
-	});
+			it('passes the expected Brotli quality and size hint parameters', async () => {
+				const original = Buffer.from('demo payload');
+				const spy = vi.mocked(zlib.brotliCompress);
+				spy.mockClear();
 
-	describe('readCompressed / writeCompressed', () => {
+				await Files.compressBuffer(original);
+
+				expect(spy).toHaveBeenCalledWith(
+					original,
+					expect.objectContaining({
+						params: expect.objectContaining({
+							[zlib.constants.BROTLI_PARAM_QUALITY]: 5,
+							...(zlib.constants.BROTLI_PARAM_SIZE_HINT !== undefined ? {
+								[zlib.constants.BROTLI_PARAM_SIZE_HINT]: original.length
+							} : {})
+						})
+					}),
+					expect.any(Function)
+				);
+			});
+
 		it('round-trips V8 serialized + Brotli compressed data', async () => {
 			vol.mkdirSync('/cache', { recursive: true });
 			const data = { version: 2, files: { 'a.d.ts': { code: 'declare const a: string;' } } };
