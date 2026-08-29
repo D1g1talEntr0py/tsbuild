@@ -46,9 +46,6 @@ if (help) {
 		if (error instanceof BuildError) {
 			console.error(error.message);
 			process.exitCode = error.code;
-		} else if (error instanceof Error) {
-			console.error(error);
-			process.exitCode = 1;
 		} else {
 			console.error(error);
 			process.exitCode = 1;

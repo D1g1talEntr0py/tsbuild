@@ -153,4 +153,55 @@ describe('TypeScriptProject - Integration Builds', () => {
 		expect(output).toContain('magic-string');
 		expect(output.length).toBeLessThan(5000);
 	});
+
+	it('bundles a tsconfig paths-aliased import instead of leaving it as an unresolved external specifier when noExternal is set', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/utils.ts': "export const util = (): string => 'utils';",
+				'src/index.ts': "import { util } from '@app/utils'; export const value: string = util();"
+			},
+			tsconfig: {
+				compilerOptions: { declaration: false, paths: { '@app/*': ['./src/*'] } },
+				tsbuild: { clean: false, noExternal: ['some-unrelated-package'] }
+			}
+		});
+		cleanup = c;
+
+		const project = new TypeScriptProject(dir);
+		await project.build();
+		project.close();
+
+		const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+		expect(output).not.toContain('@app/utils');
+		expect(output).toContain('utils');
+	});
+
+	it('sets exit code 2 and reports the bundling failure exactly once for an unresolvable bundled import', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				// Ambient declaration satisfies the type checker so the failure only surfaces at bundle time.
+				'src/ambient.d.ts': "declare module 'tsbuild-test-nonexistent-package';",
+				'src/index.ts': "import { missing } from 'tsbuild-test-nonexistent-package'; export { missing };"
+			},
+			tsconfig: {
+				compilerOptions: { declaration: false },
+				tsbuild: { clean: false, packages: 'bundle' }
+			}
+		});
+		cleanup = c;
+
+		const logSpy = vi.spyOn(console, 'log');
+
+		const project = new TypeScriptProject(dir);
+		await project.build();
+		project.close();
+
+		expect(process.exitCode).toBe(2);
+
+		const unresolvedImportReports = logSpy.mock.calls.filter(([message]) =>
+			typeof message === 'string' && message.includes('tsbuild-test-nonexistent-package')).length;
+		expect(unresolvedImportReports).toBe(1);
+
+		logSpy.mockRestore();
+	});
 });

@@ -127,4 +127,46 @@ describe('externalModulesPlugin', () => {
 			expect(onResolveCallback(args(id))).toEqual({ external: true });
 		});
 	});
+
+	describe('paths option', () => {
+		it('does not mark a path-mapped specifier as external when noExternal is set', () => {
+			setupPlugin({ noExternal: ['some-other-package'], paths: { '@app/*': ['./src/*'] } });
+			expect(onResolveCallback(args('@app/utils'))).toBeUndefined();
+		});
+
+		it('does not mark the exact paths alias (no subpath) as external', () => {
+			setupPlugin({ paths: { '@app/*': ['./src/*'] } });
+			expect(onResolveCallback(args('@app/utils'))).toBeUndefined();
+		});
+
+		it('supports a paths key without a wildcard suffix', () => {
+			setupPlugin({ paths: { '@app': ['./src/index.ts'] } });
+			expect(onResolveCallback(args('@app'))).toBeUndefined();
+		});
+
+		it('does not match subpaths of a non-wildcard paths key', () => {
+			setupPlugin({ paths: { '@app': ['./src/index.ts'] } });
+			expect(onResolveCallback(args('@app/utils'))).toEqual({ path: '@app/utils', external: true });
+		});
+
+		it('does not match a similarly prefixed specifier', () => {
+			setupPlugin({ paths: { '@app/*': ['./src/*'] } });
+			expect(onResolveCallback(args('@app2/utils'))).toEqual({ path: '@app2/utils', external: true });
+		});
+
+		it('supports wildcard paths keys without a slash', () => {
+			setupPlugin({ paths: { '@app*': ['./src/*'] } });
+			expect(onResolveCallback(args('@app2/utils'))).toBeUndefined();
+		});
+
+		it('still marks unrelated bare specifiers as external', () => {
+			setupPlugin({ paths: { '@app/*': ['./src/*'] } });
+			expect(onResolveCallback(args('lodash'))).toEqual({ path: 'lodash', external: true });
+		});
+
+		it('takes priority over dependencies', () => {
+			setupPlugin({ dependencies: ['@app/utils'], paths: { '@app/*': ['./src/*'] } });
+			expect(onResolveCallback(args('@app/utils'))).toBeUndefined();
+		});
+	});
 });

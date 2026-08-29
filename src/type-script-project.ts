@@ -12,14 +12,14 @@ import { resolvePlugins } from './plugins/resolve-plugin';
 import { createIifePluginHandle } from './plugins/iife';
 import { createWriteOutputPlugin } from './plugins/output';
 import { logPerformance, flushPerformanceLog } from './decorators/performance-logger';
-import { BuildError, ConfigurationError, TypeCheckError } from './errors';
+import { BuildError, BundleError, ConfigurationError, TypeCheckError, castError } from './errors';
 import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
 import { processManager } from './process-manager';
 import { inferEntryPoints, updateEntryPoints, type PackageJson } from './entry-points';
 import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from './constants';
-import type { Message, OutputFile } from 'esbuild';
+import type { BuildFailure, Message, OutputFile } from 'esbuild';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
 import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern, Plugin } from './@types';
@@ -431,6 +431,8 @@ export class TypeScriptProject implements Closable {
 				metafile: true,
 				treeShaking: true,
 				logLevel: 'warning',
+				// tsconfigRaw's `paths` are resolved relative to this directory rather than process.cwd()
+				absWorkingDir: this.#directory,
 				tsconfigRaw: {
 					compilerOptions: {
 						alwaysStrict: this.#configuration.compilerOptions.alwaysStrict,
@@ -463,32 +465,39 @@ export class TypeScriptProject implements Closable {
 
 			if (outputs === undefined) { return [] }
 
-			if (await this.#hasEsbuildErrors(formatMessages, warnings, errors)) { return [] }
+			await this.#reportEsbuildErrors(formatMessages, warnings, errors);
 
 			return writtenFiles;
 		} catch (error) {
-			Logger.error('Transpile failed', error);
-			throw error;
+			if (error instanceof BuildError) { throw error }
+
+			const failure = error as Partial<BuildFailure>;
+			const message = failure.errors !== undefined && failure.errors.length > 0
+				? (await formatMessages(failure.errors, { kind: 'error', color: true })).join(sys.newLine)
+				: castError(error).message;
+
+			// BundleError is treated as "already logged" by #handleBuildError - log once here.
+			Logger.error(message);
+			throw new BundleError(message);
 		}
 	}
 
 	/**
-	 * Logs esbuild warnings/errors and returns whether the build produced errors.
+	 * Logs esbuild warnings/errors and throws a BundleError when the build produced errors.
 	 * @param formatMessages - esbuild formatter function
 	 * @param warnings - esbuild warnings
 	 * @param errors - esbuild errors
-	 * @returns True when errors were reported, false otherwise
 	 */
-	async #hasEsbuildErrors(formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>, warnings: Message[], errors: Message[]): Promise<boolean> {
+	async #reportEsbuildErrors(formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>, warnings: Message[], errors: Message[]): Promise<void> {
 		for (const [ kind, logEntryType, messages ] of [[ BuildMessageType.WARNING, Logger.EntryType.Warn, warnings ], [ BuildMessageType.ERROR, Logger.EntryType.Error, errors ]] as const) {
 			if (messages.length > 0) {
 				for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
 			}
 
-			if (kind === BuildMessageType.ERROR && errors.length > 0) { return true }
+			if (kind === BuildMessageType.ERROR && errors.length > 0) {
+				throw new BundleError(`Bundling failed with ${errors.length} error${errors.length === 1 ? '' : 's'}`);
+			}
 		}
-
-		return false;
 	}
 
 	/**
@@ -521,7 +530,7 @@ export class TypeScriptProject implements Closable {
 		// When packages === 'bundle', we can just use esbuild's built-in packages option
 		if (this.#buildConfiguration.noExternal.length > 0) {
 			// esbuild's `external` option doesn't support RegExp. So here we use a custom plugin to implement it
-			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths ?? [], noExternal: this.#buildConfiguration.noExternal }));
+			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths ?? [], noExternal: this.#buildConfiguration.noExternal, paths: this.#configuration.compilerOptions.paths }));
 		}
 
 		if (this.#buildConfiguration.plugins?.length) {
