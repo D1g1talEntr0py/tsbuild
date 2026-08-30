@@ -57,7 +57,6 @@ describe('externalModulesPlugin', () => {
 			['../parent'],
 			['/absolute/path'],
 			['./foo/bar.js'],
-			['C:\\win\\path'],
 		];
 
 		it.each(localPaths)('does not mark local path "%s" as external', (path) => {

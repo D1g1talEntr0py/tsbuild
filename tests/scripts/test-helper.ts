@@ -308,7 +308,7 @@ export class TestHelper {
 		const dir = await mkdtemp(pathJoin(tmpdir(), 'tsbuild-test-'));
 
 		// Symlink real node_modules so TypeScript finds @types/node and esbuild finds packages
-		await symlink(pathJoin(process.cwd(), 'node_modules'), pathJoin(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : undefined);
+		await symlink(pathJoin(process.cwd(), 'node_modules'), pathJoin(dir, 'node_modules'));
 
 		const defaultTsConfig = {
 			compilerOptions: {

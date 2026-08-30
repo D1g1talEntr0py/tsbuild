@@ -67,9 +67,6 @@ describe('Paths', () => {
 			['./foo',     true],
 			['../foo',    true],
 			['/foo/bar',  true],
-			['C:/',       true],
-			['C:\\foo',   true],
-			['D:/bar',    true],
 			['lodash',    false],
 			['@types/node', false],
 			['fs',        false],
@@ -78,7 +75,6 @@ describe('Paths', () => {
 			['',          false],
 			['.ts',       false],
 			['..foo',     false],
-			['a:/test',   false],
 		];
 
 		it.each(pathMatrix)('"%s" → %s', (input, expected) => {

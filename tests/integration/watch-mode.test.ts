@@ -92,6 +92,65 @@ describe('TypeScriptProject - Watch Mode', () => {
 		expect(process.exitCode).toBeUndefined();
 	});
 
+	it('reloads a scoped TypeScript plugin when an imported plugin dependency changes', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export const version = 1;',
+				'build/plugin-value.ts': 'export const banner = "first-plugin";',
+				'build/plugin-extra.ts': 'export const extra = "first-extra";',
+				'build/plugin.ts': [
+					'import { banner } from "./plugin-value";',
+					'import type { Plugin } from "esbuild";',
+					'enum Mode { Enabled = "enabled" }',
+					'export default function (): Plugin {',
+					'  return {',
+					'    name: `scoped-plugin-${Mode.Enabled}`,',
+					'    setup(build) { build.initialOptions.banner = { js: `// ${banner}` }; },',
+					'  };',
+					'}'
+				].join('\n')
+			},
+			tsconfig: { tsbuild: { clean: false, plugins: [ './build/plugin.ts' ] } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>(resolve => setImmediate(resolve));
+
+		await expect(readUtf8(join(dir, 'dist/index.js'))).resolves.toContain('first-plugin');
+		await writeFile(join(dir, 'build/plugin-value.ts'), 'export const banner = "second-plugin";');
+
+		await vi.waitFor(async () => {
+			await expect(readUtf8(join(dir, 'dist/index.js'))).resolves.toContain('second-plugin');
+			expect(process.exitCode).toBeUndefined();
+		}, { timeout: 7_500, interval: 100 });
+
+		await writeFile(join(dir, 'build/plugin.ts'), [
+			'import { banner } from "./plugin-value";',
+			'import { extra } from "./plugin-extra";',
+			'import type { Plugin } from "esbuild";',
+			'enum Mode { Enabled = "enabled" }',
+			'export default function (): Plugin {',
+			'  return {',
+			'    name: `scoped-plugin-${Mode.Enabled}`,',
+			'    setup(build) { build.initialOptions.banner = { js: `// ${banner}-${extra}` }; },',
+			'  };',
+			'}'
+		].join('\n'));
+
+		await vi.waitFor(async () => {
+			await expect(readUtf8(join(dir, 'dist/index.js'))).resolves.toContain('second-plugin-first-extra');
+		}, { timeout: 7_500, interval: 100 });
+
+		await writeFile(join(dir, 'build/plugin-extra.ts'), 'export const extra = "second-extra";');
+
+		await vi.waitFor(async () => {
+			await expect(readUtf8(join(dir, 'dist/index.js'))).resolves.toContain('second-plugin-second-extra');
+			expect(process.exitCode).toBeUndefined();
+		}, { timeout: 7_500, interval: 100 });
+	});
+
 	it('rebuilds when watchr reports a zero-size add for a tracked file', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },

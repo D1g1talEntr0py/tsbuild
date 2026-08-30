@@ -26,6 +26,7 @@ export default defineConfig({
     globals: false,
     pool: 'forks',
     testTimeout: 15_000,
+    server: { deps: { external: [ /[/\\]tsnode[/\\]/ ] } },
 		typecheck: { enabled: false },
     coverage: {
       reporter: [ 'text', 'json' ],

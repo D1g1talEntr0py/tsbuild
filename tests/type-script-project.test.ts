@@ -44,6 +44,46 @@ describe('TypeScriptProject', () => {
 			expect(output).toContain('hello');
 		});
 
+		it('runs a scoped TypeScript plugin with non-erasable syntax and project path aliases', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: {
+					'src/index.ts': 'export const hello = "world";',
+					'build-support/message.ts': 'export const message = "plugin-ran";',
+					'build/plugin.ts': [
+						'import { writeFile } from "node:fs/promises";',
+						'import { join } from "node:path";',
+						'import { message } from "@plugin/message";',
+						'import type { Plugin } from "esbuild";',
+						'enum Output { Marker = "plugin-output.txt" }',
+						'export default function (): Plugin {',
+						'  return {',
+						'    name: "scoped-typescript-plugin",',
+						'    setup(build) {',
+						'      build.onEnd(() => writeFile(join(build.initialOptions.absWorkingDir!, Output.Marker), message));',
+						'    },',
+						'  };',
+						'}'
+					].join('\n')
+				},
+				tsconfig: {
+					compilerOptions: {
+						baseUrl: '.',
+						ignoreDeprecations: '6.0',
+						paths: { '@plugin/*': [ './build-support/*' ] }
+					},
+					tsbuild: { plugins: [ './build/plugin.ts' ] }
+				}
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			await expect(readFile(join(dir, 'plugin-output.txt'), 'utf8')).resolves.toBe('plugin-ran');
+			expect(process.exitCode).toBeUndefined();
+		});
+
 		it('emits bundled .d.ts when declaration is true', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const value: number = 42;' },
