@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.4.0...v2.5.0) (2026-08-30)
+
+
+### Features
+
+* Update project to enforce Linux/POSIX environment and improve TypeScript plugin handling ([f075ec6](https://github.com/D1g1talEntr0py/tsbuild/commit/f075ec64f6b06794be54c6b7f56c4f2c6b3ba1d4))
+
 # [2.4.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.3.2...v2.4.0) (2026-08-29)
 
 
