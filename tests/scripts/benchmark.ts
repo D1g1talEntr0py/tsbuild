@@ -253,7 +253,7 @@ function tsbuildTool(opts: { dts?: boolean } = {}): Tool {
 }
 
 function dlxArgs(packages: string[], cmd: string, args: string[]): string[] {
-	const out: string[] = [ 'dlx' ];
+	const out: string[] = [ '--allow-build=esbuild', 'dlx' ];
 	for (let i = 0; i < packages.length; i++) { out.push(`--package=${packages[i]}`); }
 	out.push(cmd, ...args);
 	return out;
