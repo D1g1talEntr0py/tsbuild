@@ -1,8 +1,6 @@
 import { lstat } from 'node:fs/promises';
 import { relative, resolve, join, type ParsedPath, parse } from 'node:path';
 import type { Path, AbsolutePath, RelativePath, ConditionalPath } from './@types';
-
-const windowsDrivePathPattern = /^[A-Z]:[\\/]/;
 const isMissingPathError = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === 'ENOENT';
 
 /**
@@ -62,7 +60,7 @@ export class Paths {
 
 	/**
 	 * Checks if a module specifier represents a local path (not a bare specifier).
-	 * Local paths start with '/', './', '../', '.', '..', or Windows drive letters (e.g., 'C:\').
+	 * Local paths start with '/', './', '../', '.', or '..'.
 	 * @param path - The module specifier to check
 	 * @returns True if the path is a local/relative path, false if it's a bare specifier (node module)
 	 */
@@ -73,7 +71,7 @@ export class Paths {
 
 		if (path.startsWith('./') || path.startsWith('../')) { return true }
 
-		return windowsDrivePathPattern.test(path);
+		return false;
 	}
 
 	/**

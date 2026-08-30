@@ -14,7 +14,6 @@ type WriteEntry = { path: AbsolutePath | string; data: WritableData; options?: W
 
 const removalBatchSize = 32;
 const writeBatchSize = 32;
-const windowsDrivePathRegex = /^[A-Za-z]:[\\/]/;
 const makeDirMapper = (directory: string) => mkdir(directory, defaultDirOptions);
 
 /**
@@ -294,8 +293,8 @@ export class Files {
 	 */
 	static normalizePath(path: Path): AbsolutePath {
 		if (path.startsWith('file://')) { return fileURLToPath(path) as AbsolutePath }
-		if (path.startsWith('/') || windowsDrivePathRegex.test(path)) { return path as AbsolutePath }
-		// Paths that don't start with /, file://, or a Windows drive letter must be valid URLs
+		if (path.startsWith('/')) { return path as AbsolutePath }
+		// Paths that don't start with / or file:// must be valid URLs
 		// or else they're invalid relative paths
 		if (!path.includes('://')) { throw new TypeError(`Files.normalizePath requires an absolute path, got: ${path}`) }
 		return new URL(path, import.meta.url).pathname as AbsolutePath;

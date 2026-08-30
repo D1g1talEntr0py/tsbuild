@@ -99,6 +99,7 @@ const outputManifestFile = 'outputs.manifest.json';
 const format = 'esm';
 const newLine = '\n';
 const typeMatcher: RegExp = /\btype\b/;
+const nodeModulesPathPattern: RegExp = /\/node_modules\//;
 const sourceScriptExtensionExpression: RegExp = /(?<!\.d)\.[jt]sx?$/;
 const typeScriptExtensionExpression: RegExp = /(\.tsx?)$/;
 /** Pattern to match and expand process.env references in config values (e.g., "${process.env.npm_package_version}") */
@@ -132,6 +133,7 @@ export {
 	format,
 	newLine,
 	typeMatcher,
+	nodeModulesPathPattern,
 	FileExtension,
 	toEsTarget,
 	toJsxRenderingMode

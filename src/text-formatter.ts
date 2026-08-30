@@ -3,10 +3,10 @@ import { styleText } from 'node:util';
 import type { InspectColor } from 'node:util';
 import type { FormatSupplier } from './@types';
 
-const { env = {}, platform = '' } = process;
+const { env = {} } = process;
 const isDumbTerminal = env['TERM'] === 'dumb';
 const isCompatibleTerminal = isatty(1) && env['TERM'] && !isDumbTerminal;
-const isColorSupported = !('NO_COLOR' in env) && ('FORCE_COLOR' in env || (platform === 'win32' && !isDumbTerminal) || isCompatibleTerminal);
+const isColorSupported = !('NO_COLOR' in env) && ('FORCE_COLOR' in env || isCompatibleTerminal);
 
 /**
  * Recursively replaces all occurrences of `close` in `string` with `replace`, starting from `index`.

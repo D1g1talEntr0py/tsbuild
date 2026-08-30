@@ -2,6 +2,7 @@
 
 ## One-Screen Rules
 - Prioritize correctness, clarity, and performance; choose the simplest solution that works.
+- Linux/POSIX only: Windows is not supported. Developers on Windows must use WSL and run tooling inside the Linux environment.
 - Strict ESM only (no CommonJS).
 - Cycle; Change/implement, check for type errors or linting errors, test. Repeat until done.
 - No `any`, no unnecessary line wrapping, preserve existing formatting.

@@ -78,6 +78,7 @@ yarn add -D @d1g1tal/tsbuild
 
 - **Node.js**: >=24.0.0
 - **pnpm**: >=12.0.0 (for development)
+- **Operating system**: Linux/POSIX environment. Windows is not supported; use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) and run tsbuild inside the Linux environment.
 
 ## Quick Start
 
@@ -568,11 +569,18 @@ Custom esbuild plugins can be declared in `tsconfig.json` or passed programmatic
   "tsbuild": {
     "plugins": [
       "esbuild-plugin-copy",                          // default export used as-is (or called if it's a factory)
-      ["./build/my-plugin.js", { "verbose": true }],  // factory called with the options object
+      ["./build/my-plugin.ts", { "verbose": true }],  // TypeScript source is loaded directly
     ]
   }
 }
 ```
+
+Local `.ts` and `.tsx` plugins run directly through an isolated
+[`@d1g1tal/tsnode`](https://github.com/D1g1talEntr0py/tsnode) scope. They can use
+the project's `tsconfig.json` path aliases and non-erasable syntax such as enums,
+namespaces, and standard decorators without a separate plugin build. In watch mode,
+tsbuild also tracks the local modules imported by the plugin and rebuilds when they
+change. Plugin packages and JavaScript plugin files continue to use native ESM imports.
 
 **Programmatically** — pass `Plugin` objects directly:
 
@@ -660,7 +668,7 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 ## Limitations
 
 - **ESM Only** - No CommonJS support by design
-- **Node.js 24+** - Requires a modern Node.js version
+- **Node.js 24.11.1+** - Requires a modern Node.js version
 - **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
 - **Config plugins need a default export** - Plugins referenced in `tsconfig.json` must be modules whose default export is a plugin factory or esbuild `Plugin` object; anything else requires the programmatic API
 - **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed

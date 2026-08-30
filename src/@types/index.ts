@@ -78,7 +78,7 @@ type Brand<T, U> = U extends symbol ? T & { readonly [K in U]: true } : T & { re
 declare const AbsolutePathBrand: unique symbol;
 declare const RelativePathBrand: unique symbol;
 
-/** An absolute file system path (e.g., `/home/user/project` or `C:\Users\project`) */
+/** An absolute file system path (e.g., `/home/user/project`) */
 type AbsolutePath = Brand<string, typeof AbsolutePathBrand>;
 
 /** A relative file system path (e.g., `./src` or `../lib`) */
@@ -161,7 +161,7 @@ type AsyncEntryPoints = Promise<EntryPoints<AbsolutePath>>;
 type ProjectBuildConfiguration = Readonly<Modify<BuildConfiguration, {
 	entryPoints: AsyncEntryPoints,
 	target: EsTarget,
-	outDir: string,
+	outDir: AbsolutePath,
 	sourceMap: boolean | 'inline' | 'external' | 'both'
 }>>;
 
@@ -216,6 +216,8 @@ type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	compilerOptions: TypeScriptCompilerConfiguration;
 	tsbuild: BuildConfiguration;
 	directory: AbsolutePath;
+	/** Absolute path to the resolved tsconfig.json used for this project (passed to tsnode as the plugin scope's tsconfig) */
+	configFilePath: AbsolutePath;
 	/** Absolute paths of root names used to create the TypeScript program */
 	rootNames: string[];
 	configFileParsingDiagnostics: Diagnostic[];
