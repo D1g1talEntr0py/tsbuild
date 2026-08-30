@@ -23,6 +23,6 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm add -D typescript@${{ matrix.typescript-version }} --save-exact
-      - run: npx tsc --version
+      - run: pnpm add -D "typescript@npm:typescript@${{ matrix.typescript-version }}" --save-exact
+      - run: node --input-type=module -e "import('typescript').then(({ version }) => console.log(version))"
       - run: pnpm test

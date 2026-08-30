@@ -10,6 +10,7 @@
  *   --target VERSION   Test a specific TypeScript version (e.g., 5.5.4)
  */
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
 // Strip leading '--' that pnpm injects when forwarding args
@@ -24,10 +25,14 @@ const { values } = parseArgs({
 	strict: true,
 });
 
-const run = (cmd: string) => execSync(cmd, { encoding: 'utf8', stdio: 'pipe' }).trim();
+const run = (command: string) => execSync(command, { encoding: 'utf8', stdio: 'pipe' }).trim();
+const installedTypeScriptVersion = () => run(`node --input-type=module -e "import('typescript').then(({ version }) => console.log(version))"`);
+const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { devDependencies?: Record<string, string> };
+const originalTypeScriptSpecifier = packageJson.devDependencies?.['typescript'];
+if (originalTypeScriptSpecifier === undefined) { throw new Error('package.json must define devDependencies.typescript') }
 
 // Capture the currently installed version so we can restore it
-const currentVersion = run('npx tsc --version').replace('Version ', '');
+const currentVersion = installedTypeScriptVersion();
 console.log(`Current TypeScript version: ${currentVersion}\n`);
 
 let targetVersions: string[];
@@ -67,8 +72,9 @@ for (const version of targetVersions) {
 	console.log(`Installing TypeScript ${version}...`);
 
 	try {
-		run(`pnpm add -D typescript@${version} --save-exact`);
-		const installed = run('npx tsc --version').replace('Version ', '');
+		run(`pnpm add -D "typescript@npm:typescript@${version}" --save-exact`);
+		const installed = installedTypeScriptVersion();
+		if (installed !== version) { throw new Error(`Installed TypeScript ${installed}, expected ${version}`) }
 		console.log(`Running compatibility tests against TypeScript ${installed}...`);
 
 		const output = run('pnpm test 2>&1');
@@ -85,7 +91,7 @@ for (const version of targetVersions) {
 // Restore original version
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`Restoring TypeScript ${currentVersion}...`);
-run(`pnpm add -D typescript@${currentVersion} --save-exact`);
+run(`pnpm add -D "typescript@${originalTypeScriptSpecifier}"`);
 
 // Summary
 console.log(`\n${'═'.repeat(60)}`);

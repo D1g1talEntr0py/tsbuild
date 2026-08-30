@@ -1,10 +1,13 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { versionMajorMinor } from 'typescript';
 import { TypeScriptProject } from '../src/type-script-project';
 import { Files } from '../src/files';
 import { processManager } from '../src/process-manager';
 import { TestHelper } from './scripts/test-helper';
+
+const typeScript6OrNewer = Number(versionMajorMinor.split('.')[0]) >= 6;
 
 // Watchr emits an 'error' event when a watched path is deleted during tmpdir cleanup.
 // Add a no-op error listener to prevent unhandled-error escalation in tests.
@@ -68,7 +71,7 @@ describe('TypeScriptProject', () => {
 				tsconfig: {
 					compilerOptions: {
 						baseUrl: '.',
-						ignoreDeprecations: '6.0',
+						...(typeScript6OrNewer ? { ignoreDeprecations: '6.0' } : {}),
 						paths: { '@plugin/*': [ './build-support/*' ] }
 					},
 					tsbuild: { plugins: [ './build/plugin.ts' ] }
