@@ -202,6 +202,7 @@ Add a `tsbuild` property to your `tsconfig.json` with only the options you need 
 
 ```jsonc
 {
+  "$schema": "https://json.schemastore.org/tsbuild.json", // optional, enables editor IntelliSense for tsbuild options
   "compilerOptions": {
     "declaration": true,
     "isolatedModules": true,
@@ -280,7 +281,7 @@ In watch mode, build failures are reported but do not set a non-zero exit code â
   "scripts": {
     "build": "tsbuild",
     "build:watch": "tsbuild --watch",
-		"build:force": "tsbuild --force",
+    "build:force": "tsbuild --force",
     "type-check": "tsbuild --noEmit"
   }
 }
