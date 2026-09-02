@@ -1,3 +1,10 @@
+## [2.5.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.5.0...v2.5.1) (2026-09-02)
+
+
+### Performance Improvements
+
+* **watch:** reuse esbuild context and builder program across rebuilds ([d782717](https://github.com/D1g1talEntr0py/tsbuild/commit/d7827172d6299dd73ef53023abaf86632b6bbd75))
+
 # [2.5.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.4.0...v2.5.0) (2026-08-30)
 
 
