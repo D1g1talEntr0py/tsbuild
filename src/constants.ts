@@ -95,7 +95,6 @@ const dtsCacheVersion = 4;
 // Version-stamped so the filename alone proves structural compatibility: a present file is always
 // the current version, letting the .tsbuildinfo/cache consistency guard use a plain existence check.
 const dtsCacheFile: string = `dts_cache.v${dtsCacheVersion}.br`;
-const outputManifestFile = 'outputs.manifest.json';
 const format = 'esm';
 const newLine = '\n';
 const typeMatcher: RegExp = /\btype\b/;
@@ -128,7 +127,6 @@ export {
 	cacheDirectory,
 	buildInfoFile,
 	dtsCacheFile,
-	outputManifestFile,
 	dtsCacheVersion,
 	format,
 	newLine,

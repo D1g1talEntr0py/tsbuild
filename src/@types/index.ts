@@ -201,12 +201,6 @@ interface BuildCacheManager {
 	isBuildInfoFile(filePath: AbsolutePath): boolean;
 	/** Synchronously checks whether persisted incremental state exists on disk (i.e. .tsbuildinfo). */
 	hasPersistedState(): boolean;
-	/** Synchronously checks whether a manifest snapshot from a prior build is available. */
-	hasPersistedManifest(): boolean;
-	/** Returns the project-relative output paths recorded by the previous build, or undefined if none. */
-	getPreviousOutputs(): readonly string[] | undefined;
-	/** Persists the project-relative output paths produced by the current build. Fire-and-forget. */
-	saveOutputs(outputs: readonly string[]): Promise<void>;
 	/** Checks whether the build configuration has changed since the cache was last saved. */
 	fingerprintMatches(currentFingerprint: string): Promise<boolean>;
 };

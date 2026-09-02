@@ -524,6 +524,8 @@ Watch mode is enabled with the `--watch` CLI flag. Fine-tuning lives under `tsbu
 
 Rebuilds are content-aware: metadata-only churn (e.g. a save that doesn't change bytes) is detected via size/mtime fast paths and content hashing, and skipped without rebuilding.
 
+Watch mode snapshots `tsconfig.json` and `package.json` configuration when it starts. Restart tsbuild after changing either file so compiler options, entry-point inference, and build settings are reloaded.
+
 ## Advanced Features
 
 ### Isolated Modules

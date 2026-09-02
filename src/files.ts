@@ -320,8 +320,6 @@ export class Files {
 		const params: Record<number, number> = {
 			[brotliConstants.BROTLI_PARAM_QUALITY]: 5
 		};
-		const sizeHintParam = brotliConstants.BROTLI_PARAM_SIZE_HINT;
-		if (sizeHintParam !== undefined) { params[sizeHintParam] = buffer.length }
 
 		return new Promise<Buffer>((resolve, reject) => brotliCompress(
 			buffer,

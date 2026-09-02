@@ -1,29 +1,16 @@
 import { Files } from './files';
 import { Paths } from './paths';
-import { Json } from './json';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { cacheDirectory, defaultCleanOptions, defaultDirOptions, dtsCacheFile, dtsCacheVersion as version, outputManifestFile } from './constants';
-import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration, JsonString } from './@types';
+import { existsSync, rmSync } from 'node:fs';
+import { cacheDirectory, defaultCleanOptions, dtsCacheFile, dtsCacheVersion as version } from './constants';
+import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration } from './@types';
 
-/**
- * Handles persistent caching of pre-processed declaration files for incremental builds.
- * Uses V8 serialization for faster deserialization than JSON, and pre-loads
- * the cache asynchronously during construction to overlap I/O with other initialization.
- */
+/** Handles persistent caching of pre-processed declaration files for incremental builds. */
 export class IncrementalBuildCache implements BuildCacheManager {
 	readonly #buildInfoPath: AbsolutePath;
 	readonly #cacheDirectoryPath: AbsolutePath;
 	readonly #cacheFilePath: AbsolutePath;
-	readonly #outputsManifestPath: AbsolutePath;
 	/** Pre-loading promise started in constructor for async cache restoration */
 	readonly #cacheLoaded: Promise<BuildCache | undefined>;
-	/**
-	 * Manifest snapshot captured synchronously at construction. Held in memory so it survives
-	 * `invalidate()` (which deletes the on-disk manifest as part of clearing `.tsbuild`) and so
-	 * subsequent in-process reads are race-free.
-	 */
-	#outputsSnapshot: readonly string[] | undefined;
 	/** Set to true when invalidate() is called to prevent stale cache from being restored */
 	#invalidated = false;
 	/** Updated synchronously in save() so fingerprintMatches() sees fresh data without re-reading from disk. */
@@ -38,16 +25,12 @@ export class IncrementalBuildCache implements BuildCacheManager {
 		this.#buildInfoPath = Paths.join(projectRoot, tsBuildInfoFile);
 		this.#cacheDirectoryPath = Paths.join(projectRoot, cacheDirectory);
 		this.#cacheFilePath = Paths.join(this.#cacheDirectoryPath, dtsCacheFile);
-		this.#outputsManifestPath = Paths.join(this.#cacheDirectoryPath, outputManifestFile);
 		// Enforce consistency BEFORE the TypeScript program reads .tsbuildinfo. An orphaned
 		// build-info (present without a matching dts cache) would let the incremental program
 		// skip emit while no cached declarations exist, producing broken bundles.
 		this.#enforceIncrementalConsistency();
 		// Start pre-loading the cache immediately - this runs in parallel with TypeScript program creation
 		this.#cacheLoaded = this.#loadCache();
-		// Capture the manifest synchronously so it survives invalidate() and downstream code can
-		// read it without awaiting. The file is small (a JSON array of paths) so sync I/O is fine.
-		this.#outputsSnapshot = IncrementalBuildCache.#loadOutputsSync(this.#outputsManifestPath);
 	}
 
 	/**
@@ -97,40 +80,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 		return cache?.fingerprint === currentFingerprint;
 	}
 
-	/**
-	 * Loads the previous build's output manifest synchronously.
-	 * @param manifestPath - Absolute path to the manifest file
-	 * @returns The recorded outputs, or undefined when missing/unreadable/malformed.
-	 */
-	static #loadOutputsSync(manifestPath: AbsolutePath): readonly string[] | undefined {
-		try {
-			const parsed = Json.parse(readFileSync(manifestPath, 'utf8') as JsonString<readonly string[]>);
-			return Array.isArray(parsed) ? parsed : undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
-	/**
-	 * Returns the project-relative output paths recorded by the previous build, or undefined if none.
-	 * The snapshot is captured at construction time and survives `invalidate()`.
-	 * @returns The recorded outputs from the prior build, or undefined when unavailable.
-	 */
-	getPreviousOutputs(): readonly string[] | undefined {
-		return this.#outputsSnapshot;
-	}
-
-	/**
-	 * Persists the project-relative output paths produced by the current build.
-	 * Updates the in-memory snapshot immediately so subsequent getPreviousOutputs() calls
-	 * (in watch mode) return the freshly written list without re-reading disk.
-	 * @param outputs - Project-relative output paths
-	 */
-	async saveOutputs(outputs: readonly string[]): Promise<void> {
-		this.#outputsSnapshot = outputs.slice();
-		await mkdir(this.#cacheDirectoryPath, defaultDirOptions);
-		await writeFile(this.#outputsManifestPath, Json.serialize(this.#outputsSnapshot), 'utf8');
-	}
 
 	/**
 	 * Checks if the cache is valid (not invalidated).
@@ -163,9 +112,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	invalidate(): void {
 		this.#invalidated = true;
 		try { rmSync(this.#cacheDirectoryPath, defaultCleanOptions) } catch { /* Ignore */ }
-		// Note: outputsSnapshot is intentionally preserved. The manifest describes outputs in
-		// `outDir` (not under `.tsbuild`) and is needed to remove stale outputs after this build,
-		// keeping clean() off the critical path on --clearCache / --force runs.
 	}
 
 	/**
@@ -185,16 +131,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	hasPersistedState(): boolean {
 		return !this.#invalidated && existsSync(this.#buildInfoPath);
-	}
-
-	/**
-	 * Synchronously checks whether a manifest snapshot from a prior build is available.
-	 * Survives `invalidate()` so the manifest-driven cleanup path can be used on
-	 * `--clearCache` and `--force` runs as well.
-	 * @returns True when an output manifest snapshot is held in memory.
-	 */
-	hasPersistedManifest(): boolean {
-		return this.#outputsSnapshot !== undefined;
 	}
 
 	/**

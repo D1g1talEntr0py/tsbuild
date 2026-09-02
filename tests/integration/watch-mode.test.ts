@@ -8,6 +8,13 @@ import { Logger } from '../../src/logger';
 import { TestHelper } from '../scripts/test-helper';
 import type { AbsolutePath } from '../../src/@types';
 
+// Wraps the named export so rebuild's direct call to it (proving oldProgram reuse, not a
+// createIncrementalProgram() round-trip which never forwards oldProgram) is observable.
+vi.mock('typescript', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('typescript')>();
+	return { ...actual, createEmitAndSemanticDiagnosticsBuilderProgram: vi.fn(actual.createEmitAndSemanticDiagnosticsBuilderProgram) };
+});
+
 // When a watched path is removed (tmpdir cleanup after close(), or a rebuild's directory
 // re-scan racing teardown), watchr surfaces a "Path not found" condition two ways: as an
 // 'error' event, and as a rejection from its async watchPath() re-scan. Neither is a real
@@ -64,6 +71,8 @@ describe('TypeScriptProject - Watch Mode', () => {
 		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
+		await expect(stat(join(dir, '.tsbuild', 'tsconfig.tsbuildinfo'))).rejects.toMatchObject({ code: 'ENOENT' });
+		await expect(readUtf8(join(dir, 'dist', 'index.d.ts'))).resolves.toContain('version');
 
 		expect(() => project!.close()).not.toThrow();
 		expect(() => project!.close()).not.toThrow();
@@ -90,6 +99,45 @@ describe('TypeScriptProject - Watch Mode', () => {
 		}, { timeout: 7_500, interval: 100 });
 
 		expect(process.exitCode).toBeUndefined();
+	});
+
+	it('reuses the prior BuilderProgram as oldProgram on rebuild instead of a from-scratch parse', { timeout: 15_000 }, async () => {
+		const ts = await import('typescript');
+		const createBuilderSpy = vi.mocked(ts.createEmitAndSemanticDiagnosticsBuilderProgram);
+		createBuilderSpy.mockClear();
+
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version = 1;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>(resolve => setImmediate(resolve));
+
+		// The initial build goes through createIncrementalProgram()'s internal builder factory,
+		// not the named export our rebuild path calls directly.
+		expect(createBuilderSpy).not.toHaveBeenCalled();
+
+		await writeFile(join(dir, 'src/index.ts'), 'export const version = 2;');
+
+		await vi.waitFor(() => {
+			expect(createBuilderSpy).toHaveBeenCalledTimes(1);
+		}, { timeout: 7_500, interval: 100 });
+
+		// Object the first rebuild produced — the next rebuild must chain from THIS exact
+		// in-memory instance, not a fresh reconstruction from disk .tsbuildinfo.
+		const firstBuilderProgram = createBuilderSpy.mock.results[0].value;
+
+		await writeFile(join(dir, 'src/index.ts'), 'export const version = 3;');
+
+		await vi.waitFor(() => {
+			expect(createBuilderSpy).toHaveBeenCalledTimes(2);
+		}, { timeout: 7_500, interval: 100 });
+
+		const [ , , , oldProgram ] = createBuilderSpy.mock.calls[1];
+		expect(oldProgram).toBe(firstBuilderProgram);
 	});
 
 	it('reloads a scoped TypeScript plugin when an imported plugin dependency changes', { timeout: 15_000 }, async () => {
@@ -318,6 +366,28 @@ describe('TypeScriptProject - Watch Mode', () => {
 		}, { timeout: 7_500, interval: 100 });
 
 		infoSpy.mockRestore();
+	});
+
+	it('recreates the esbuild context when an entry point is renamed', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version = 1;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const oldPath = join(dir, 'src/index.ts');
+		const newPath = join(dir, 'src/main.ts');
+		await rename(oldPath, newPath);
+		await writeFile(newPath, 'export const version = 2;');
+
+		await vi.waitFor(async () => {
+			const output = await readUtf8(join(dir, 'dist/index.js'));
+			expect(output.includes('version = 2') || output.includes('version=2')).toBe(true);
+		}, { timeout: 7_500, interval: 100 });
 	});
 
 	it('coalesces a rapid triple-rename chain into a single rebuild', { timeout: 15_000 }, async () => {

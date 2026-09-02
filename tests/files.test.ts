@@ -296,7 +296,7 @@ describe('Files', () => {
 			expect(decompressed).toEqual(original);
 		});
 
-			it('passes the expected Brotli quality and size hint parameters', async () => {
+		it('passes the expected Brotli quality parameter', async () => {
 				const original = Buffer.from('demo payload');
 				const spy = vi.mocked(zlib.brotliCompress);
 				spy.mockClear();
@@ -307,10 +307,7 @@ describe('Files', () => {
 					original,
 					expect.objectContaining({
 						params: expect.objectContaining({
-							[zlib.constants.BROTLI_PARAM_QUALITY]: 5,
-							...(zlib.constants.BROTLI_PARAM_SIZE_HINT !== undefined ? {
-								[zlib.constants.BROTLI_PARAM_SIZE_HINT]: original.length
-							} : {})
+							[zlib.constants.BROTLI_PARAM_QUALITY]: 5
 						})
 					}),
 					expect.any(Function)

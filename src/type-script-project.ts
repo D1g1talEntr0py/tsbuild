@@ -2,7 +2,6 @@ import { Files } from './files';
 import { Paths } from './paths';
 import { Json } from './json';
 import { Logger } from './logger';
-import { rm } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { TextFormat } from './text-formatter';
@@ -17,11 +16,11 @@ import { FileManager } from './file-manager';
 import { IncrementalBuildCache } from './incremental-build-cache';
 import { processManager } from './process-manager';
 import { inferEntryPoints, updateEntryPoints, type PackageJson } from './entry-points';
-import { sys, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
+import { sys, createEmitAndSemanticDiagnosticsBuilderProgram, createIncrementalCompilerHost, createIncrementalProgram, formatDiagnostics, formatDiagnosticsWithColorAndContext, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
 import { compilerOptionOverrides, BuildMessageType, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform, format, toEsTarget, processEnvExpansionPattern, toJsxRenderingMode } from './constants';
-import type { BuildFailure, Message, OutputFile } from 'esbuild';
+import type { BuildFailure, BuildOptions, Message, OutputFile } from 'esbuild';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
-import type { BuilderProgram, CompilerOptions, Diagnostic, FormatDiagnosticsHost } from 'typescript';
+import type { BuilderProgram, CompilerHost, CompilerOptions, Diagnostic, EmitAndSemanticDiagnosticsBuilderProgram, FormatDiagnosticsHost, SourceFile } from 'typescript';
 import type { Closable, ProjectBuildConfiguration, TypeScriptConfiguration, BuildConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, AsyncEntryPoints, PendingFileChange, ReadConfigResult, JsonString, Pattern, Plugin } from './@types';
 
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
@@ -29,22 +28,15 @@ type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
 type QueuedPendingChange = PendingFileChange & { version: number };
 
 type BuildPlan = {
-	buildCache: TypeScriptConfiguration['buildCache'];
 	currentFingerprint: string;
 	fingerprintMatched: boolean;
 	force: boolean;
 	cleanEnabled: boolean;
-	useManifest: boolean;
-	previousOutputs: readonly string[] | undefined;
-	eagerCleanPromise: Promise<void> | undefined;
 };
 
 type BuildFinalizeContext = {
-	buildCache: TypeScriptConfiguration['buildCache'];
 	currentFingerprint: string;
 	fingerprintMatched: boolean;
-	previousOutputs: readonly string[] | undefined;
-	newOutputs: readonly string[];
 };
 
 const globCharacters = /[*?\\[\]!].*$/;
@@ -102,14 +94,18 @@ function formatPendingChangeSummary(pendingFileChanges: ReadonlyArray<PendingFil
 export class TypeScriptProject implements Closable {
 	#fileWatcher?: Watchr;
 	#watchedPaths: readonly AbsolutePath[] = [];
-	#builderProgram: BuilderProgram;
+	#builderProgram: EmitAndSemanticDiagnosticsBuilderProgram;
+	/** Shared across the whole project lifetime so rebuilds can pass the prior BuilderProgram as oldProgram for real AST/checker reuse */
+	readonly #compilerHost: CompilerHost;
+	readonly #programCompilerOptions: CompilerOptions;
+	/** Caches parsed SourceFile objects by path so unchanged files (including lib/@types) are reused across rebuilds by object identity */
+	readonly #sourceFileCache: Map<AbsolutePath, SourceFile> = new Map();
 	#entryPoints?: EntryPoints<AbsolutePath>;
 	#rebuildDispatch: NodeJS.Timeout | undefined;
 	#renameCycleTimer: NodeJS.Timeout | undefined;
 	#renameCycleDeadline = 0;
 	#queueRevision = 0;
 	#dispatchRevision = 0;
-	#pendingStaleOutputsCleanup?: Promise<void>;
 	#rebuildInFlight = false;
 	#rebuildPending = false;
 	#pluginInvalidated = false;
@@ -129,6 +125,8 @@ export class TypeScriptProject implements Closable {
 	readonly #buildDependencies: Set<RelativePath> = new Set();
 	/** Local TypeScript plugin dependencies discovered via the tsnode plugin scope (the plugin module and anything it imports) */
 	readonly #pluginDependencies: Set<RelativePath> = new Set();
+	#watchEsbuildContext?: import('esbuild').BuildContext;
+	#watchEsbuildFiles: WrittenFile[] = [];
 
 	/**
 	 * Creates a TypeScript project and prepares it for building/bundling.
@@ -146,7 +144,27 @@ export class TypeScriptProject implements Closable {
 
 		// Initialize file manager for tracking emissions
 		this.#fileManager = new FileManager(buildCache);
-		this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences, configFileParsingDiagnostics });
+		this.#programCompilerOptions = this.#configuration.tsbuild.watch.enabled ? { ...this.#configuration.compilerOptions, incremental: false, tsBuildInfoFile: undefined } : this.#configuration.compilerOptions;
+		this.#compilerHost = createIncrementalCompilerHost(this.#programCompilerOptions);
+		// createIncrementalCompilerHost() does not cache SourceFile objects across calls (only
+		// createWatchProgram's private internals do). Without this, TypeScript's structural-reuse
+		// check (tryReuseStructureFromOldProgram) sees a brand-new object for every file on every
+		// rebuild — including lib.*.d.ts and @types/node — forcing a full re-parse regardless of
+		// oldProgram. Caching here, invalidated only for files our own watch diff confirms changed,
+		// lets unaffected files (the vast majority) reuse their prior AST untouched.
+		const originalGetSourceFile = this.#compilerHost.getSourceFile.bind(this.#compilerHost);
+		this.#compilerHost.getSourceFile = (fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile) => {
+			if (!shouldCreateNewSourceFile) {
+				const cached = this.#sourceFileCache.get(fileName as AbsolutePath);
+				if (cached !== undefined) { return cached }
+			}
+
+			const sourceFile = originalGetSourceFile(fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile);
+			if (sourceFile !== undefined) { this.#sourceFileCache.set(fileName as AbsolutePath, sourceFile) }
+
+			return sourceFile;
+		};
+		this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#programCompilerOptions, projectReferences, configFileParsingDiagnostics, host: this.#compilerHost });
 		this.#buildConfiguration = { entryPoints: this.#getEntryPoints(entryPoints), target: toEsTarget(target), outDir: outDir as AbsolutePath, ...tsbuildOptions };
 
 		if (this.#buildConfiguration.noExternal.length > 0) {
@@ -172,43 +190,6 @@ export class TypeScriptProject implements Closable {
 	}
 
 	/**
-	 * Removes outputs that the previous build wrote but the current build did not — e.g. renamed
-	 * entry points or content-hashed chunks whose hash changed. Restricted to files under outDir
-	 * for safety. Fire-and-forget: scheduled after build completion so it never inflates timings.
-	 * @param previous - Project-relative paths recorded by the previous build (or undefined)
-	 * @param current - Project-relative paths produced by the current build
-	 */
-	#cleanupStaleOutputs(previous: readonly string[] | undefined, current: readonly string[]): void {
-		if (previous === undefined || previous.length === 0) { return }
-
-		const currentSet = new Set(current);
-		const outDirRel = this.#relativeToProject(this.#buildConfiguration.outDir);
-		const prefix = `${outDirRel}/`;
-		const stale: string[] = [];
-		for (const path of previous) {
-			if (currentSet.has(path)) { continue }
-			if (path !== outDirRel && !path.startsWith(prefix)) { continue }
-			stale.push(Paths.absolute(this.#directory, path));
-		}
-
-		if (stale.length === 0) { return }
-
-		const removals = new Array<Promise<void>>(stale.length);
-		for (let i = 0, length = stale.length; i < length; i++) {
-			removals[i] = rm(stale[i], { force: true });
-		}
-
-		const cleanup = Promise.all(removals)
-			.then(() => undefined)
-			.catch(() => undefined)
-			.finally(() => {
-				if (this.#pendingStaleOutputsCleanup === cleanup) { this.#pendingStaleOutputsCleanup = undefined }
-			});
-
-		this.#pendingStaleOutputsCleanup = cleanup;
-	}
-
-	/**
 	 * Builds the project
 	 * @returns A promise that resolves when the build is complete.
 	 */
@@ -218,100 +199,71 @@ export class TypeScriptProject implements Closable {
 
 		try {
 			const processes: Array<Promise<WrittenFile[]>> = [];
-			const { buildCache, currentFingerprint, fingerprintMatched, force, cleanEnabled, useManifest, previousOutputs, eagerCleanPromise } = await this.#resolveBuildPlan();
+			const { currentFingerprint, fingerprintMatched, force, cleanEnabled } = await this.#resolveBuildPlan();
 
 			const filesWereEmitted = await this.#typeCheck();
 
 			if ((filesWereEmitted || force || this.#pluginInvalidated) && !this.#configuration.compilerOptions.noEmit) {
-				if (eagerCleanPromise !== undefined) {
-					await eagerCleanPromise;
-				}	else if (cleanEnabled && !useManifest) {
-					await this.clean();
-				}
+				if (cleanEnabled) { await this.clean() }
 
 				// Process declarations if enabled
 				if (this.#configuration.compilerOptions.declaration) { processes.push(this.#processDeclarations()) }
 
 				if (!this.#configuration.compilerOptions.emitDeclarationOnly) { processes.push(this.#transpile()) }
-			} else if (eagerCleanPromise !== undefined) {
-				// We started a clean but won't emit — still wait for it to finish so the directory
-				// is in a consistent state before returning.
-				await eagerCleanPromise;
 			}
 
-			const settled = await Promise.allSettled(processes);
-			const newOutputs = this.#collectWrittenOutputs(settled);
-			this.#finalizeBuildArtifacts({ buildCache, currentFingerprint, fingerprintMatched, previousOutputs, newOutputs });
+			this.#collectWrittenOutputs(await Promise.allSettled(processes));
+			this.#finalizeBuildArtifacts({ currentFingerprint, fingerprintMatched });
 		} catch (error) {
 			this.#handleBuildError(error);
 		} finally {
 			this.#pluginInvalidated = false;
 
 			// In watch mode, populate buildDependencies from TypeScript program's source files.
-			// This is necessary because esbuild's inputs are only available after transpile(),
-			// which may not run on incremental builds with no changes.
+			// This is necessary because esbuild's inputs are only available after transpile(), which may not run on incremental builds with no changes.
 			if (this.#buildConfiguration.watch.enabled) {
-				// Only re-walk when the underlying Program changed (e.g., after rebuild creates a new one).
-				// Incremental no-op builds reuse the same Program and skip this O(N) loop entirely.
+				// Only re-walk when the underlying Program changed (e.g., after rebuild creates a new one). Incremental no-op builds reuse the same Program and skip this O(N) loop entirely.
 				const program = this.#builderProgram.getProgram();
 				if (this.#buildDependenciesProgram !== program) {
 					this.#buildDependenciesProgram = program;
 					this.#buildDependencies.clear();
 					const dirWithSlash = this.#directory + '/';
 					for (const { isDeclarationFile, fileName } of program.getSourceFiles()) {
-						// Skip declaration files and files outside project directory (e.g., node_modules)
-						// Files outside the directory can't match watcher events anyway
-						if (!isDeclarationFile && fileName.startsWith(dirWithSlash)) {
-							this.#buildDependencies.add(this.#relativeToProject(fileName as AbsolutePath));
-						}
+						// Skip declaration files and files outside project directory (e.g., node_modules). Files outside the directory can't match watcher events anyway
+						if (!isDeclarationFile && fileName.startsWith(dirWithSlash)) { this.#buildDependencies.add(this.#relativeToProject(fileName as AbsolutePath)) }
 					}
 				}
 
-				// Reconcile watcher targets after every build because a plugin rebuild may add or
-				// remove local imports outside the project's source include tree.
+				// Reconcile watcher targets after every build because a plugin rebuild may add or remove local imports outside the project's source include tree.
 				await this.#watch();
 			}
 		}
 	}
 
 	/**
-	 * Collects successful output paths and reports rejected phase results.
+	 * Reports rejected declaration/transpile phase results.
 	 * @param settled - Settled declaration/transpile phase results
-	 * @returns Project-relative output paths from successful phases
 	 */
-	#collectWrittenOutputs(settled: ReadonlyArray<PromiseSettledResult<WrittenFile[]>>): string[] {
-		const newOutputs: string[] = [];
+	#collectWrittenOutputs(settled: ReadonlyArray<PromiseSettledResult<WrittenFile[]>>): void {
 		for (const result of settled) {
 			if (result.status === 'rejected') {
 				this.#handleBuildError(result.reason);
 				continue;
 			}
 
-			for (const { path } of result.value) { newOutputs.push(path) }
 		}
-
-		return newOutputs;
 	}
 
 	/**
 	 * Persists build artifacts after declaration/transpile phases complete.
 	 * @param context - Build artifact finalization inputs
 	 */
-	#finalizeBuildArtifacts({ buildCache, currentFingerprint, fingerprintMatched, previousOutputs, newOutputs }: BuildFinalizeContext): void {
+	#finalizeBuildArtifacts({ currentFingerprint, fingerprintMatched }: BuildFinalizeContext): void {
 		// Defer the dts cache Brotli compression until AFTER the parallel phases complete.
 		// Running it during transpile inflates esbuild's wall time by 50-70ms via libuv thread pool contention.
-		// Pass configChanged so the new fingerprint is persisted even when TypeScript had nothing
-		// new to emit — without this, every subsequent build after a config change would see a
-		// fingerprint mismatch and force an unnecessary full rebuild.
+		// Pass configChanged so the new fingerprint is persisted even when TypeScript had nothing new to emit — without this,
+		// every subsequent build after a config change would see a fingerprint mismatch and force an unnecessary full rebuild.
 		this.#fileManager.persistCache(currentFingerprint, !fingerprintMatched);
-
-		// Stale-file cleanup + new manifest persistence — both fire-and-forget after the build
-		// has reported completion, so they never inflate the critical path.
-		if (buildCache === undefined || newOutputs.length === 0) { return }
-
-		if (previousOutputs !== undefined) { this.#cleanupStaleOutputs(previousOutputs, newOutputs) }
-
-		void buildCache.saveOutputs(newOutputs).catch(() => { /* best-effort manifest persistence */ });
 	}
 
 	/**
@@ -328,21 +280,7 @@ export class TypeScriptProject implements Closable {
 		const force = this.#configuration.tsbuild.force || !fingerprintMatched;
 		const cleanEnabled = this.#configuration.clean && !this.#configuration.compilerOptions.noEmit;
 
-		// Manifest-driven output cleanup: when a manifest snapshot from a prior build is available,
-		// skip the upfront clean entirely — even on --force / --clearCache. dts/transpile overwrite
-		// same-named files, and stale outputs are diffed and removed asynchronously after the build
-		// phases complete (off the critical path). This keeps the parallel `clean()` from racing
-		// libuv's thread pool with TypeScript's emit and esbuild's I/O. Pre-clean is reserved for
-		// truly cold builds (no manifest snapshot at all).
-		const useManifest = cleanEnabled && buildCache !== undefined && buildCache.hasPersistedManifest();
-		const previousOutputs = useManifest ? buildCache.getPreviousOutputs() : undefined;
-
-		// On a true cold build (no manifest available), pre-clean in parallel with typeCheck —
-		// only when emission is guaranteed to follow (force, or no persisted incremental state).
-		const willEmit = force || buildCache?.hasPersistedState() !== true;
-		const eagerCleanPromise = cleanEnabled && willEmit && !useManifest ? this.clean() : undefined;
-
-		return { buildCache, currentFingerprint, fingerprintMatched, force, cleanEnabled, useManifest, previousOutputs, eagerCleanPromise };
+		return { currentFingerprint, fingerprintMatched, force, cleanEnabled };
 	}
 
 	/**
@@ -422,13 +360,23 @@ export class TypeScriptProject implements Closable {
 	 */
 	@logPerformance('Transpile')
 	async #transpile() {
-		const { build: esbuild, formatMessages } = await import('esbuild');
+		const { build: esbuild, context: createEsbuildContext, formatMessages } = await import('esbuild');
 		const { plugins, iifeFiles, define, pluginDependencies, disposePlugins } = await this.#configureTranspileOptions();
 		const writtenFiles: WrittenFile[] = [];
-		plugins.push(createWriteOutputPlugin(this.#directory, (files) => writtenFiles.push(...files), iifeFiles));
+		const canReuseContext = this.#buildConfiguration.watch.enabled && this.#buildConfiguration.iife === undefined && !this.#buildConfiguration.plugins?.length;
+
+		plugins.push(createWriteOutputPlugin(this.#directory, (files) => {
+			if (canReuseContext) {
+				this.#watchEsbuildFiles = files;
+			} else {
+				writtenFiles.push(...files);
+			}
+		}, iifeFiles));
 
 		try {
-			const { warnings, errors, metafile: { outputs } = {} } = await esbuild({
+			if (canReuseContext) { this.#watchEsbuildFiles = [] }
+
+			const options: BuildOptions = {
 				format,
 				plugins,
 				define,
@@ -466,13 +414,16 @@ export class TypeScriptProject implements Closable {
 				minify: this.#buildConfiguration.minify,
 				// Force decorator transformation even with ESNext target since Node.js doesn't support decorators yet
 				supported: { decorators: false }
-			});
+			};
+
+			const result = canReuseContext ? await (this.#watchEsbuildContext ??= await createEsbuildContext(options)).rebuild() : await esbuild(options);
+			const { warnings, errors, metafile: { outputs } = {} } = result;
 
 			if (outputs === undefined) { return [] }
 
 			await this.#reportEsbuildErrors(formatMessages, warnings, errors);
 
-			return writtenFiles;
+			return canReuseContext ? this.#watchEsbuildFiles : writtenFiles;
 		} catch (error) {
 			if (error instanceof BuildError) { throw error }
 
@@ -486,11 +437,9 @@ export class TypeScriptProject implements Closable {
 			this.#pluginDependencies.clear();
 			for (const dependency of pluginDependencies) { this.#pluginDependencies.add(this.#relativeToProject(dependency)) }
 
-			// The TypeScript plugin scope (if any was created) must stay registered through the
-			// entire esbuild() call above, since plugin setup()/onEnd() callbacks may dynamically
-			// import further local TypeScript modules. Unregister only now that esbuild has settled,
-			// on both the success and failure paths.
-			disposePlugins();
+			// The TypeScript plugin scope (if any was created) must stay registered through the entire esbuild() call above, since plugin setup()/onEnd()
+			// callbacks may dynamically import further local TypeScript modules. Unregister only now that esbuild has settled, on both the success and failure paths.
+			if (!canReuseContext) { disposePlugins() }
 		}
 	}
 
@@ -742,6 +691,8 @@ export class TypeScriptProject implements Closable {
 	/** Closes the project and cleans up resources. */
 	close(): void {
 		processManager.removeCloseable(this);
+		void this.#watchEsbuildContext?.dispose();
+		this.#watchEsbuildContext = undefined;
 		this.#fileWatcher?.close();
 		this.#watchedPaths = [];
 
@@ -756,7 +707,6 @@ export class TypeScriptProject implements Closable {
 		}
 
 		this.#fileManager.close();
-		this.#pendingStaleOutputsCleanup = undefined;
 		this.#buildDependencies.clear();
 		this.#pluginDependencies.clear();
 		this.#renameCyclePaths.clear();
@@ -766,6 +716,7 @@ export class TypeScriptProject implements Closable {
 		this.#pendingChangeVersions.clear();
 		this.#pendingChangeKeysByPath.clear();
 		this.#contentStates.clear();
+		this.#sourceFileCache.clear();
 		this.#buildDependenciesProgram = undefined;
 		this.#pendingChanges.clear();
 	}
@@ -902,15 +853,11 @@ export class TypeScriptProject implements Closable {
 
 			const rootNames = [ ...this.#builderProgram.getProgram().getRootFileNames() ];
 
-			this.#applyPendingFileChanges(pendingFileChanges, rootNames);
+			await this.#applyPendingFileChanges(pendingFileChanges, rootNames);
 
-			// Ensure the previous build's .tsbuildinfo write has settled before TypeScript reads it
-			// during createIncrementalProgram(). persistCache() defers that write off the critical
-			// path; the @debounce(100) usually covers it, but flushing here removes the race entirely.
-			await this.#fileManager.flush();
-
-			// Recreate program with incremental support if configured
-			this.#builderProgram = createIncrementalProgram({ rootNames, options: this.#configuration.compilerOptions, projectReferences: this.#configuration.projectReferences, configFileParsingDiagnostics: this.#configuration.configFileParsingDiagnostics });
+			// Pass the current BuilderProgram as oldProgram so TypeScript reuses unchanged ASTs/checker state instead of a
+			// from-scratch parse+bind+check (createIncrementalProgram never forwards oldProgram — it always creates one from scratch internally).
+			this.#builderProgram = createEmitAndSemanticDiagnosticsBuilderProgram(rootNames, this.#programCompilerOptions, this.#compilerHost, this.#builderProgram, this.#configuration.configFileParsingDiagnostics, this.#configuration.projectReferences);
 
 			// build() handles its own errors - no need to catch here
 			await this.build();
@@ -952,8 +899,13 @@ export class TypeScriptProject implements Closable {
 	 * @param pendingFileChanges - Filtered pending watcher changes
 	 * @param rootNames - Mutable rootNames array used to recreate the incremental program
 	 */
-	#applyPendingFileChanges(pendingFileChanges: ReadonlyArray<QueuedPendingChange>, rootNames: string[]) {
+	async #applyPendingFileChanges(pendingFileChanges: ReadonlyArray<QueuedPendingChange>, rootNames: string[]) {
 		for (const { event, path, nextPath } of pendingFileChanges) {
+			// Force a fresh parse only for files we've confirmed changed; every other cached SourceFile (including lib/@types) stays eligible for structural reuse.
+			this.#sourceFileCache.delete(path);
+
+			if (nextPath !== undefined) { this.#sourceFileCache.delete(nextPath) }
+
 			if (this.#pluginDependencies.has(this.#relativeToProject(path)) || (nextPath !== undefined && this.#pluginDependencies.has(this.#relativeToProject(nextPath)))) {
 				this.#pluginInvalidated = true;
 			}
@@ -962,6 +914,12 @@ export class TypeScriptProject implements Closable {
 			if (nextPath !== undefined && isRenameEvent(event)) {
 				this.#buildDependencies.delete(this.#relativeToProject(path));
 				this.#buildDependencies.add(this.#relativeToProject(nextPath));
+
+				if (Object.values(this.#entryPoints ?? {}).includes(path)) {
+					const context = this.#watchEsbuildContext;
+					this.#watchEsbuildContext = undefined;
+					await context?.dispose();
+				}
 
 				updateEntryPoints(this.#entryPoints, path, nextPath);
 
