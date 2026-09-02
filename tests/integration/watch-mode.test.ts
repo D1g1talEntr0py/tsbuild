@@ -381,13 +381,23 @@ describe('TypeScriptProject - Watch Mode', () => {
 
 		const oldPath = join(dir, 'src/index.ts');
 		const newPath = join(dir, 'src/main.ts');
+		const infoSpy = vi.spyOn(Logger, 'info');
 		await rename(oldPath, newPath);
+
+		await vi.waitFor(() => {
+			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
+			expect(rebuildLogs).toHaveLength(1);
+			expect(rebuildLogs[0]?.[0]).toBe('Rebuilding project: 1 file renamed detected.');
+		}, { timeout: 7_500, interval: 100 });
+
 		await writeFile(newPath, 'export const version = 2;');
 
 		await vi.waitFor(async () => {
 			const output = await readUtf8(join(dir, 'dist/index.js'));
 			expect(output.includes('version = 2') || output.includes('version=2')).toBe(true);
 		}, { timeout: 7_500, interval: 100 });
+
+		infoSpy.mockRestore();
 	});
 
 	it('coalesces a rapid triple-rename chain into a single rebuild', { timeout: 15_000 }, async () => {
