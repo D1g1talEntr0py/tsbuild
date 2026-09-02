@@ -48,6 +48,7 @@
     "build": "tsnode ./src/tsbuild.ts",
     "build:watch": "tsnode ./src/tsbuild.ts --watch",
     "bench": "tsnode ./tests/scripts/benchmark.ts",
+    "perf:profile": "tsnode ./tests/scripts/profile.ts",
     "type-check": "tsnode ./src/tsbuild.ts --noEmit",
     "lint": "eslint --flag unstable_native_nodejs_ts_config ./src",
     "test": "vitest run",
