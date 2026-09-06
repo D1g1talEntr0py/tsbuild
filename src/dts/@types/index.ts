@@ -69,13 +69,19 @@ type ExternalImport =
 	| { kind: 'named'; specifier: string; isType: boolean; names: string[] }
 	| { kind: 'raw'; text: string };
 
+type ExportedName = {
+	localName: string;
+	exportedName: string;
+	isType: boolean;
+};
+
 /** Declaration code with collected export information */
 type DeclarationCode = {
 	code: string;
 	/** External import statements to preserve (structured, not text) */
 	externalImports: ExternalImport[];
-	typeExports: string[];
-	valueExports: string[];
+	typeExports: ExportedName[];
+	valueExports: ExportedName[];
 };
 
 /** Module dependency graph with bundled specifier tracking */
@@ -84,4 +90,4 @@ type ModuleDependencyGraph = {
 	readonly bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
-export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, DeclarationCode, ExternalImport, ModuleDependencyGraph };
+export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, ExportedName, DeclarationCode, ExternalImport, ModuleDependencyGraph };

@@ -53,6 +53,21 @@ describe('bundleDeclarations', () => {
 			expect(content).toContain('export { a };');
 		});
 
+		it('bundles types imported through a directory barrel', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'import type { Options } from "./types";\nexport declare const options: Options;'],
+					[join(cwd, 'src/types/index.d.ts'), 'export type Options = { enabled: boolean; };'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).toContain('type Options = { enabled: boolean; };');
+			expect(content).not.toContain('from "./types"');
+		});
+
 		it('bundles multiple entry points in parallel', async () => {
 			const options = makeOptions({
 				declarationFiles: TestHelper.createDeclarationFilesMap([
@@ -357,8 +372,51 @@ export declare const Theme: { color: string; };`],
 
 			await bundleDeclarations(options);
 			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
-			expect(content).not.toContain('export default');
-			expect(content).toContain('export { a };');
+			expect(content).toContain('export { a, _default as default };');
+		});
+
+		it('preserves named export aliases and bundled local bindings', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'import { value as localValue } from "./dependency";\nexport { localValue as publicValue };'],
+					[join(cwd, 'src/dependency.d.ts'), 'export declare const value: number;'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).toContain('export { value as publicValue };');
+		});
+
+		it('does not expose dependency-only exports', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'import { publicValue } from "./dependency";\nexport { publicValue };'],
+					[join(cwd, 'src/dependency.d.ts'), 'export declare const publicValue: number;\nexport declare const privateValue: string;'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).toContain('export { publicValue };');
+			expect(content).not.toContain('export { privateValue');
+		});
+	});
+
+	describe('nested entry output', () => {
+		it('creates directories for nested entry names', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/feature.d.ts'), 'export declare const feature: boolean;'],
+				]),
+				entryPoints: { 'features/index': join(cwd, 'src/feature.d.ts') as AbsolutePath },
+			});
+
+			const result = await bundleDeclarations(options);
+			expect(result[0]?.path).toBe('dist/features/index.d.ts');
+			expect(TestHelper.readFile(join(outDir, 'features/index.d.ts'))).toContain('export { feature };');
 		});
 	});
 

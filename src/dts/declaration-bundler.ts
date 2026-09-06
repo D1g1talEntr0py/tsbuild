@@ -32,7 +32,7 @@ import {
 } from 'typescript';
 import type { SourceFile, Node, StringLiteral, ModuleResolutionHost } from 'typescript';
 import type { AbsolutePath, CachedDeclaration, WrittenFile } from '../@types';
-import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, ExternalImport } from './@types';
+import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, ExternalImport, ExportedName } from './@types';
 
 const nodeModules = '/node_modules/';
 const emptySet: ReadonlySet<string> = new Set();
@@ -472,18 +472,20 @@ class DeclarationBundler {
 	 * @param bundledImportPaths - Set of resolved file paths that were bundled (to exclude from external imports)
 	 * @param renameMap - Map of renamed identifiers (name:path -> newName)
 	 * @param modulePath - Path of current module for looking up renames
+	 * @param dependencyExports - Export bindings collected from dependencies already processed
 	 * @returns Object with processed code, collected external imports, and exported names (separated by type/value)
 	 */
-	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string): DeclarationCode {
+	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string, dependencyExports: ReadonlyMap<string, ReadonlyMap<string, string>>): DeclarationCode {
 		const externalImports: ExternalImport[] = [];
-		const typeExports: string[] = [];
-		const valueExports: string[] = [];
+		const typeExports: ExportedName[] = [];
+		const valueExports: ExportedName[] = [];
 		// Use pre-computed identifiers directly - they're already Sets
 		const { types: typeIdentifiers, values: valueIdentifiers } = identifiers;
 		// Use MagicString for efficient code manipulation
 		const magic = new MagicString(code);
 		const moduleRenames = new Map<string, string>();
-		const exportsMapper = (name: string) => moduleRenames.get(name) ?? name;
+		const localBindings = new Map<string, string>();
+		const exportsMapper = (name: string) => moduleRenames.get(localBindings.get(name) ?? name) ?? localBindings.get(name) ?? name;
 
 		// Apply renaming for identifiers from this module
 		for (const name of typeIdentifiers) {
@@ -504,6 +506,21 @@ class DeclarationBundler {
 		for (const statement of sourceFile.statements) {
 			if (isImportDeclaration(statement)) {
 				const moduleSpecifier = (statement.moduleSpecifier as StringLiteral).text;
+				const resolvedPath = this.#resolveModule(moduleSpecifier, modulePath);
+				const resolvedExports = resolvedPath === undefined ? undefined : dependencyExports.get(resolvedPath);
+				const importClause = statement.importClause;
+				if (resolvedExports && importClause) {
+					if (importClause.name) {
+						const imported = resolvedExports.get('default');
+						if (imported) { localBindings.set(importClause.name.text, imported) }
+					}
+					if (importClause.namedBindings && isNamedImports(importClause.namedBindings)) {
+						for (const { name, propertyName } of importClause.namedBindings.elements) {
+							const imported = resolvedExports.get(propertyName?.text ?? name.text);
+							if (imported) { localBindings.set(name.text, imported) }
+						}
+					}
+				}
 
 				// Keep as external if:
 				// 1. It explicitly matches external patterns, OR
@@ -542,6 +559,17 @@ class DeclarationBundler {
 			} else if (isExportDeclaration(statement)) {
 				// Export from another module: export { X } from './module'
 				if (statement.moduleSpecifier) {
+					if (statement.exportClause && isNamedExports(statement.exportClause) && bundledImportPaths.has((statement.moduleSpecifier as StringLiteral).text)) {
+						const resolvedPath = this.#resolveModule((statement.moduleSpecifier as StringLiteral).text, modulePath);
+						const resolvedExports = resolvedPath === undefined ? undefined : dependencyExports.get(resolvedPath);
+						if (resolvedExports) {
+							for (const { name, propertyName, isTypeOnly } of statement.exportClause.elements) {
+								const importedName = propertyName?.text ?? name.text;
+								const exported = { localName: resolvedExports.get(importedName) ?? importedName, exportedName: name.text, isType: statement.isTypeOnly || isTypeOnly };
+								if (exported.isType) { typeExports.push(exported) } else { valueExports.push(exported) }
+							}
+						}
+					}
 					// Keep external or unresolved re-exports verbatim so public APIs are preserved.
 					// Only strip re-exports that were actually bundled into the combined output.
 					if (bundledImportPaths.has((statement.moduleSpecifier as StringLiteral).text)) { magic.remove(statement.pos, statement.end) }
@@ -554,15 +582,18 @@ class DeclarationBundler {
 					// Check if this is an empty export (export {};). These are used by TypeScript to mark a file as a module
 					// Collect exported names
 					if (statement.exportClause.elements.length > 0) {
-						for (const { name, propertyName: { text = name.text } = {} } of statement.exportClause.elements) {
+						for (const { name, propertyName } of statement.exportClause.elements) {
+							const localName = propertyName?.text ?? name.text;
+							const mappedLocalName = exportsMapper(localName);
+							const exported = { localName: mappedLocalName, exportedName: name.text, isType: statement.isTypeOnly };
 							// Categorize as type or value. Values take precedence (classes/enums are both)
-							if (valueIdentifiers.has(text)) {
-								valueExports.push(text);
-							} else if (typeIdentifiers.has(text)) {
-								typeExports.push(text);
+							if (valueIdentifiers.has(localName) || localBindings.has(localName) && !statement.isTypeOnly) {
+								valueExports.push(exported);
+							} else if (typeIdentifiers.has(localName) || localBindings.has(localName)) {
+								typeExports.push(exported);
 							} else {
 								// Unknown, assume value (safer default)
-								valueExports.push(text);
+								valueExports.push(exported);
 							}
 						}
 
@@ -572,6 +603,9 @@ class DeclarationBundler {
 				}
 			} else if (isExportAssignment(statement)) {
 				// Handle export default assignment: export default ...
+				if (isIdentifier(statement.expression)) {
+					valueExports.push({ localName: exportsMapper(statement.expression.text), exportedName: 'default', isType: false });
+				}
 				magic.remove(statement.pos, statement.end);
 			}
 		}
@@ -581,6 +615,10 @@ class DeclarationBundler {
 		// IMPORTANT: Only visit declaration statements, NOT import/export declarations.
 		// Import and export declarations are removed via magic.remove() above.
 		// Calling magic.overwrite() on an already-removed range reinserts the text.
+		for (const [localName, importedName] of localBindings) {
+			moduleRenames.set(localName, exportsMapper(importedName));
+		}
+
 		const hasRenames = moduleRenames.size > 0;
 		const hasBundledAliases = bundledNamespaceAliases.size > 0;
 		if (hasRenames || hasBundledAliases) {
@@ -603,16 +641,15 @@ class DeclarationBundler {
 		}
 
 		// Value exports take precedence - remove any types that are also values
-		const finalValueExportsSet = new Set<string>();
-		for (const name of valueExports) { finalValueExportsSet.add(exportsMapper(name)) }
+		const finalValueExports = new Map<string, ExportedName>();
+		for (const exported of valueExports) { finalValueExports.set(exported.exportedName, exported) }
 
-		const finalTypeExports: string[] = [];
-		for (const type of typeExports) {
-			const mapped = exportsMapper(type);
-			if (!finalValueExportsSet.has(mapped)) { finalTypeExports.push(mapped) }
+		const finalTypeExports = new Map<string, ExportedName>();
+		for (const exported of typeExports) {
+			if (!finalValueExports.has(exported.exportedName)) { finalTypeExports.set(exported.exportedName, exported) }
 		}
 
-		return { code: magic.toString(), externalImports, typeExports: finalTypeExports, valueExports: Array.from(finalValueExportsSet) };
+		return { code: magic.toString(), externalImports, typeExports: Array.from(finalTypeExports.values()), valueExports: Array.from(finalValueExports.values()) };
 	}
 
 	/**
@@ -626,9 +663,9 @@ class DeclarationBundler {
 		const typeReferencesSet = new Set<string>();
 		const fileReferencesSet = new Set<string>();
 		const allExternalImports: ExternalImport[] = [];
-		const valueExportsSet = new Set<string>();
-		const typeExportsSeen = new Set<string>();
-		const orderedTypeExports: string[] = []; // preserve first-seen order for stable output
+		const valueExports = new Map<string, ExportedName>();
+		const typeExports = new Map<string, ExportedName>();
+		const moduleExports = new Map<string, Map<string, string>>();
 		const codeBlocks: string[] = [];
 
 		// Track declarations per module to detect conflicts and rename
@@ -676,22 +713,21 @@ class DeclarationBundler {
 			// Strip import/export statements, preserving external imports.
 			// Use cached identifiers and sourceFile (both always present after buildModuleGraph).
 			const bundledForThisModule = bundledSpecifiers.get(path) ?? emptySet;
-			const { code: strippedCode, externalImports, typeExports, valueExports } = this.#stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path);
+			const { code: strippedCode, externalImports, typeExports: moduleTypeExports, valueExports: moduleValueExports } = this.#stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path, moduleExports);
 
 			// Collect external imports from all modules (merged later by mergeImports)
 			for (const imp of externalImports) { allExternalImports.push(imp) }
 
-			// Collect exports from project modules, but not from bundled npm packages.
-			// This prevents unused types from dependencies being re-exported
-			// while still allowing re-exports from the project's own modules.
-			if (!path.includes(nodeModules)) {
-				for (const exp of valueExports) { valueExportsSet.add(exp) }
-				for (const exp of typeExports) {
-					if (!typeExportsSeen.has(exp)) {
-						typeExportsSeen.add(exp);
-						orderedTypeExports.push(exp);
-					}
-				}
+			const exportsForModule = new Map<string, string>();
+			for (const exported of moduleValueExports) { exportsForModule.set(exported.exportedName, exported.localName) }
+			for (const exported of moduleTypeExports) { exportsForModule.set(exported.exportedName, exported.localName) }
+			moduleExports.set(path, exportsForModule);
+
+			// Only the entry module defines the public API. Dependencies are emitted for
+			// referenced declarations but their private exports must not leak out.
+			if (path === sortedModules[sortedModules.length - 1]?.path) {
+				for (const exported of moduleValueExports) { valueExports.set(exported.exportedName, exported) }
+				for (const exported of moduleTypeExports) { typeExports.set(exported.exportedName, exported) }
 			}
 
 			// Skip modules that only contain imports/exports (pure re-export files)
@@ -707,11 +743,8 @@ class DeclarationBundler {
 		}
 
 		// Value exports take precedence — strip any types that are also values
-		const finalValueExports: string[] = [...valueExportsSet];
-		const finalTypeExports: string[] = [];
-		for (const typeExport of orderedTypeExports) {
-			if (!valueExportsSet.has(typeExport)) { finalTypeExports.push(typeExport) }
-		}
+		const finalValueExports = Array.from(valueExports.values());
+		const finalTypeExports = Array.from(typeExports.values()).filter(({ exportedName }) => !valueExports.has(exportedName));
 
 		// Build output using array for better performance than string concatenation
 		const outputParts: string[] = [];
@@ -746,12 +779,12 @@ class DeclarationBundler {
 
 			// Export values on a separate line (only if non-empty)
 			if (finalValueExports.length > 0) {
-				outputParts.push(`export { ${finalValueExports.sort().join(', ')} };`);
+				outputParts.push(`export { ${finalValueExports.sort((a, b) => a.exportedName.localeCompare(b.exportedName)).map(({ localName, exportedName }) => localName === exportedName ? localName : `${localName} as ${exportedName}`).join(', ')} };`);
 			}
 
 			// Export types (only if non-empty)
 			if (finalTypeExports.length > 0) {
-				outputParts.push(`export type { ${finalTypeExports.sort().join(', ')} };`);
+				outputParts.push(`export type { ${finalTypeExports.sort((a, b) => a.exportedName.localeCompare(b.exportedName)).map(({ localName, exportedName }) => localName === exportedName ? localName : `${localName} as ${exportedName}`).join(', ')} };`);
 			}
 		}
 
@@ -837,7 +870,7 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 		const content = dtsBundler.bundle(entryPoint);
 		if (content.length > 0) {
 			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}${FileExtension.DTS}`);
-			bundleTasks.push(writeFile(outPath, content, Encoding.utf8).then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length })));
+			bundleTasks.push(mkdir(Paths.parse(outPath).dir, defaultDirOptions).then(() => writeFile(outPath, content, Encoding.utf8)).then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length })));
 		}
 	};
 
