@@ -1,9 +1,10 @@
 # tsbuild Performance Baseline Log
 
 **Created:** 2026-04-12
-**Updated:** 2026-08-27 (re-baselined after regression fixes + Node 24 baseline + Brotli params restored + styleText migration)
-**Version:** 2.3.2
-**Node.js:** 24+
+**Updated:** 2026-09-05
+**Version:** 2.5.1
+**Node.js:** 26.8.1
+**pnpm:** 12.3.4
 **Purpose:** Track performance metrics to identify regressions and optimize critical paths.
 
 ---
@@ -16,7 +17,7 @@ tsbuild's `TypeScriptProject.build()` runs in three stages, the middle one paral
 2. **Declaration Bundling + Transpile Phase** (parallel) — `#processDeclarations()` (custom dts bundler) and `#transpile()` (esbuild) are both pushed onto a `processes` array and awaited together via `Promise.allSettled(processes)`. Each only runs if emission is required for that artifact (`compilerOptions.declaration` / `!compilerOptions.emitDeclarationOnly`).
 3. **Finalize Phase** (`#finalizeBuildArtifacts()`) — persists the Brotli-compressed `.tsbuildinfo`/dts cache. This is deliberately deferred until *after* the parallel phase completes (compressing during transpile was measured to inflate esbuild's wall time by 50-70ms via libuv threadpool contention). Stale-output cleanup and manifest persistence are fire-and-forget here and never inflate the critical path.
 
-Performance optimization focuses on the critical path: **total build time**, with type-checking as the dominant, unavoidable cost and the parallel phase as the main tuning lever (see `docs/repo` notes on the 2026-07 sequential-vs-parallel CPU contention experiment, which concluded parallel is the current, retained design).
+Performance optimization focuses on the critical path: **total build time**, with type-checking as the dominant cost and the declaration/transpile phase retained in parallel. Runtime optimization requires repeatable measurements before code changes.
 
 ---
 
@@ -37,13 +38,28 @@ All major phases are already instrumented with decorators that use Node.js `perf
 
 ### No Sub-Step Tracking
 
-The previously-documented `addPerformanceStep()` breakdown (Diagnostics/Emit/Finalize sub-steps inside type-checking) no longer exists in the codebase — `#typeCheck()` is measured as a single unified phase. Diagnostics collection and TypeScript's `emit()` call happen inline inside `#typeCheck()`/`#collectTypeCheckDiagnostics()` with no separate timing marks reported to the logger.
+`#typeCheck()` is measured as one unified phase. Diagnostics collection and TypeScript's `emit()` call happen inline; they are not reported as separate performance steps.
 
 ---
 
-## Baseline Metrics (tsbuild Self-Hosting)
+### Baseline Metrics
 
-Measured 2026-08-27 on this machine (AMD Ryzen 9 9950X, Node 26.7.0, quiet system) by running `pnpm build` against tsbuild's own `src/` (real numbers — not a synthetic project; see below for the multi-tool synthetic-project comparison via `pnpm bench`). Take these as a single-run reference point, not an average.
+Measured 2026-09-05 on Linux with Node 26.8.1, pnpm 12.3.4, TypeScript 7.0.2, and esbuild 0.28.2. Synthetic projects were isolated under `/tmp`; values are medians from repeated samples, not hard performance targets.
+
+| Scenario | Samples | Median | p95 | Notes |
+|----------|---------|--------|-----|-------|
+| Cold build, 120 modules | 7 | 594 ms | 601 ms | Fresh project/cache |
+| Warm no-op, 300 modules | 9 | 496 ms | 500 ms | Includes fresh CLI startup |
+| One-file rebuild, 120 modules | 7 | 577 ms | 618 ms | CV 7.2% |
+| Multi-entry DTS, 300 modules, no `rootDir` | 5 | 716 ms | 723 ms | Path scan not material at this size |
+| Multi-entry DTS, explicit `rootDir` | 5 | 710 ms | 721 ms | 0.8% median difference |
+| Nested output names, 180 modules | 5 | 644 ms | 650 ms | Declaration output paths |
+| CLI `--help` | 9 | 20.3 ms | 21.2 ms | Lazy import path |
+| CLI `--version` | 9 | 19.6 ms | 20.3 ms | Lazy import path |
+
+### Historical Self-Hosting Reference
+
+The following older self-hosting values remain historical context only and are not directly comparable to the synthetic measurements above.
 
 ### Cold Build (`rm -rf .tsbuild dist && pnpm build`)
 ```
@@ -95,18 +111,18 @@ This stays fast only because `src/errors.ts` avoids a top-level `import ... from
 1. **TypeScript Type Checking** (60% of cold build)
    - `typeCheck()` orchestrates: diagnostics collection → emit → cache finalize
    - Sub-path: `builderProgram.getSemanticDiagnostics()` — highest allocation cost
-   - Measurement: Already logged via `@logPerformance` with sub-steps
+   - Measurement: Logged via `@logPerformance('Type-checking/Emit')`
 
 2. **esbuild Bundling** (25-35% of cold build)
    - `transpile()` invokes `esbuild()` with plugin pipeline
    - Plugin execution order matters (resolve→decorator metadata→output)
-   - Measurement: Already logged via `@logPerformance('Transpile', true)`
+   - Measurement: Logged via `@logPerformance('Transpile')`
 
 3. **Declaration Processing/Bundling** (5-15% of cold build)
    - `processDeclarations()` → `bundleDeclarations()` or direct file write
    - Hot path: Module graph traversal in `declaration-bundler.ts`
    - Sub-path: `collectIdentifiers()` with WeakMap caching
-   - Measurement: Already logged via `@logPerformance`
+   - Measurement: Logged via `@logPerformance('Bundle Declarations')`
 
 4. **File I/O** (2-5% of cold build)
    - `FileManager.writeFiles()` — disk I/O for declarations and build info
@@ -115,7 +131,7 @@ This stays fast only because `src/errors.ts` avoids a top-level `import ... from
 
 5. **Plugin Pipeline** (variable, typically <5%)
    - `externalModulesPlugin` — pattern matching on resolved modules
-   - `swcDecoratorMetadata` — lazy-loaded only when needed
+   - Custom resolve plugins — loaded only when configured
    - Custom resolve plugins — deduped via resolution cache
 
 ### Watch Mode Specific
@@ -125,12 +141,12 @@ This stays fast only because `src/errors.ts` avoids a top-level `import ... from
 Watchr detects change
 └─ validate (skip zero-byte events, check build dependencies)
    └─ enqueue in pendingChanges[]
-      └─ @debounce(100) triggerRebuild()  [prevents thrashing]
+      └─ rename-timeout dispatch  [coalesces rapid changes]
          └─ recreate TypeScript Program with updated rootNames
             └─ run full build() (but TypeScript incremental optimization kicks in)
 ```
 
-**Performance Concern:** `buildDependencies.clear()` → `getSourceFiles()` loop happens BEFORE error handling, which is correct for cleanup but means dependency tracking survives failed builds.
+**Performance Note:** Watch rebuilds reuse the prior builder program and cached source files where possible. No watch-retention regression was observed in the current integration suite.
 
 ---
 
@@ -140,32 +156,32 @@ Watchr detects change
 **Why:** Developers see this metric. Regressions here directly impact DX.
 ```
 Tracked as: @logPerformance('Build')
-Baseline: 800-1200ms (cold), 200-400ms (incremental)
-Action: Any 20%+ regression warrants investigation
+Baseline: See the measured workload table above.
+Action: Investigate repeatable regressions outside measurement variability.
 ```
 
 ### 2. Phase Breakdown (Type-check → Transpile → Bundle)
 **Why:** Isolates which phase regresses.
 ```
 Tracked as: Individual @logPerformance decorators
-Baseline: See breakdown above
-Action: If one phase > 50% of total, investigate that path
+Baseline: See the measured workload table above.
+Action: Compare paired runs on the same environment before investigating.
 ```
 
 ### 3. Incremental Build Speedup
 **Why:** Cache effectiveness impacts watch mode DX.
 ```
 Metric: (cold_build_ms - incremental_build_ms) / cold_build_ms
-Baseline: >50% speedup expected
-Action: Cache hit rate <40% indicates cache invalidation issue
+Baseline: Not established across project sizes.
+Action: Measure cold, warm no-op, and changed-file runs together.
 ```
 
 ### 4. Watch Mode Rebuild Latency
 **Why:** Developers expect fast feedback loops.
 ```
 Tracked as: @logPerformance('Build') called from triggerRebuild()
-Baseline: 150-300ms for single-file changes
-Action: >500ms indicates plugin or resolution cost explosion
+Baseline: Not established independently of the build process.
+Action: Measure watch latency separately before attributing cost to plugins or resolution.
 ```
 
 ### 5. Allocation/Memory Efficiency
@@ -178,8 +194,8 @@ Not currently tracked. See "Future Monitoring" below.
 **Why:** Large projects with deep dependency graphs can stall here.
 ```
 Tracked within: @logPerformance('Bundle Declarations')
-Baseline: 100-150ms
-Action: >300ms suggests module graph explosion
+Baseline: Not established independently of the full build.
+Action: Profile larger declaration graphs before optimizing.
 ```
 
 ---
@@ -189,7 +205,7 @@ Action: >300ms suggests module graph explosion
 ### File Watcher (Watchr)
 - Zero-byte file events are **filtered out** (ignore meaningless writes)
 - `buildDependencies` Set tracks only transpiled entry points (not all TS source files in noEmit mode)
-- `@debounce(100)` batches rapid file changes to prevent rebuild thrashing
+- Watch rename timeout batches rapid file changes to prevent rebuild thrashing
 
 ### TypeScript Incremental Compilation
 - `createIncrementalProgram()` is called **per rebuild** with new root files
@@ -205,7 +221,7 @@ Action: >300ms suggests module graph explosion
 ### esbuild Plugin Pipeline
 - Plugins run in **registration order**
 - `externalModulesPlugin` only added if `noExternal` array has patterns
-- `swcDecoratorMetadata` is **lazy-loaded** only when `emitDecoratorMetadata: true`
+- Custom plugins are loaded only when configured
 - Plugin resolution cache is **per-bundler instance** (per build)
 
 ---
@@ -217,7 +233,7 @@ Create performance baseline for reference builds. Document:
 - Cold build time
 - Incremental build time
 - watch mode rebuild latency
-- Platform (Node.js 22, pnpm 10)
+- Platform and tool versions, including Node.js 26.8.1, pnpm 12.3.4, TypeScript 7.0.2, and esbuild 0.28.2
 
 ### 2. Periodic Re-measurement
 After significant code changes (especially in `declaration-bundler.ts`, `type-script-project.ts`, or plugins), measure:
@@ -278,7 +294,7 @@ Currently **unmeasured**. Could track:
 **Why useful:** Identifies I/O bottlenecks on slower systems.
 
 ### 4. Type Diagnostics Breakdown
-Currently **lumped as "Diagnostics"**. Could split:
+Currently **not separately instrumented**. Could split:
 - Syntactic diags (`getSyntacticDiagnostics`)
 - Semantic diags (`getSemanticDiagnostics`)
 - Declaration diags (`getDeclarationDiagnostics`)
@@ -331,7 +347,7 @@ describe('Performance', () => {
 
 - [ ] Baseline recorded: Cold build, incremental, watch mode
 - [ ] All major phases already instrumented with `@logPerformance`
-- [ ] Sub-steps tracked in type-check phase
+- [ ] Type-check sub-steps tracked separately (not currently implemented)
 - [ ] Critical paths identified and documented
 - [ ] Regression detection strategy defined
 - [ ] Future monitoring opportunities noted
@@ -347,4 +363,4 @@ describe('Performance', () => {
 - **esbuild Integration:** `TypeScriptProject.transpile()` method
 - **DTS Bundler:** `src/dts/declaration-bundler.ts` (module graph traversal)
 - **File Manager:** `src/file-manager.ts` (in-memory storage + incremental cache)
-- **Watch Mode:** `TypeScriptProject.watch()` + `triggerRebuild()` (@debounce)
+- **Watch Mode:** `TypeScriptProject.build()` + watcher queue dispatch in `src/type-script-project.ts`

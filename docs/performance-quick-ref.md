@@ -2,7 +2,7 @@
 
 **For:** tsbuild development team
 **Purpose:** Quick checks for performance regressions
-**Last Updated:** 2026-08-27 (re-baselined after regression fixes + Node 24 baseline + Brotli params restored + styleText migration)
+**Last Updated:** 2026-09-05
 
 ---
 
@@ -10,12 +10,14 @@
 
 | Scenario | Time | Status | Notes |
 |----------|------|--------|-------|
-| Cold build (fresh .tsbuild) | **486ms** | ✓ Baseline | Type-checking dominates (93%) |
-| Incremental (no changes) | **9ms** | ✓ Baseline | Instant exit via TS incremental |
-| Incremental (source change) | **445ms** | ✓ Baseline | 8% faster than cold |
-| Watch rebuild (single file) | **~300-500ms** | Estimated | Not yet measured |
+| Cold build, 120 modules | **594ms median** | ✓ Measured | 7 samples |
+| Warm no-op, 300 modules | **496ms median** | ✓ Measured | Includes fresh CLI startup |
+| One-file rebuild, 120 modules | **577ms median** | ✓ Measured | 7.2% CV |
+| CLI `--help` | **20.3ms median** | ✓ Measured | 9 samples |
+| CLI `--version` | **19.6ms median** | ✓ Measured | 9 samples |
+| Watch rebuild | Not established | Deferred | Needs a dedicated latency harness |
 
-**Regression Threshold:** Any single phase >20% slower = investigate immediately.
+**Regression Threshold:** Investigate repeatable regressions outside measured sample variability.
 
 ---
 
@@ -25,13 +27,13 @@
 ```bash
 rm -rf .tsbuild dist
 pnpm build
-# Expected: ~470-500ms total
+# Compare against the current environment; historical synthetic median is 594ms.
 ```
 
 ### Incremental Build (No Changes)
 ```bash
 pnpm build
-# Expected: ~10ms total
+# Compare against the current environment; fresh CLI startup dominates this measurement.
 ```
 
 ### Incremental Build (With Changes)
@@ -39,7 +41,7 @@ pnpm build
 echo "// Change" >> src/logger.ts
 pnpm build
 git checkout src/logger.ts
-# Expected: ~430-460ms total (≈8% faster than cold)
+# Compare against the current environment; historical synthetic median is 577ms.
 ```
 
 ### Watch Mode Rebuild
@@ -47,7 +49,7 @@ git checkout src/logger.ts
 pnpm build:watch
 # In another terminal:
 echo "// Change" >> src/type-script-project.ts
-# Expected: ~300-500ms until "Completed in Xms"
+# No baseline is currently established for watch latency.
 git checkout src/type-script-project.ts
 ```
 
@@ -67,28 +69,27 @@ Use a low-overhead, trigger-based approach by default:
 ## What to Watch For
 
 ### Performance Improvement Opportunities
-These have >5ms overhead and could be tuned:
+These areas are candidates for investigation only when profiling shows material cost:
 
-1. **Declaration Bundling (21ms)** — 4% of cold build
+1. **Declaration bundling**
    - Module graph traversal in `declaration-bundler.ts`
    - Opportunity: Profile with large declaration trees
 
-2. **Emit Phase (415ms)** — 79% of type-check
+2. **TypeScript emit and checking**
    - This is TypeScript's own emit cost — mostly unavoidable
    - Opportunity: Test with smaller projects to establish baseline scaling
 
-3. **Transpile Plugin Pipeline (100ms)** — 19% of cold build
+3. **Transpile/plugin pipeline**
    - esbuild + plugins (external modules, SWC decorator metadata, custom resolve)
    - Opportunity: Measure per-plugin cost breakdown
 
 ### Regression Red Flags
 Stop and investigate if you see:
 
-- **Total build >600ms** (cold) — indicates new overhead
-- **Type-check phase >500ms** — TypeScript regression (usually TS version, not our code)
-- **Transpile >150ms** (cold) — plugin overhead explosion
-- **Incremental speedup <40%** — cache invalidation issue
-- **"Diagnostics" step missing from output** — indicates logging bug
+- Repeatable regression outside measured sample variability
+- Missing expected output after a warm no-op build
+- Cache invalidation that forces unnecessary full work
+- A phase whose cost grows unexpectedly with project size
 
 ---
 
@@ -111,16 +112,14 @@ Test performance BEFORE submitting PR if you change:
 The `@logPerformance` decorator logs time automatically. Read it like:
 
 ```
-✓ Type-checking (424ms)          ← Total time for this phase
-  └─ Emit 416ms                  ← Sub-step timing
-  └─ Finalize 8ms                ← Sub-step timing
-✓ Transpile (100ms)              ← Total time for transpile
-✓ Bundle Declarations (21ms)     ← Total time for bundling
+✓ Type-checking/Emit (time)      ← Unified TypeScript phase
+✓ Transpile (time)               ← esbuild phase
+✓ Bundle Declarations (time)     ← Declaration phase
 ────────────────────────────────────
-✓ Completed in 528ms             ← Grand total
+✓ Completed in (time)             ← Grand total
 ```
 
-**Key Insight:** If type-check shows 424ms but sub-steps only sum to 424ms, another step (Diagnostics) ran but wasn't logged. Check [performance-baseline.md](./performance-baseline.md#sub-step-tracking) for details.
+**Key Insight:** Type-checking/Emit is a unified measurement; diagnostics and emit are not logged as separate sub-steps.
 
 ---
 
@@ -133,9 +132,9 @@ The `@logPerformance` decorator logs time automatically. Read it like:
 - **esbuild cache** — File-based cache improves transpile speed ±30ms
 
 ### Best Practices
-1. **Take 3 measurements**, use middle value to avoid outliers
+1. Take repeated measurements and report median plus p95 when possible
 2. **Run on quiet system** if possible
-3. **Test both cold and incremental** — regressions may only appear in one
+3. Test cold, warm no-op, changed-file, and multi-entry workloads
 4. **Compare on same hardware** — CPU matters for build speed
 
 ---
@@ -164,8 +163,7 @@ it('build completes in acceptable time', async () => {
   await new TypeScriptProject('.').build();
   const elapsed = performance.now() - start;
 
-  // Warn if >20% slower than baseline
-  expect(elapsed).toBeLessThan(528 * 1.2);
+// Compare repeated runs against a versioned baseline instead of a fixed local SLA.
 });
 ```
 
