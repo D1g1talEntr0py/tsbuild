@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.0...v3.0.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **cache:** increment cache version due to regression introduced in recent changes ([9007615](https://github.com/D1g1talEntr0py/tsbuild/commit/9007615b47e9777967bc17467c2c6a4860bf8c0b))
+
 # [3.0.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.5.1...v3.0.0) (2026-09-06)
 
 
