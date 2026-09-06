@@ -1,3 +1,18 @@
+# [3.0.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.5.1...v3.0.0) (2026-09-06)
+
+
+* refactor(project)!: extract build orchestration modules ([f410fad](https://github.com/D1g1talEntr0py/tsbuild/commit/f410fadf8cdcacff2e73bd6408a040d8c4da1e34))
+
+
+### Bug Fixes
+
+* **dts:** preserve aliased bundled re-exports ([c956093](https://github.com/D1g1talEntr0py/tsbuild/commit/c9560934a14797e7529a35a7747688d48f8ffa43))
+
+
+### BREAKING CHANGES
+
+* tsbuild.force, tsbuild.watch, tsbuild.minify, and tsbuild.clearCache are no longer valid tsconfig or TypeScriptOptions fields; pass them as the explicit third TypeScriptProject constructor argument or CLI flags instead.
+
 ## [2.5.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v2.5.0...v2.5.1) (2026-09-02)
 
 
