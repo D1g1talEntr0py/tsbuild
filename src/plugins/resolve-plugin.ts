@@ -1,10 +1,10 @@
 import { resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Paths } from '../paths';
 import { Logger } from '../logger';
 import { ConfigurationError } from '../errors';
-import { nodeModulesPathPattern } from '../constants';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { discoverLocalDependencies } from './plugin-dependencies';
+import { nodeModulesPathPattern, typeScriptExtensionExpression } from '../constants';
 import type { Plugin } from 'esbuild';
 import type { NamespacedUnregister } from '@d1g1tal/tsnode/api';
 import type { CompilerOptions } from 'typescript';
@@ -21,7 +21,7 @@ export type PluginScopeOptions = {
 };
 
 /** Result of resolving a project's configured plugins into esbuild Plugin objects. */
-export type PluginResolution = {
+export type PluginResolution = Disposable & {
 	plugins: Plugin[];
 	/**
 	 * Absolute paths of local TypeScript files loaded through the tsnode plugin scope — the
@@ -29,17 +29,7 @@ export type PluginResolution = {
 	 * Empty when none of the configured plugins required TypeScript support.
 	 */
 	dependencies: ReadonlySet<AbsolutePath>;
-	/**
-	 * Unregisters the per-project tsnode scope, if one was created for this resolution.
-	 * Always safe to call — a no-op when no local TypeScript plugin was loaded. Must be called
-	 * only after all plugin `setup`/`onEnd` callbacks that may run during the build have
-	 * finished, since those callbacks may dynamically import further TypeScript modules.
-	 */
-	dispose: () => void;
 };
-
-/** Matches local file extensions that require TypeScript's on-demand loader (tsnode) rather than native `import()`. */
-const typeScriptExtensionPattern = /\.tsx?$/;
 
 /**
  * Checks whether a value is an esbuild Plugin object (has `name` string and `setup` function).
@@ -71,7 +61,7 @@ function isFactory(value: unknown): value is PluginFactory {
  * @returns True when the plugin should be loaded through the tsnode scope
  */
 function isLocalTypeScriptPlugin(specifier: string, resolvedPath: string): boolean {
-	return Paths.isPath(specifier) && typeScriptExtensionPattern.test(resolvedPath);
+	return Paths.isPath(specifier) && typeScriptExtensionExpression.test(resolvedPath);
 }
 
 /**
@@ -186,7 +176,7 @@ export async function resolvePlugins(plugins: (Plugin | PluginReference)[], proj
 			resolved.push(isPlugin(entry) ? entry : await resolveReference(entry, projectDir, scope));
 		}
 
-		return { plugins: resolved, dependencies, dispose: () => handle?.unregister() };
+		return { plugins: resolved, dependencies, [Symbol.dispose]: () => handle?.unregister() };
 	} catch (error) {
 		// Loading failed before the caller ever receives a dispose handle — unregister here so the
 		// scope never leaks past this function on any failure path.

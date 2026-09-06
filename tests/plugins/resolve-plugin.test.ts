@@ -165,7 +165,7 @@ describe('resolvePlugins', () => {
 			const result = await resolvePlugins([ 'plain-js-plugin' ], projectDir, scopeOptions);
 
 			expect(result.dependencies.size).toBe(0);
-			expect(() => result.dispose()).not.toThrow();
+			expect(() => result[Symbol.dispose]()).not.toThrow();
 
 			vi.doUnmock('plain-js-plugin');
 		});
@@ -211,7 +211,7 @@ describe('resolvePlugins', () => {
 				expect(result.plugins).toHaveLength(1);
 				expect(result.plugins[0]?.name).toBe('hello-from-alias-util-default');
 
-				expect(() => result.dispose()).not.toThrow();
+				expect(() => result[Symbol.dispose]()).not.toThrow();
 			});
 
 			it('tracks the plugin and its local module graph as dependencies, excluding node_modules', async () => {
@@ -223,7 +223,7 @@ describe('resolvePlugins', () => {
 				expect(dependencyPaths.some((path) => path.endsWith(join('lib', 'message.ts')))).toBe(true);
 				expect(dependencyPaths.every((path) => !path.includes('node_modules'))).toBe(true);
 
-				result.dispose();
+				result[Symbol.dispose]();
 			});
 
 			it('does not route a local JS plugin through the scope even when a TS plugin is also configured', async () => {
@@ -233,7 +233,7 @@ describe('resolvePlugins', () => {
 				expect(result.plugins[1]?.name).toBe('js-plugin');
 				expect([ ...result.dependencies ].some((path) => path.endsWith('js-plugin.js'))).toBe(false);
 
-				result.dispose();
+				result[Symbol.dispose]();
 			});
 
 			it('unregisters the scope on a failure path (invalid plugin export) without leaking it', async () => {
@@ -246,7 +246,7 @@ describe('resolvePlugins', () => {
 				// failed resolution's scope was fully unregistered rather than left dangling.
 				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-failure-recovery', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
 				expect(result.plugins).toHaveLength(1);
-				result.dispose();
+				result[Symbol.dispose]();
 			});
 		});
 	});
