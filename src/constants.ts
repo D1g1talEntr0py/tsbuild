@@ -96,7 +96,7 @@ const defaultEntryFile = 'src/index.ts' as RelativePath;
 const cacheDirectory = '.tsbuild' as RelativePath;
 const buildInfoFile = 'tsconfig.tsbuildinfo';
 /** Cache format version - increment when cache structure changes (v4: V8 serialization + Map-based file storage) */
-const dtsCacheVersion = 4;
+const dtsCacheVersion = 5;
 // Version-stamped so the filename alone proves structural compatibility: a present file is always
 // the current version, letting the .tsbuildinfo/cache consistency guard use a plain existence check.
 const dtsCacheFile: string = `dts_cache.v${dtsCacheVersion}.br`;
