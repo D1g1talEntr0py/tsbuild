@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises';
-import { relative, resolve, join, type ParsedPath, parse } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { dirname, relative, resolve, join, type ParsedPath, parse } from 'node:path';
 import type { Path, AbsolutePath, RelativePath, ConditionalPath } from './@types';
 const isMissingPathError = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === 'ENOENT';
 
@@ -32,6 +32,31 @@ export class Paths {
 	 */
 	static parse(path: string): ParsedPath {
 		return parse(path);
+	}
+
+	/**
+	 * Resolves existing symlink components while preserving non-existent suffixes.
+	 * @param path - The path to canonicalize
+	 * @returns The canonical path, including any non-existent trailing components
+	 */
+	static async canonical(path: string | Path): Promise<AbsolutePath> {
+		const absolutePath = resolve(path);
+		const missingParts: string[] = [];
+		let currentPath = absolutePath;
+
+		while (true) {
+			try {
+				return resolve(await realpath(currentPath), ...missingParts.reverse()) as AbsolutePath;
+			} catch (error) {
+				if (!isMissingPathError(error)) { throw error }
+
+				const parentPath = dirname(currentPath);
+				if (parentPath === currentPath) { return absolutePath as AbsolutePath }
+
+				missingParts.push(currentPath.slice(parentPath.length + (parentPath === '/' ? 0 : 1)));
+				currentPath = parentPath;
+			}
+		}
 	}
 
 	/**

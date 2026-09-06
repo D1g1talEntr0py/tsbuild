@@ -58,6 +58,11 @@ const jsxEmitMap: Partial<Record<JsxEmit, JsxRenderingMode>> = {
  */
 const toEsTarget: (target: ScriptTarget) => EsTarget = (target: ScriptTarget) => scriptTargetToEsTarget[target];
 
+/** Returns undefined for any input, useful for defaulting optional values. */
+const alwaysUndefined = () => undefined;
+
+const isString = (value: unknown): value is string => typeof value === 'string';
+
 /**
  * Converts TypeScript's JsxEmit enum to an esbuild-compatible jsx string.
  * @param jsxEmit - The TypeScript JsxEmit enum value
@@ -134,5 +139,7 @@ export {
 	nodeModulesPathPattern,
 	FileExtension,
 	toEsTarget,
+	alwaysUndefined,
+	isString,
 	toJsxRenderingMode
 };

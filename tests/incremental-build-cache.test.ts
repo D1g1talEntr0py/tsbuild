@@ -14,6 +14,7 @@ import { vol } from 'memfs';
 import { IncrementalBuildCache } from 'src/incremental-build-cache';
 import type { AbsolutePath, CachedDeclaration } from 'src/@types';
 import { join } from 'node:path';
+import { Files } from 'src/files';
 
 const projectRoot = '/project' as AbsolutePath;
 const buildInfoFile = 'tsconfig.tsbuildinfo';
@@ -49,7 +50,7 @@ describe('IncrementalBuildCache', () => {
 
 		it('keeps .tsbuildinfo when a matching dts cache exists', async () => {
 			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
-			await cache.save(new Map<string, CachedDeclaration>(), false);
+			await cache.save(new Map<string, CachedDeclaration>(), 'test-fingerprint');
 			vol.writeFileSync(join(projectRoot, buildInfoFile), '{"version":"5.0"}');
 			// Both files present → consistent state, leave the incremental build-info intact.
 			new IncrementalBuildCache(projectRoot, buildInfoFile);
@@ -69,7 +70,7 @@ describe('IncrementalBuildCache', () => {
 				['/project/src/a.d.ts', { code: 'declare const a: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 				['/project/src/b.d.ts', { code: 'declare const b: number;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 			]);
-			await cache1.save(source, false);
+			await cache1.save(source, 'test-fingerprint');
 
 			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			const target = new Map<string, CachedDeclaration>();
@@ -90,11 +91,23 @@ describe('IncrementalBuildCache', () => {
 			const cacheDir = join(projectRoot, '.tsbuild');
 			vol.mkdirSync(cacheDir, { recursive: true });
 			vol.writeFileSync(join(cacheDir, 'dts_cache.v4.br'), 'not valid brotli data');
+			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
 
 			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			const target = new Map<string, CachedDeclaration>();
 			await cache.restore(target);
 			expect(target.size).toBe(0);
+			expect(vol.existsSync(join(projectRoot, buildInfoFile))).toBe(false);
+		});
+
+		it('rejects a structurally invalid cache payload', async () => {
+			const cacheDir = join(projectRoot, '.tsbuild');
+			vol.mkdirSync(cacheDir, { recursive: true });
+			vol.writeFileSync(join(cacheDir, 'dts_cache.v4.br'), 'not a serialized cache');
+			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
+
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(await cache.fingerprintMatches('fingerprint')).toBe(false);
 		});
 
 		it('skips restoration when cache is invalidated', async () => {
@@ -102,7 +115,7 @@ describe('IncrementalBuildCache', () => {
 			const source = new Map<string, CachedDeclaration>([
 				['/project/src/a.d.ts', { code: 'declare const a: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 			]);
-			await cache1.save(source, false);
+			await cache1.save(source, 'test-fingerprint');
 
 			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			cache2.invalidate();
@@ -118,7 +131,7 @@ describe('IncrementalBuildCache', () => {
 			const source = new Map<string, CachedDeclaration>([
 				['/project/src/a.d.ts', { code: 'declare const a: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 			]);
-			await cache.save(source, false);
+			await cache.save(source, 'test-fingerprint');
 			const cacheFile = join(projectRoot, '.tsbuild', 'dts_cache.v4.br');
 			expect(vol.existsSync(cacheFile)).toBe(true);
 		});
@@ -133,7 +146,7 @@ describe('IncrementalBuildCache', () => {
 					fileReferences: new Set<string>(),
 				});
 			}
-			await cache1.save(source, false);
+			await cache1.save(source, 'test-fingerprint');
 
 			const cache2 = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			const target = new Map<string, CachedDeclaration>();
@@ -144,13 +157,52 @@ describe('IncrementalBuildCache', () => {
 		});
 	});
 
+	describe('expected outputs', () => {
+		it('returns true when every recorded artifact exists', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			cache.setExpectedOutputArtifacts(['/project/dist/index.js' as AbsolutePath, '/project/dist/index.d.ts' as AbsolutePath]);
+			await cache.save(new Map(), 'test-fingerprint');
+			vol.mkdirSync(join(projectRoot, 'dist'), { recursive: true });
+			vol.writeFileSync(join(projectRoot, 'dist/index.js'), '');
+			vol.writeFileSync(join(projectRoot, 'dist/index.d.ts'), '');
+
+			const restoredCache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			expect(await restoredCache.expectedOutputsExist()).toBe(true);
+		});
+
+		it('stops checking after the first missing artifact', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			cache.setExpectedOutputArtifacts(['/project/dist/missing.js' as AbsolutePath, '/project/dist/later.js' as AbsolutePath]);
+			await cache.save(new Map(), 'test-fingerprint');
+			const restoredCache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			const existsSpy = vi.spyOn(Files, 'exists');
+
+			expect(await restoredCache.expectedOutputsExist()).toBe(false);
+			expect(existsSpy).toHaveBeenCalledTimes(1);
+			expect(existsSpy).toHaveBeenCalledWith('/project/dist/missing.js');
+		});
+
+		it('returns false after invalidation', async () => {
+			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			cache.setExpectedOutputArtifacts(['/project/dist/index.js' as AbsolutePath]);
+			await cache.save(new Map(), 'test-fingerprint');
+			vol.mkdirSync(join(projectRoot, 'dist'), { recursive: true });
+			vol.writeFileSync(join(projectRoot, 'dist/index.js'), '');
+
+			const restoredCache = new IncrementalBuildCache(projectRoot, buildInfoFile);
+			restoredCache.invalidate();
+
+			expect(await restoredCache.expectedOutputsExist()).toBe(false);
+		});
+	});
+
 	describe('invalidate', () => {
 		it('removes the cache directory', async () => {
 			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
 			const source = new Map<string, CachedDeclaration>([
 				['/project/src/a.d.ts', { code: 'declare const a: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 			]);
-			await cache.save(source, false);
+			await cache.save(source, 'test-fingerprint');
 			cache.invalidate();
 			expect(vol.existsSync(join(projectRoot, '.tsbuild'))).toBe(false);
 		});

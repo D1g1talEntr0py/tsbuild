@@ -214,7 +214,7 @@ Add a `tsbuild` property to your `tsconfig.json` with only the options you need 
     // ... other TypeScript options
   },
   "tsbuild": {
-    "clean": true, // Remove all files from output directory before building (default: true)
+    "clean": true, // Remove all files from output directory before building (default: true; unsafe paths are rejected)
     "platform": "node", // Will default to "browser" if "DOM" is found in "lib", otherwise "node"
     "entryPoints": { // Optional - tsbuild can infer entry points from package.json if not provided
       "cli": "./src/cli.ts",
@@ -260,7 +260,7 @@ tsbuild --help  # or -h
 tsbuild --version  # or -v
 ```
 
-> **Note**: `--watch` and `--force` are CLI-only runtime options. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default. `--minify` uses an explicit CLI default (`false`).
+> **Note**: `--watch`, `--force`, and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. Programmatic callers pass them as the explicit `CliOptions` argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default.
 
 ### Exit Codes
 
@@ -452,7 +452,6 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
   "tsbuild": {
     "platform": "node",          // Target platform: 'node' | 'browser' | 'neutral'
     "clean": true,               // Remove output directory contents before building (default: true)
-    "minify": false,             // Minify output
     "sourceMap": true,           // Generate source maps (boolean | 'inline' | 'external' | 'both')
     "splitting": true,           // Enable code splitting
     "bundle": true,              // Enable/disable bundling
@@ -471,7 +470,7 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
 }
 ```
 
-**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--force` and `--watch` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape.
+**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--force`, `--watch`, and `--minify` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape. Putting them in `tsconfig.json` produces a configuration error with the matching CLI flag guidance.
 
 ### Environment Variables
 
@@ -507,20 +506,9 @@ Set `iife` to produce self-contained IIFE bundles alongside the primary ESM outp
 
 With `globalName`, `export { Foo, Bar }` becomes `globalThis.MyLib = { Foo, Bar }`; without it, exports are merged onto `globalThis` directly. Useful for CDN/`<script>` consumption of a library that is otherwise ESM-only.
 
-### Watch Options
+### Watch Mode
 
-Watch mode is enabled with the `--watch` CLI flag. Fine-tuning lives under `tsbuild.watch`:
-
-```jsonc
-{
-  "tsbuild": {
-    "watch": {
-      "ignore": ["fixtures", "tmp"],  // directory/file names to ignore (in addition to tsconfig "exclude")
-      "renameTimeout": 150            // ms window for pairing rename events and coalescing follow-up edits
-    }
-  }
-}
-```
+Watch mode is enabled only with the `--watch` CLI flag. It is not a `tsbuild` configuration option; `tsbuild.watch` in `tsconfig.json` is rejected. Programmatic callers pass `{ watch: true }` in the explicit `CliOptions` argument.
 
 Rebuilds are content-aware: metadata-only churn (e.g. a save that doesn't change bytes) is detected via size/mtime fast paths and content hashing, and skipped without rebuilding.
 
@@ -597,8 +585,15 @@ const myPlugin = {
   }
 };
 
-await new TypeScriptProject(process.cwd(), { tsbuild: { plugins: [myPlugin] } }).build();
+await using project = new TypeScriptProject(process.cwd(), { tsbuild: { plugins: [myPlugin] } });
+await project.build();
 ```
+
+Projects are registered for automatic process-shutdown cleanup when they are constructed, so callers do not have to call `close()` for normal process termination. `await using` closes the project when its scope ends, including when the scope throws. It is supported by the project's Node.js and TypeScript requirements. For deterministic cleanup before the process terminates, call `await project.close()` in a `finally` block or use `await using`. Keep watch projects alive until watching is no longer needed; leaving an `await using` scope stops the watcher.
+
+`close()` stops watcher scheduling and releases in-memory resources immediately, then waits for pending cache writes and esbuild disposal. It is idempotent, uses a 5-second default timeout (overridable with `close(timeoutMs)`), and rejects when cleanup fails or exceeds that timeout. The CLI awaits it automatically for non-watch builds. `shutdown()` remains a deprecated alias for compatibility.
+
+`@closeOnExit` registers the project with the process manager. On `SIGINT` (Ctrl+C), the process manager automatically calls `close()`, waits for registered asynchronous cleanup to settle, and then exits with code 0. The synchronous Node.js `exit` event also calls `close()` as a final fallback, but cannot await asynchronous cleanup. Use `await using` or `await project.close()` only when cleanup must complete before your code continues or the process terminates.
 
 Plugin registration order is significant — user plugins run after tsbuild's built-in plugins.
 
@@ -672,6 +667,7 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 
 - **ESM Only** - No CommonJS support by design
 - **Node.js 24.11.1+** - Requires a modern Node.js version
+- **Windows** - Watch mode is not supported on Windows because the `@d1g1tal/watchr` dependency supports Linux and macOS only. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) and run tsbuild inside the Linux environment.
 - **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
 - **Config plugins need a default export** - Plugins referenced in `tsconfig.json` must be modules whose default export is a plugin factory or esbuild `Plugin` object; anything else requires the programmatic API
 - **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed

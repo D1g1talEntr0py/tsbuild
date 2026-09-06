@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Closable } from 'src/@types';
+import { alwaysUndefined } from 'src/constants';
 
 describe('closeOnExit', () => {
 	let processManager: Awaited<typeof import('src/process-manager')>['processManager'];
 
 	beforeEach(async () => {
 		vi.resetModules();
-		vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+		vi.spyOn(process, 'exit').mockImplementation(alwaysUndefined as never);
 		({ processManager } = await import('src/process-manager'));
 	});
 

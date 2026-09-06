@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { BuildError } from './errors';
-import type { TypeScriptOptions } from './@types';
 
 const options = {
 	help: { type: 'boolean', default: undefined, short: 'h', description: 'Show this help message' },
@@ -14,7 +13,7 @@ const options = {
 	minify: { type: 'boolean', default: false, short: 'm', description: 'Minify the output' }
 } as const;
 
-const { values: { help, version, ...args } } = parseArgs({ options });
+const { values: { help, version, noEmit, project: projectDirectory, ...args } } = parseArgs({ options });
 
 // Handle help option
 if (help) {
@@ -33,15 +32,15 @@ if (help) {
 	console.log(import.meta.env?.tsbuild_version ?? process.env['npm_package_version']);
 	process.exitCode = 0;
 } else {
-	const typeScriptOptions = {
-		clearCache: args.clearCache,
-		compilerOptions: { ...(args.noEmit !== undefined ? { noEmit: args.noEmit } : {}) },
-		tsbuild: { force: args.force, watch: { enabled: args.watch }, minify: args.minify }
-	} satisfies TypeScriptOptions;
-
 	try {
 		const { TypeScriptProject } = await import('./type-script-project');
-		await new TypeScriptProject(args.project, typeScriptOptions).build();
+
+		const project = new TypeScriptProject(projectDirectory, { compilerOptions: { ...(noEmit !== undefined ? { noEmit } : {}) } }, args);
+
+		// Use the project as a resource that will be automatically cleaned up when the process exits, unless in watch mode.
+		await using _resource = project.isWatchMode ? null : project;
+
+		await project.build();
 	} catch (error) {
 		if (error instanceof BuildError) {
 			console.error(error.message);

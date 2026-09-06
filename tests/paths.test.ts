@@ -57,6 +57,19 @@ describe('Paths', () => {
 		});
 	});
 
+	describe('canonical', () => {
+		it('resolves existing symlink ancestors for a non-existent target', async () => {
+			vol.mkdirSync('/protected', { recursive: true });
+			vol.symlinkSync('/protected', '/alias');
+
+			expect(await Paths.canonical('/alias/new/output')).toBe('/protected/new/output');
+		});
+
+		it('preserves ordinary non-existent paths', async () => {
+			expect(await Paths.canonical('/new/output')).toBe('/new/output');
+		});
+	});
+
 	describe('isPath', () => {
 		const pathMatrix: [string, boolean][] = [
 			['/',         true],

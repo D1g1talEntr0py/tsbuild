@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';
 import { processManager } from '../../src/process-manager';
@@ -88,6 +88,27 @@ describe('TypeScriptProject - Integration Builds', () => {
 
 		await expect(access(join(dir, 'dist/entry1.js'))).resolves.toBeUndefined();
 		await expect(access(join(dir, 'dist/entry2.js'))).resolves.toBeUndefined();
+	});
+
+	it('regenerates outputs when the cached output directory is deleted', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const value = 1;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		const first = new TypeScriptProject(dir);
+		await first.build();
+		first.close();
+		await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+
+		await rm(join(dir, 'dist'), { recursive: true, force: true });
+
+		const second = new TypeScriptProject(dir);
+		await second.build();
+		second.close();
+
+		await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
 	});
 
 	it('generates external source maps when sourceMap is enabled', async () => {

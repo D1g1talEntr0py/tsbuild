@@ -44,6 +44,4 @@ export class ConfigurationError extends BuildError {
 	}
 }
 
-export const castError = (exception: unknown): Error => {
-	return exception instanceof Error ? exception : new Error(typeof exception === 'string' ? exception : 'Unknown error');
-};
+export const castError = (exception: unknown): Error => exception instanceof Error ? exception : new Error(typeof exception === 'string' ? exception : 'Unknown error');

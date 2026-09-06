@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { Logger } from './logger';
 import type { Closable } from './@types';
 
@@ -6,6 +7,7 @@ const ProcessEvent = {
 	sigint: 'SIGINT',
 	uncaughtException: 'uncaughtException'
 };
+const sigintCleanupTimeoutMs = 5000;
 
 /** Manages process events and allows registering closeable classes to be closed on exit */
 class ProcessManager implements Closable {
@@ -47,28 +49,40 @@ class ProcessManager implements Closable {
 	/** Handles normal process exit */
 	#handleExit = () => {
 		if (this.#hasHandledExit) { return }
-		this.#runCleanup();
+
+		this.#hasHandledExit = true;
+		void this.#runCleanup().catch((error: unknown) => Logger.error('Error while closing resource...', error instanceof Error ? error.stack : error));
 	};
 
 	/** Handles SIGINT (ctrl+c) */
 	#consoleExit = () => {
 		this.#hasHandledExit = true;
-		this.#runCleanup();
 
 		// Exit gracefully so package managers do not report a failed lifecycle when a user stops watch mode.
-		process.exit(0);
+		void Promise.race([ this.#runCleanup(), delay(sigintCleanupTimeoutMs, undefined, { ref: false }) ]).then(() => process.exit(0), (error: unknown) => {
+			Logger.error('Error while closing resource...', error instanceof Error ? error.stack : error);
+			process.exit(0);
+		});
 	};
 
 	/** Performs closeable cleanup and detaches process listeners. */
-	#runCleanup(): void {
-		for (const closeable of [ ...this.#closeableClasses ]) {
+	async #runCleanup(): Promise<void> {
+		const pendingCleanup: Promise<void>[] = [];
+
+		for (const [ index, closeable ] of [ ...this.#closeableClasses ].entries()) {
+			const resourceLabel = `${closeable.constructor.name || 'anonymous resource'} #${index + 1}`;
+
 			try {
-				closeable.close();
+				const result = closeable.close();
+				if (result !== undefined) {
+					pendingCleanup.push(result.catch((error: unknown) => Logger.error(`Error while closing ${resourceLabel}...`, error instanceof Error ? error.stack : error)));
+				}
 			} catch (error) {
-				Logger.error('Error while closing resource...', error instanceof Error ? error.stack : error);
+				Logger.error(`Error while closing ${resourceLabel}...`, error instanceof Error ? error.stack : error);
 			}
 		}
 		this.close();
+		await Promise.all(pendingCleanup);
 	}
 
 	/**

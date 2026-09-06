@@ -1,6 +1,7 @@
 import { Files } from './files';
-import { defaultEntryPoint } from './constants';
+import { alwaysUndefined, defaultEntryPoint } from './constants';
 import { DeclarationProcessor } from './dts/declaration-processor';
+import { ConfigurationError } from './errors';
 import { createSourceFile, ScriptTarget } from 'typescript';
 import type { AbsolutePath, BuildCacheManager, CachedDeclaration, Closable, WrittenFile } from './@types';
 
@@ -154,9 +155,13 @@ export class FileManager implements Closable {
 
 		if (tasks.length === 0) { return }
 
-		const save = tasks.length === 1 ? tasks[0].then(noop, noop) : Promise.all(tasks).then(noop, noop	);
+		const save: Promise<void> = tasks.length === 1 ? tasks[0] : Promise.all(tasks).then(alwaysUndefined);
+		void save.catch(noop);
 
-		this.#pendingSave = this.#pendingSave === undefined ? save : Promise.all([ this.#pendingSave, save ]).then(noop, noop);
+		const pendingSave = this.#pendingSave === undefined ? save : Promise.all([ this.#pendingSave, save ]).then(alwaysUndefined);
+		void pendingSave.catch(noop);
+
+		this.#pendingSave = pendingSave;
 	}
 
 	/**
@@ -206,6 +211,14 @@ export class FileManager implements Closable {
 			return defaultEntryPoint in projectEntryPoints ? { [defaultEntryPoint]: projectEntryPoints[defaultEntryPoint] } : projectEntryPoints;
 		}
 
+		const isEntryPointUnknown = (name: string) => !Object.hasOwn(projectEntryPoints, name);
+		const unknownEntryPoints = dtsEntryPoints.filter(isEntryPointUnknown);
+
+		if (unknownEntryPoints.length > 0) {
+			const validEntryPointNames = Object.keys(projectEntryPoints);
+			throw new ConfigurationError(`Unknown dts.entryPoints: ${unknownEntryPoints.join(', ')}. Valid entry points: ${validEntryPointNames.length > 0 ? validEntryPointNames.join(', ') : '(none)'}.`);
+		}
+
 		const result: Record<string, AbsolutePath> = {};
 		const allowedEntryPoints = new Set(dtsEntryPoints);
 
@@ -222,10 +235,9 @@ export class FileManager implements Closable {
 	 * Clears all stored declaration files.
 	 */
 	close(): void {
-		// Await any in-flight cache save to prevent data loss on exit.
-		// ProcessManager calls close() synchronously, so we can only best-effort here.
-		// The pendingSave promise is lightweight (already running), so this is safe.
-		this.#pendingSave?.then(noop, noop);
+		// Await any in-flight cache save to prevent data loss on exit. ProcessManager calls close() synchronously,
+		// so we can only best-effort here. The pendingSave promise is lightweight (already running), so this is safe.
+		this.#pendingSave?.catch(noop);
 		this.#pendingSave = undefined;
 		this.#pendingFiles.length = 0;
 		this.#pendingBuildInfo = undefined;
@@ -273,7 +285,11 @@ export class FileManager implements Closable {
 		for (const { path, text } of this.#pendingFiles) {
 			const result = DeclarationProcessor.preProcess(createSourceFile(path, text, ScriptTarget.Latest, true));
 			// Skip declarations with no meaningful content (e.g. CLI entry points with no exports)
-			if (result.code.length > 0) { this.#declarationFiles.set(path, result) }
+			if (result.code.length > 0) {
+				this.#declarationFiles.set(path, result);
+			} else {
+				this.#declarationFiles.delete(path);
+			}
 		}
 
 		this.#pendingFiles.length = 0;

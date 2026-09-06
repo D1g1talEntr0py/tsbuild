@@ -1,6 +1,55 @@
-import { describe, it, expect } from 'vitest';
-import { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName } from 'src/entry-points';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { vol } from 'memfs';
+import { inferEntryPoints, normalizeEntryPoints, outputToSourcePath, resolveConditionalExport, resolveEntryPoints, subpathToEntryName } from 'src/entry-points';
+import { Files } from 'src/files';
+import { Paths } from 'src/paths';
+import { ConfigurationError } from 'src/errors';
 import type { PackageJson } from 'src/entry-points';
+
+vi.mock('node:fs', async () => (await import('memfs')).fs);
+vi.mock('node:fs/promises', async () => (await import('memfs')).fs.promises);
+
+describe('resolveEntryPoints', () => {
+	const directory = Paths.absolute('/project');
+
+	beforeEach(() => {
+		vol.fromJSON({ '/project/src/index.ts': '', '/project/src/index.js': '', '/project/src/data.json': '', '/project/src/nested/child.ts': '', '/project/other.ts': '' });
+	});
+
+	afterEach(() => { vol.reset() });
+
+	it('resolves relative and absolute files in configured key order', async () => {
+		const entries = { custom: './src/index.ts', other: '/project/other.ts' };
+		const result = await resolveEntryPoints(directory, entries);
+		expect(result).toEqual({ custom: '/project/src/index.ts', other: '/project/other.ts' });
+		expect(Object.keys(result)).toEqual([ 'custom', 'other' ]);
+		expect(entries.custom).toBe('./src/index.ts');
+	});
+
+	it('expands immediate files with deterministic precedence for colliding stems', async () => {
+		vi.spyOn(Files, 'readDirectory').mockResolvedValueOnce([ 'index.ts', 'index.js', 'data.json' ]);
+		expect(await resolveEntryPoints(directory, { ignored: './src' })).toEqual({ data: '/project/src/data.json', index: '/project/src/index.ts' });
+	});
+
+	it('overwrites collisions in configured iteration order without moving the key', async () => {
+		const result = await resolveEntryPoints(directory, { expanded: './src', index: './other.ts' });
+		expect(result).toEqual({ data: '/project/src/data.json', index: '/project/other.ts' });
+		expect(Object.keys(result)).toEqual([ 'data', 'index' ]);
+		expect(await resolveEntryPoints(directory, { index: './other.ts', expanded: './src' })).toEqual({ index: '/project/src/index.ts', data: '/project/src/data.json' });
+	});
+
+	it('rejects asynchronously with the first missing configured path', async () => {
+		const result = resolveEntryPoints(directory, { first: './missing.ts', second: './also-missing.ts' });
+		expect(result).toBeInstanceOf(Promise);
+		await expect(result).rejects.toThrow(new ConfigurationError('Entry point does not exist: ./missing.ts. Add explicit entryPoints to your tsconfig.json tsbuild configuration.'));
+	});
+
+	it('returns empty maps for empty configuration or directories', async () => {
+		vol.mkdirSync('/project/empty');
+		expect(await resolveEntryPoints(directory, {})).toEqual({});
+		expect(await resolveEntryPoints(directory, { empty: './empty' })).toEqual({});
+	});
+});
 
 describe('outputToSourcePath', () => {
 	const conversionMatrix: [string, string, string, string | undefined][] = [
@@ -85,6 +134,10 @@ describe('resolveConditionalExport', () => {
 			default: './dist/index.js',
 		})).toBe('./dist/index.js');
 	});
+
+	it('resolves the first usable array target', () => {
+		expect(resolveConditionalExport([null, './dist/index.js'])).toBe('./dist/index.js');
+	});
 });
 
 describe('subpathToEntryName', () => {
@@ -99,6 +152,23 @@ describe('subpathToEntryName', () => {
 
 	it.each(nameMatrix)('subpath %s with name %s → %s', (subpath, packageName, expected) => {
 		expect(subpathToEntryName(subpath, packageName)).toBe(expected);
+	});
+});
+
+describe('normalizeEntryPoints', () => {
+	it('uses source filename stems for array entries', () => {
+		expect(normalizeEntryPoints(['./src/index.ts', './src/cli.ts'])).toEqual({
+			index: './src/index.ts',
+			cli: './src/cli.ts'
+		});
+	});
+
+	it('preserves object entry point names', () => {
+		expect(normalizeEntryPoints({ main: './src/index.ts' })).toEqual({ main: './src/index.ts' });
+	});
+
+	it('rejects duplicate source filename stems', () => {
+		expect(() => normalizeEntryPoints(['./src/first/index.ts', './src/second/index.ts'])).toThrow('Duplicate entry point stem: index');
 	});
 });
 
@@ -139,6 +209,13 @@ describe('inferEntryPoints', () => {
 		};
 		const result = inferEntryPoints(pkg, 'dist');
 		expect(result).toEqual({ index: './src/index.ts' });
+	});
+
+	it('infers from root conditional exports', () => {
+		const pkg: PackageJson = {
+			exports: { import: './dist/index.js', require: './dist/index.cjs' },
+		};
+		expect(inferEntryPoints(pkg, 'dist')).toEqual({ index: './src/index.ts' });
 	});
 
 	it('skips wildcard subpath patterns', () => {

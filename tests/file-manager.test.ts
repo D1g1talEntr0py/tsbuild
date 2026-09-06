@@ -76,7 +76,7 @@ describe('FileManager', () => {
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
 			manager1.finalize();
-			manager1.persistCache(false);
+			manager1.persistCache('fingerprint', false);
 			await manager1.flush();
 
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -160,7 +160,7 @@ describe('FileManager', () => {
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
 			manager1.finalize();
-			manager1.persistCache(false);
+			manager1.persistCache('fingerprint', false);
 			await manager1.flush();
 
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -179,7 +179,7 @@ describe('FileManager', () => {
 			await manager1.initialize();
 			manager1.fileWriter('test.d.ts', 'export const hello: string;');
 			manager1.finalize();
-			manager1.persistCache(false);
+			manager1.persistCache('fingerprint', false);
 			await manager1.flush();
 
 			const cache2 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -187,7 +187,7 @@ describe('FileManager', () => {
 			await manager2.initialize();
 			manager2.fileWriter('test.d.ts', 'export const hello: number;');
 			manager2.finalize();
-			manager2.persistCache(false);
+			manager2.persistCache('fingerprint', false);
 			await manager2.flush();
 
 			const cache3 = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
@@ -195,6 +195,27 @@ describe('FileManager', () => {
 			await manager3.initialize();
 			const cached = manager3.getDeclarationFiles().get('test.d.ts' as AbsolutePath) as CachedDeclaration;
 			expect(cached.code).toContain('declare const hello: number;');
+		});
+
+		it('removes a cached declaration when its replacement is empty', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const manager = new FileManager(cache);
+			await manager.initialize();
+			manager.fileWriter('test.d.ts', 'export const hello: string;');
+			manager.finalize();
+			manager.persistCache('fingerprint', false);
+			await manager.flush();
+
+			const nextCache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			const nextManager = new FileManager(nextCache);
+			await nextManager.initialize();
+			nextManager.fileWriter('test.d.ts', '');
+			nextManager.finalize();
+
+			expect(nextManager.getDeclarationFiles().has('test.d.ts' as AbsolutePath)).toBe(false);
 		});
 	});
 
@@ -287,13 +308,12 @@ describe('FileManager', () => {
 			expect(result).toEqual({ index: './src/index.ts', utils: './src/utils.ts' });
 		});
 
-		it('returns empty object when dtsEntryPoints has no matches', () => {
+		it('throws for unknown dts entry points with requested and valid names', () => {
 			const manager = new FileManager();
-			const result = manager.resolveEntryPoints(
+			expect(() => manager.resolveEntryPoints(
 				{ index: './src/index.ts' } as unknown as Record<string, AbsolutePath>,
-				['nonexistent']
-			);
-			expect(result).toEqual({});
+				['nonexistent', 'index.test']
+			)).toThrow('Unknown dts.entryPoints: nonexistent, index.test. Valid entry points: index.');
 		});
 
 		it('returns empty object for empty dtsEntryPoints array', () => {
@@ -327,6 +347,28 @@ describe('FileManager', () => {
 	});
 
 	describe('flush', () => {
+		it('handles rejected background saves without an unhandled rejection', async () => {
+			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
+			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);
+
+			const cache = new IncrementalBuildCache(tempDir, tsBuildInfoFile);
+			vi.spyOn(cache, 'save').mockRejectedValue(new Error('cache save failed'));
+			const manager = new FileManager(cache);
+			await manager.initialize();
+			manager.fileWriter('test.d.ts', 'export const hello: string;');
+			manager.finalize();
+
+			let unhandledReason: unknown;
+			const onUnhandledRejection = (reason: unknown): void => { unhandledReason = reason };
+			process.on('unhandledRejection', onUnhandledRejection);
+			manager.persistCache('fingerprint', false);
+			await new Promise<void>(resolve => setImmediate(resolve));
+			process.off('unhandledRejection', onUnhandledRejection);
+
+			expect(unhandledReason).toBeUndefined();
+			await expect(manager.flush()).rejects.toThrow('cache save failed');
+		});
+
 		it('awaits pending save operations', async () => {
 			const tsBuildInfoFile = 'tsconfig.tsbuildinfo';
 			await mkdir(join(tempDir, '.tsbuild'), defaultDirOptions);

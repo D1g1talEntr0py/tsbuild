@@ -68,7 +68,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 		await expect(stat(join(dir, '.tsbuild', 'tsconfig.tsbuildinfo'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -85,7 +85,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -112,7 +112,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -162,7 +162,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -206,7 +206,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -228,7 +228,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -251,7 +251,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -297,7 +297,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -314,6 +314,58 @@ describe('TypeScriptProject - Watch Mode', () => {
 		}, { timeout: 7_500, interval: 100 });
 	});
 
+	it('preserves drained changes when another change arrives before queue stability returns', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'export { first } from "./first.js"; export { second } from "./second.js";',
+				'src/first.ts': 'export const first = 1;',
+				'src/second.ts': 'export const second = 1;'
+			},
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		await project.build();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		const firstPath = join(dir, 'src/first.ts');
+		const secondPath = join(dir, 'src/second.ts');
+		await writeFile(firstPath, 'export const first = 2;');
+		await writeFile(secondPath, 'export const second = 2;');
+		const firstStats = await stat(firstPath);
+		const secondStats = await stat(secondPath);
+		const originalRead = Files.read.bind(Files);
+		let readStarted!: () => void;
+		let releaseRead!: () => void;
+		const readHasStarted = new Promise<void>((resolve) => { readStarted = resolve });
+		const readIsReleased = new Promise<void>((resolve) => { releaseRead = resolve });
+		const readSpy = vi.spyOn(Files, 'read').mockImplementation(async (path) => {
+			if (path === firstPath) {
+				readStarted();
+				await readIsReleased;
+			}
+
+			return originalRead(path as AbsolutePath);
+		});
+
+		watchCallback?.('change', { size: firstStats.size, modifiedTimeMs: firstStats.mtimeMs }, firstPath);
+		await readHasStarted;
+		setImmediate(() => watchCallback?.('change', { size: secondStats.size, modifiedTimeMs: secondStats.mtimeMs }, secondPath));
+		releaseRead();
+
+		try {
+			await vi.waitFor(async () => {
+				const output = await readUtf8(join(dir, 'dist/index.js'));
+				expect(output.includes('first = 2') || output.includes('first=2')).toBe(true);
+				expect(output.includes('second = 2') || output.includes('second=2')).toBe(true);
+				expect(process.exitCode).toBeUndefined();
+			}, { timeout: 7_500, interval: 100 });
+		} finally {
+			readSpy.mockRestore();
+		}
+	});
+
 	it('runs manifest-driven cleanup across watch rebuilds', { timeout: 20_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
@@ -321,7 +373,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -348,7 +400,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -375,7 +427,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -413,7 +465,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -462,7 +514,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true, renameTimeout: 1_000 } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -498,7 +550,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -521,7 +573,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -552,7 +604,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, { tsbuild: { watch: { enabled: true } } });
+		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 

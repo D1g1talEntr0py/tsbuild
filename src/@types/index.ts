@@ -38,10 +38,9 @@ type InferredFunction<T = Fn> = T extends (...args: infer P) => infer R ? (...ar
  * @template R - The return type of the method
  */
 type MethodFunction<T = any, A extends any[] = any[], R = any> = (this: T, ...args: A) => R;
-type Callable = Fn<never, void>;
 type Constructor<P extends unknown[] = unknown[], R = unknown> = new (...args: P) => R;
 
-interface Closable { close: Callable };
+interface Closable { close: () => void | Promise<void> };
 type ClosableConstructor = Constructor<any[], Closable>;
 
 type PerformanceSubStep = { name: string; duration: string; ms: number };
@@ -57,32 +56,34 @@ type EsTarget = `ES${EsVersion}` | 'ESNext';
 
 type BannerOrFooter = { [type in 'js' | 'css']?: string };
 
+declare const BrandTag: unique symbol;
+
+interface Branded<Tag> {
+  readonly [BrandTag]: Tag;
+}
+
 /**
  * Creates a "branded" type with nominal typing.
  * This adds a unique, non-existent property to 'T' to make it
  * incompatible with other types that are structurally the same.
  *
- * @template T - The base type to brand
- * @template U - The brand identifier (symbol type or any other type)
+ * @template BaseType - The base type to brand
+ * @template Tag - A readable brand identifier
  *
- * @example Symbol brands (stronger nominal typing):
- * declare const PathSymbol: unique symbol;
- * type Path = Brand<string, typeof PathSymbol>;
+ * @example
+ * type Path = Brand<BaseType, 'Path'>;
  *
  * @example Generic brands:
  * type JsonString<T> = Brand<string, T>;
  */
-type Brand<T, U> = U extends symbol ? T & { readonly [K in U]: true } : T & { readonly __brand: U };
+type Brand<BaseType, Tag> = BaseType & Branded<Tag>;
 
 // Branded path types for type safety without runtime overhead
-declare const AbsolutePathBrand: unique symbol;
-declare const RelativePathBrand: unique symbol;
-
 /** An absolute file system path (e.g., `/home/user/project`) */
-type AbsolutePath = Brand<string, typeof AbsolutePathBrand>;
+type AbsolutePath = Brand<string, 'AbsolutePath'>;
 
 /** A relative file system path (e.g., `./src` or `../lib`) */
-type RelativePath = Brand<string, typeof RelativePathBrand>;
+type RelativePath = Brand<string, 'RelativePath'>;
 
 /** A file system path that can be either absolute or relative */
 type Path = AbsolutePath | RelativePath;
@@ -114,9 +115,7 @@ type JsxRenderingMode = NonNullable<Required<TsconfigRaw>['compilerOptions']['js
 type BuildOptions = {
 	/** Project directory (relative or absolute). Defaults to the current directory. Resolved to absolute internally. */
 	project?: Path;
-	/** Force a full rebuild, even if no files have changed. Applicable for incremental builds */
-	force?: boolean;
-	entryPoints?: EntryPoints<RelativePath>;
+	entryPoints?: EntryPoints<RelativePath> | RelativePath[];
 	/** Platform target. Auto-detected from tsconfig lib (DOM = browser, no DOM = node) */
 	platform?: 'browser' | 'node' | 'neutral';
 	bundle?: boolean;
@@ -129,14 +128,12 @@ type BuildOptions = {
 	/** Specific dependencies to bundle (override packages setting) */
 	noExternal?: Pattern[];
 	splitting?: boolean;
-	minify?: boolean;
 	/** Source map options. Overrides the value in tsconfig.json CompilerOptions */
 	sourceMap?: boolean | 'inline' | 'external' | 'both';
 	banner?: BannerOrFooter;
 	footer?: BannerOrFooter;
 	env?: Record<string, string>;
 	dts?: DtsOptions;
-	watch?: WatchOptions;
 	/** Produce additional IIFE output alongside ESM. Set to `true` for default IIFE or provide options. */
 	iife?: boolean | IifeOptions;
 	/** Custom esbuild plugins (Plugin objects via programmatic API, or string/tuple references via config) */
@@ -152,24 +149,28 @@ type PluginReference = string | [string, Record<string, unknown>];
 
 type PluginFactory = (options: Record<string, unknown> | undefined) => unknown;
 
-type BuildConfiguration = PrettyModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'minify' | 'bundle' | 'noExternal' | 'sourceMap'>, { watch: WatchConfiguration, dts: DtsConfiguration }>;
+type CommandLineOptions = {
+	clearCache: boolean;
+	force: boolean;
+	watch: boolean;
+	minify: boolean;
+};
+
+type BuildConfiguration = PrettyModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { force: boolean, minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
 
 type EntryPoints<out T extends Path> = Record<string, T>;
-type AsyncEntryPoints = Promise<EntryPoints<AbsolutePath>>;
 
 /** Project build options used internally (includes values from both tsbuild config and compiler options) */
-type ProjectBuildConfiguration = Readonly<Modify<BuildConfiguration, {
-	entryPoints: AsyncEntryPoints,
+type ProjectBuildConfiguration = Readonly<Modify<BuildConfiguration, { entryPoints?: Promise<EntryPoints<AbsolutePath>> }> & {
 	target: EsTarget,
 	outDir: AbsolutePath,
 	sourceMap: boolean | 'inline' | 'external' | 'both'
-}>>;
+}>;
 
 type TypeScriptCompilerOptions = Modify<Pick<CompilerOptions, KnownKeys<CompilerOptions>>, { target?: ScriptTarget }>;
 type TypeScriptCompilerConfiguration = MarkRequired<TypeScriptCompilerOptions, 'target' | 'outDir' | 'noEmit' | 'sourceMap' | 'lib' | 'incremental' | 'tsBuildInfoFile'>;
 
 type TypeScriptOptions = {
-	clearCache?: boolean;
 	compilerOptions?: TypeScriptCompilerOptions;
 	tsbuild?: BuildOptions;
 };
@@ -197,6 +198,8 @@ interface BuildCacheManager {
 	invalidate(): void;
 	restore(target: Map<string, CachedDeclaration>): Promise<void>;
 	save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void>;
+	setExpectedOutputArtifacts(outputArtifacts: ReadonlyArray<AbsolutePath>): void;
+	expectedOutputsExist(): Promise<boolean>;
 	isValid(): boolean;
 	isBuildInfoFile(filePath: AbsolutePath): boolean;
 	/** Synchronously checks whether persisted incremental state exists on disk (i.e. .tsbuildinfo). */
@@ -267,7 +270,6 @@ export type {
 	DetailedPerformanceEntry,
 	ReadConfigResult,
 	EntryPoints,
-	AsyncEntryPoints,
 	TypeScriptOptions,
 	TypeScriptConfiguration,
 	ProjectBuildConfiguration,
@@ -293,6 +295,7 @@ export type {
 	CachedDeclaration,
 	PluginReference,
 	PluginFactory,
+	CommandLineOptions,
 	IifeOptions,
 	Plugin,
 }

@@ -1,8 +1,11 @@
 import { FileExtension } from './constants';
+import { ConfigurationError } from './errors';
+import { Files } from './files';
+import { Paths } from './paths';
 import type { AbsolutePath, EntryPoints, RelativePath } from './@types/index';
 
-interface PackageJsonConditionalExport { [key: string]: string | PackageJsonConditionalExport | undefined }
-type PackageJsonExports = string | Record<string, string | PackageJsonConditionalExport>;
+type PackageJsonExportValue = string | null | PackageJsonExportValue[] | { [key: string]: PackageJsonExportValue | undefined };
+type PackageJsonExports = PackageJsonExportValue;
 
 /** Minimal package.json shape for entry point inference */
 type PackageJson = {
@@ -21,6 +24,12 @@ type PackageJson = {
 const importConditions = [ 'import', 'node', 'module', 'default' ] as const;
 const endsWithSlash = /\/$/;
 const startsWithDotSlash = /^\.\//;
+/** Output → source file extension mapping */
+const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
+	[ FileExtension.JS, FileExtension.TS ],
+	[ FileExtension.JSX, FileExtension.TSX ],
+	[ FileExtension.DTS, FileExtension.TS ]
+]);
 
 /**
  * Extracts the filename stem from a path (e.g., `'./src/index.ts'` → `'index'`).
@@ -34,12 +43,24 @@ function stemOf(filePath: string) {
 	return dot === -1 ? base : base.slice(0, dot);
 }
 
-/** Output → source file extension mapping */
-const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
-	[ FileExtension.JS, FileExtension.TS ],
-	[ FileExtension.JSX, FileExtension.TSX ],
-	[ FileExtension.DTS, FileExtension.TS ]
-]);
+/**
+ * Normalizes array entry points to a stable output-name map.
+ * @param entryPoints Array of source paths
+ * @returns Entry points keyed by source filename stem
+ */
+function normalizeEntryPoints(entryPoints: EntryPoints<RelativePath> | RelativePath[]): EntryPoints<RelativePath> {
+	if (!Array.isArray(entryPoints)) { return entryPoints }
+
+	const normalized: EntryPoints<RelativePath> = {};
+	for (const entryPoint of entryPoints) {
+		const name = stemOf(entryPoint);
+		if (normalized[name] !== undefined) { throw new ConfigurationError(`Duplicate entry point stem: ${name}`) }
+
+		normalized[name] = entryPoint;
+	}
+
+	return normalized;
+}
 
 /**
  * Strips the npm scope prefix from a package name (e.g., `'@scope/pkg'` → `'pkg'`).
@@ -82,11 +103,22 @@ function outputToSourcePath(outputPath: string, outDir: string, sourceDir: strin
  * @param exportValue String shorthand or conditional export object
  * @returns The resolved output path, or undefined if no supported condition is found
  */
-function resolveConditionalExport(exportValue: string | PackageJsonConditionalExport): string | undefined {
+function resolveConditionalExport(exportValue: PackageJsonExportValue): string | undefined {
 	if (typeof exportValue === 'string') { return exportValue }
 
+	if (exportValue === null) { return undefined }
+
+	if (Array.isArray(exportValue)) {
+		for (const value of exportValue) {
+			const resolved = resolveConditionalExport(value);
+			if (resolved !== undefined) { return resolved }
+		}
+
+		return undefined;
+	}
+
 	for (const condition of importConditions) {
-		const value: string | PackageJsonConditionalExport | undefined = exportValue[condition];
+		const value = exportValue[condition];
 
 		if (value === undefined) { continue }
 
@@ -125,12 +157,17 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	const entryPoints: EntryPoints<RelativePath> = {};
 
 	if (packageJson.exports !== undefined) {
-		if (typeof packageJson.exports === 'string') {
-			const sourcePath = outputToSourcePath(packageJson.exports, outDir, sourceDir);
-			if (sourcePath) { entryPoints[stemOf(sourcePath)] = sourcePath }
-		} else {
-			for (const [ subpath, exportValue ] of Object.entries(packageJson.exports)) {
-				if (subpath.includes('*')) { continue }
+		if (typeof packageJson.exports === 'string' || Array.isArray(packageJson.exports)) {
+			const outputPath = resolveConditionalExport(packageJson.exports);
+			if (outputPath !== undefined) {
+				const resolvedSourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
+				if (resolvedSourcePath) { entryPoints[stemOf(resolvedSourcePath)] = resolvedSourcePath }
+			}
+		} else if (packageJson.exports !== null) {
+			const exportEntries = Object.keys(packageJson.exports).some((key) => key === '.' || key.startsWith('./')) ? Object.entries(packageJson.exports) : [[ '.', packageJson.exports ] as const];
+
+			for (const [ subpath, exportValue ] of exportEntries) {
+				if (subpath.includes('*') || exportValue === undefined) { continue }
 
 				const outputPath = resolveConditionalExport(exportValue);
 				if (outputPath === undefined) { continue }
@@ -182,5 +219,56 @@ function updateEntryPoints(entryPoints: EntryPoints<AbsolutePath> | undefined, p
 	}
 }
 
-export { inferEntryPoints, outputToSourcePath, resolveConditionalExport, subpathToEntryName, updateEntryPoints };
+/**
+ * Resolves configured entry points sequentially, expanding directories into file-stem entries.
+ * @param directory - Project directory
+ * @param entries - Configured entry point paths keyed by output name
+ * @returns Absolute entry points with later collisions overwriting earlier entries
+ */
+async function resolveEntryPoints(directory: AbsolutePath, entries: Record<string, string>): Promise<EntryPoints<AbsolutePath>> {
+	const expandedEntryPoints: EntryPoints<AbsolutePath> = {};
+
+	for (const [ name, entryPoint ] of Object.entries(entries)) {
+		for (const [ resolvedName, resolvedPath ] of Object.entries(await resolveEntryPoint(directory, name, entryPoint))) {
+			expandedEntryPoints[resolvedName] = resolvedPath;
+		}
+	}
+
+	return expandedEntryPoints;
+}
+
+/**
+ * Resolves a single configured entry point to one or more absolute file entries.
+ * @param directory - Project directory
+ * @param name - Entry point key from config
+ * @param entryPoint - Configured entry path
+ * @returns Expanded entry mapping for this entry
+ */
+async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string): Promise<EntryPoints<AbsolutePath>> {
+	const resolvedPath = Paths.absolute(directory, entryPoint);
+
+	if (await Paths.isDirectory(resolvedPath)) { return expandDirectoryEntryPoints(resolvedPath) }
+
+	if (await Paths.isFile(resolvedPath)) { return { [name]: resolvedPath } }
+
+	throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+}
+
+/**
+ * Expands a directory entry into per-file entries using file stem names.
+ * @param directory - Absolute directory path
+ * @returns Entry mapping with one key per file in the directory
+ */
+async function expandDirectoryEntryPoints(directory: AbsolutePath): Promise<EntryPoints<AbsolutePath>> {
+	const entries: EntryPoints<AbsolutePath> = {};
+
+	for (const file of (await Files.readDirectory(directory)).sort()) {
+		const filePath = Paths.join(directory, file);
+		if (await Paths.isFile(filePath)) { entries[Paths.parse(file).name] = filePath }
+	}
+
+	return entries;
+}
+
+export { inferEntryPoints, normalizeEntryPoints, outputToSourcePath, resolveConditionalExport, resolveEntryPoints, subpathToEntryName, updateEntryPoints };
 export type { PackageJson };

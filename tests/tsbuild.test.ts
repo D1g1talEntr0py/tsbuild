@@ -147,16 +147,22 @@ describe('tsbuild CLI', () => {
 
 		it('passes --watch flag to TypeScriptProject', async () => {
 			const buildSpy = vi.fn().mockResolvedValue(undefined);
+			const closeSpy = vi.fn().mockResolvedValue(undefined);
 			let capturedDirectory: unknown;
 			let capturedOptions: unknown;
+			let capturedCliOptions: unknown;
 
 			vi.doMock('../src/type-script-project', () => ({
-				TypeScriptProject: class {
-					constructor(directory: unknown, options: unknown) {
+				TypeScriptProject: class implements AsyncDisposable {
+					constructor(directory: unknown, options: unknown, cliOptions: unknown) {
 						capturedDirectory = directory;
 						capturedOptions = options;
+						capturedCliOptions = cliOptions;
 					}
+					isWatchMode = true;
 					build = buildSpy;
+					close = closeSpy;
+					[Symbol.asyncDispose](): Promise<void> { return this.close() }
 				}
 			}));
 
@@ -167,20 +173,117 @@ describe('tsbuild CLI', () => {
 			await import('../src/tsbuild.temp');
 
 			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(closeSpy).not.toHaveBeenCalled();
 			expect(capturedDirectory).toBe('/tmp/tsbuild-watch-test');
-			expect(capturedOptions).toMatchObject({ tsbuild: { watch: { enabled: true } } });
+			expect(capturedOptions).toMatchObject({ compilerOptions: {} });
+			expect(capturedCliOptions).toEqual({ clearCache: false, force: false, watch: true, minify: false });
+		});
+
+		it('defaults the project directory to the current working directory', async () => {
+			const buildSpy = vi.fn().mockResolvedValue(undefined);
+			const closeSpy = vi.fn().mockResolvedValue(undefined);
+			let capturedDirectory: unknown;
+
+			vi.doMock('../src/type-script-project', () => ({
+				TypeScriptProject: class implements AsyncDisposable {
+					constructor(directory: unknown) {
+						capturedDirectory = directory;
+						}
+					isWatchMode = false;
+					build = buildSpy;
+					close = closeSpy;
+					[Symbol.asyncDispose](): Promise<void> { return this.close() }
+				}
+			}));
+
+			process.argv = ['node', 'tsbuild'];
+			process.exitCode = undefined;
+
+			// @ts-expect-error - temp module created at runtime for cache busting
+			await import('../src/tsbuild.temp');
+
+			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(closeSpy).toHaveBeenCalledOnce();
+			expect(capturedDirectory).toBe(process.cwd());
+		});
+
+		it('preserves configured boolean values when flags are omitted', async () => {
+			const buildSpy = vi.fn().mockResolvedValue(undefined);
+			const closeSpy = vi.fn().mockResolvedValue(undefined);
+			let capturedOptions: unknown;
+			let capturedCliOptions: unknown;
+
+			vi.doMock('../src/type-script-project', () => ({
+				TypeScriptProject: class implements AsyncDisposable {
+					constructor(_directory: unknown, options: unknown, cliOptions: unknown) {
+						capturedOptions = options;
+						capturedCliOptions = cliOptions;
+					}
+					isWatchMode = false;
+					build = buildSpy;
+					close = closeSpy;
+					[Symbol.asyncDispose](): Promise<void> { return this.close() }
+				}
+			}));
+
+			process.argv = ['node', 'tsbuild', '-p', '/tmp/tsbuild-config-test'];
+			process.exitCode = undefined;
+
+			// @ts-expect-error - temp module created at runtime for cache busting
+			await import('../src/tsbuild.temp');
+
+			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(closeSpy).toHaveBeenCalledOnce();
+			expect(capturedOptions).toMatchObject({ compilerOptions: {} });
+			expect(capturedOptions).not.toHaveProperty('tsbuild');
+			expect(capturedCliOptions).toEqual({ clearCache: false, force: false, watch: false, minify: false });
+		});
+
+		it('passes explicit force, watch, and minify flags to TypeScriptProject', async () => {
+			const buildSpy = vi.fn().mockResolvedValue(undefined);
+			const closeSpy = vi.fn().mockResolvedValue(undefined);
+			let capturedOptions: unknown;
+			let capturedCliOptions: unknown;
+
+			vi.doMock('../src/type-script-project', () => ({
+				TypeScriptProject: class implements AsyncDisposable {
+					constructor(_directory: unknown, options: unknown, cliOptions: unknown) {
+						capturedOptions = options;
+						capturedCliOptions = cliOptions;
+					}
+					isWatchMode = true;
+					build = buildSpy;
+					close = closeSpy;
+					[Symbol.asyncDispose](): Promise<void> { return this.close() }
+				}
+			}));
+
+			process.argv = ['node', 'tsbuild', '-p', '/tmp/tsbuild-explicit-flags-test', '--force', '--watch', '--minify'];
+			process.exitCode = undefined;
+
+			// @ts-expect-error - temp module created at runtime for cache busting
+			await import('../src/tsbuild.temp');
+
+			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(closeSpy).not.toHaveBeenCalled();
+			expect(capturedOptions).toMatchObject({ compilerOptions: {} });
+			expect(capturedCliOptions).toEqual({ clearCache: false, force: true, watch: true, minify: true });
 		});
 
 		it('passes --clearCache flag to TypeScriptProject', async () => {
 			const buildSpy = vi.fn().mockResolvedValue(undefined);
-			let capturedOptions: unknown;
+			const closeSpy = vi.fn().mockResolvedValue(undefined);
+			let capturedCliOptions: unknown;
 
 			vi.doMock('../src/type-script-project', () => ({
-				TypeScriptProject: class {
-					constructor(_directory: unknown, options: unknown) {
-						capturedOptions = options;
+				TypeScriptProject: class implements AsyncDisposable {
+					constructor(_directory: unknown, _options: unknown, cliOptions: unknown) {
+						capturedCliOptions = cliOptions;
 					}
+					isWatchMode = false;
 					build = buildSpy;
+					close = closeSpy;
+					[Symbol.asyncDispose](): Promise<void> { return this.close() }
 				}
 			}));
 
@@ -191,7 +294,32 @@ describe('tsbuild CLI', () => {
 			await import('../src/tsbuild.temp');
 
 			expect(buildSpy).toHaveBeenCalledOnce();
-			expect(capturedOptions).toMatchObject({ clearCache: true });
+			expect(closeSpy).toHaveBeenCalledOnce();
+			expect(capturedCliOptions).toEqual({ clearCache: true, force: false, watch: false, minify: false });
+		});
+
+		it('drains a non-watch project after a handled build error', async () => {
+			const closeSpy = vi.fn().mockResolvedValue(undefined);
+			const buildSpy = vi.fn().mockImplementation(() => { process.exitCode = 1 });
+
+			vi.doMock('../src/type-script-project', () => ({
+				TypeScriptProject: class implements AsyncDisposable {
+					isWatchMode = false;
+					build = buildSpy;
+					close = closeSpy;
+					[Symbol.asyncDispose](): Promise<void> { return this.close() }
+				}
+			}));
+
+			process.argv = ['node', 'tsbuild', '-p', '/tmp/tsbuild-error-test'];
+			process.exitCode = undefined;
+
+			// @ts-expect-error - temp module created at runtime for cache busting
+			await import('../src/tsbuild.temp');
+
+			expect(buildSpy).toHaveBeenCalledOnce();
+			expect(closeSpy).toHaveBeenCalledOnce();
+			expect(process.exitCode).toBe(1);
 		});
 	});
 });

@@ -135,10 +135,6 @@
             "type": "string"
           }
         },
-        "minify": {
-          "type": "boolean",
-          "description": "When enabled, the generated code will be minified instead of pretty-printed."
-        },
         "sourceMap": {
           "oneOf": [
             {

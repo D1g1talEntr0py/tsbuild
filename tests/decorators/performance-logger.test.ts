@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { performance } from 'perf_hooks';
 import type { MockInstance } from 'vitest';
+import { alwaysUndefined } from 'src/constants';
 
 describe('logPerformance', () => {
 	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
@@ -9,7 +10,7 @@ describe('logPerformance', () => {
 
 	beforeEach(async () => {
 		vi.resetModules();
-		vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+		vi.spyOn(process, 'exit').mockImplementation(alwaysUndefined as never);
 		performance.clearMarks();
 		performance.clearMeasures();
 		({ logPerformance } = await import('src/decorators/performance-logger'));
