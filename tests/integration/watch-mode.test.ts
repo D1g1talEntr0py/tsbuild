@@ -174,6 +174,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 			expect(process.exitCode).toBeUndefined();
 		}, { timeout: 7_500, interval: 100 });
 
+		const infoSpy = vi.spyOn(Logger, 'info');
 		await writeFile(join(dir, 'build/plugin.ts'), [
 			'import { banner } from "./plugin-value";',
 			'import { extra } from "./plugin-extra";',
@@ -189,6 +190,10 @@ describe('TypeScriptProject - Watch Mode', () => {
 
 		await vi.waitFor(async () => {
 			await expect(readUtf8(join(dir, 'dist/index.js'))).resolves.toContain('second-plugin-first-extra');
+		}, { timeout: 7_500, interval: 100 });
+
+		await vi.waitFor(() => {
+			expect(infoSpy.mock.calls.some(([ message ]) => typeof message === 'string' && message.startsWith('Watching for changes in:') && message.includes('build/plugin-extra.ts'))).toBe(true);
 		}, { timeout: 7_500, interval: 100 });
 
 		await writeFile(join(dir, 'build/plugin-extra.ts'), 'export const extra = "second-extra";');
