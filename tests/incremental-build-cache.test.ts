@@ -15,6 +15,7 @@ import { IncrementalBuildCache } from 'src/incremental-build-cache';
 import type { AbsolutePath, CachedDeclaration } from 'src/@types';
 import { join } from 'node:path';
 import { Files } from 'src/files';
+import { dtsCacheFile } from 'src/constants';
 
 const projectRoot = '/project' as AbsolutePath;
 const buildInfoFile = 'tsconfig.tsbuildinfo';
@@ -90,7 +91,7 @@ describe('IncrementalBuildCache', () => {
 		it('handles corrupt cache file gracefully', async () => {
 			const cacheDir = join(projectRoot, '.tsbuild');
 			vol.mkdirSync(cacheDir, { recursive: true });
-			vol.writeFileSync(join(cacheDir, 'dts_cache.v4.br'), 'not valid brotli data');
+			vol.writeFileSync(join(cacheDir, dtsCacheFile), 'not valid brotli data');
 			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
 
 			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
@@ -103,7 +104,7 @@ describe('IncrementalBuildCache', () => {
 		it('rejects a structurally invalid cache payload', async () => {
 			const cacheDir = join(projectRoot, '.tsbuild');
 			vol.mkdirSync(cacheDir, { recursive: true });
-			vol.writeFileSync(join(cacheDir, 'dts_cache.v4.br'), 'not a serialized cache');
+			vol.writeFileSync(join(cacheDir, dtsCacheFile), 'not a serialized cache');
 			vol.writeFileSync(join(projectRoot, buildInfoFile), '{}');
 
 			const cache = new IncrementalBuildCache(projectRoot, buildInfoFile);
@@ -132,7 +133,7 @@ describe('IncrementalBuildCache', () => {
 				['/project/src/a.d.ts', { code: 'declare const a: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>() }],
 			]);
 			await cache.save(source, 'test-fingerprint');
-			const cacheFile = join(projectRoot, '.tsbuild', 'dts_cache.v4.br');
+			const cacheFile = join(projectRoot, '.tsbuild', dtsCacheFile);
 			expect(vol.existsSync(cacheFile)).toBe(true);
 		});
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, constants as brotliConstants } from 'node:zlib';
 import { deserialize, serialize } from 'node:v8';
+import { dtsCacheFile } from 'src/constants';
 
 type Timing = { name: string; milliseconds: number };
 
@@ -55,7 +56,7 @@ async function measureRuntimePrimitives(): Promise<void> {
 }
 
 function measureCachePrimitives(): void {
-	const cachePath = join(root, '.tsbuild', 'dts_cache.v4.br');
+	const cachePath = join(root, '.tsbuild', dtsCacheFile);
 	if (!existsSync(cachePath)) {
 		console.log('cache restore: unavailable (run pnpm build first)');
 		return;
