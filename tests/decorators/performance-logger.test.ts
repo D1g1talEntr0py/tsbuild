@@ -7,6 +7,7 @@ describe('logPerformance', () => {
 	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
 	let stepSpy: MockInstance;
 	let errorSpy: MockInstance;
+	let successSpy: MockInstance;
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -20,7 +21,7 @@ describe('logPerformance', () => {
 		stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
 		errorSpy = vi.spyOn(Logger, 'error').mockImplementation(() => {});
 		vi.spyOn(Logger, 'separator').mockImplementation(() => {});
-		vi.spyOn(Logger, 'success').mockImplementation(() => {});
+		successSpy = vi.spyOn(Logger, 'success').mockImplementation(() => {});
 		vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
 	});
 
@@ -177,14 +178,34 @@ describe('logPerformance', () => {
 		});
 	});
 
-	describe('logResult option', () => {
-		it('passes result when logResult is true', () => {
+	describe('result logging', () => {
+		it('does not log non-file results', async () => {
+			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
+
 			class Test {
-				@logPerformance('result op')
-				method(): number[] { return [1, 2, 3] }
+				@logPerformance('string result')
+				method(): string { return 'result' }
 			}
 
-			expect(new Test().method()).toEqual([1, 2, 3]);
+			new Test().method();
+			flushPerformanceLog();
+
+			expect(successSpy).not.toHaveBeenCalled();
+		});
+
+		it('logs written-file results', async () => {
+			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
+			const files = [{ path: 'dist/index.js', size: 42 }];
+
+			class Test {
+				@logPerformance('file result')
+				method(): typeof files { return files }
+			}
+
+			new Test().method();
+			flushPerformanceLog();
+
+			expect(successSpy).toHaveBeenCalledWith('', ...files);
 		});
 	});
 

@@ -10,12 +10,20 @@ import { Paths } from '../src/paths';
 import { processManager } from '../src/process-manager';
 import { TestHelper } from './scripts/test-helper';
 import { alwaysUndefined } from 'src/constants';
+import { bundleDeclarations } from '../src/dts/declaration-bundler';
+import { EsbuildRunner } from '../src/project/esbuild-runner';
+import { flushPerformanceLog } from '../src/decorators/performance-logger';
 
 const typeScript6OrNewer = Number(versionMajorMinor.split('.')[0]) >= 6;
 
 vi.mock('esbuild', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('esbuild')>();
 	return { ...actual, context: vi.fn(actual.context) };
+});
+
+vi.mock('../src/dts/declaration-bundler', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../src/dts/declaration-bundler')>();
+	return { ...actual, bundleDeclarations: vi.fn(actual.bundleDeclarations) };
 });
 
 // Watchr emits an 'error' event when a watched path is deleted during tmpdir cleanup.
@@ -42,6 +50,70 @@ describe('TypeScriptProject', () => {
 	});
 
 	describe('build', () => {
+		it('logs initialization first and reconciles displayed build overhead', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject();
+			cleanup = c;
+			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
+			const subStepsSpy = vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
+
+			try {
+				const project = new TypeScriptProject(dir);
+				await project.build();
+				flushPerformanceLog();
+				await project.close();
+
+				const messages = stepSpy.mock.calls.map(([ message ]) => message.replace(/\x1b\[[0-9;]*m/g, ''));
+				const initializationIndex = messages.findIndex(message => message.includes('Initialization'));
+				const typeCheckIndex = messages.findIndex(message => message.includes('Type-checking/Emit'));
+				const duration = (label: string) => Number(/\((\d+)ms\)/.exec(messages.find(message => message.includes(label)) ?? '')?.[1]);
+				const groupedSteps = subStepsSpy.mock.calls.flatMap(([ steps ]) => steps);
+				const completed = Number(/Completed in (\d+)ms/.exec(messages.find(message => message.includes('Completed in')) ?? '')?.[1]);
+				const overhead = duration('Overhead');
+
+				expect(initializationIndex).toBeGreaterThanOrEqual(0);
+				expect(typeCheckIndex).toBeGreaterThan(initializationIndex);
+				expect(messages.filter(message => message.includes('Bundle'))).toHaveLength(1);
+				expect(messages.some(message => message.includes('Process Declarations') || message.includes('Transpile'))).toBe(false);
+				expect(groupedSteps.map(({ name }) => name)).toEqual([ 'Process Declarations', 'Transpile' ]);
+				expect(completed).toBe(duration('Initialization') + duration('Type-checking/Emit') + duration('Bundle') + overhead);
+			} finally {
+				stepSpy.mockRestore();
+				subStepsSpy.mockRestore();
+			}
+		});
+
+		it('starts declaration bundling and transpilation concurrently', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value = 1;' },
+				tsconfig: { compilerOptions: { declaration: true }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+			const declarationStarted = Promise.withResolvers<void>();
+			const transpileStarted = Promise.withResolvers<void>();
+			const declarationSpy = vi.mocked(bundleDeclarations).mockImplementationOnce(async () => {
+				declarationStarted.resolve();
+				await transpileStarted.promise;
+				return [];
+			});
+			const transpileSpy = vi.spyOn(EsbuildRunner.prototype, 'run').mockImplementationOnce(async () => {
+				transpileStarted.resolve();
+				await declarationStarted.promise;
+				return [];
+			});
+
+			try {
+				const project = new TypeScriptProject(dir);
+				await project.build();
+				await project.close();
+
+				expect(declarationSpy).toHaveBeenCalledOnce();
+				expect(transpileSpy).toHaveBeenCalledOnce();
+			} finally {
+				declarationSpy.mockRestore();
+				transpileSpy.mockRestore();
+			}
+		});
+
 		it('emits JS output for a simple ESM project', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const hello = "world";' }

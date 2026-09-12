@@ -1,20 +1,11 @@
 import { TextFormat } from './text-formatter';
 import { dataUnits, newLine } from './constants';
+import { isWrittenFiles } from './files';
 import type { LogEntryType, WrittenFile, PerformanceSubStep } from './@types';
 
 const LOG_1024 = Math.log(1024);
 // eslint-disable-next-line no-control-regex
 const ansiEscapePattern = /\x1b\[[0-9;]*m/g;
-
-/**
- * Checks if the given data is an array of WrittenFile objects.
- * @param data - The data to check.
- * @returns True if the data is an array of WrittenFile objects, false otherwise.
- * @internal
- */
-export const isWrittenFiles = (data: unknown[]): data is WrittenFile[] => {
-	return Array.isArray(data) ? data.every((writtenFile): boolean => writtenFile !== null && typeof writtenFile === 'object' && 'path' in writtenFile && 'size' in writtenFile) : false;
-};
 
 /**
  * Colorizes a string based on the entry type.
@@ -98,22 +89,27 @@ export class Logger {
 	/**
 	 * Logs sub-step timing entries in a tree format below a parent step.
 	 * @param steps The sub-steps to log.
+	 * @param grouped Whether to render all entries as grouped timing children.
 	 */
-	static subSteps(steps: PerformanceSubStep[]): void {
-		const visible = steps.filter(({ ms }) => ms >= 5);
+	static subSteps(steps: PerformanceSubStep[], grouped = false): void {
+		const visible = grouped ? steps : steps.filter(({ ms }) => ms >= 5);
 		if (visible.length === 0) { return }
 
 		let maxNameLength = 0;
 		let maxDurationLength = 0;
 		for (let i = 0, length = visible.length; i < length; i++) {
 			const { name, duration } = visible[i];
+			const formattedDuration = grouped ? `(${duration})` : duration;
 			if (name.length > maxNameLength) { maxNameLength = name.length }
-			if (duration.length > maxDurationLength) { maxDurationLength = duration.length }
+			if (formattedDuration.length > maxDurationLength) { maxDurationLength = formattedDuration.length }
 		}
 
 		for (let i = 0, length = visible.length; i < length; i++) {
-			const { name, duration } = visible[i];
-			console.log(`${TextFormat.dim(i === length - 1 ? '  └─' : '  ├─')} ${TextFormat.bold(name.padEnd(maxNameLength))} ${TextFormat.cyan(duration.padStart(maxDurationLength))}`);
+			const { name, duration, result = [] } = visible[i];
+			const isLast = i === length - 1;
+			const formattedDuration = (grouped ? `(${duration})` : duration).padStart(maxDurationLength);
+			console.log(`${TextFormat.dim(isLast ? '  └─' : '  ├─')} ${TextFormat.bold(name.padEnd(maxNameLength))} ${grouped ? TextFormat.dim(formattedDuration) : TextFormat.cyan(formattedDuration)}`);
+			if (Array.isArray(result) && isWrittenFiles(result) && result.length > 0) { Logger.#files(result, isLast ? '     ' : '  │  ') }
 		}
 	}
 
@@ -180,8 +176,9 @@ export class Logger {
 	/**
 	 * Logs an array of WrittenFile objects in a formatted manner.
 	 * @param files - The array of WrittenFile objects to log.
+	 * @param indentation - Prefix applied before each file tree branch.
 	 */
-	static #files(files: WrittenFile[]): void {
+	static #files(files: WrittenFile[], indentation = '  ') {
 		let maxPathLength = 0;
 		let maxValueLength = 0;
 		let maxUnitLength = 0;
@@ -201,7 +198,7 @@ export class Logger {
 		for (let i = 0, length = formatted.length; i < length; i++) {
 			const { path, value, unit } = formatted[i];
 			// Determine the prefix based on the file's position in the array. Last file gets '└─', others get '├─'.
-			const prefix = i === length - 1 ? '  └─' : '  ├─';
+			const prefix = `${indentation}${i === length - 1 ? '└─' : '├─'}`;
 
 			console.log(`${TextFormat.dim(prefix)} ${TextFormat.bold(path.padEnd(maxPathLength))} ${TextFormat.cyan(value.padStart(maxValueLength))} ${TextFormat.dim(unit.padEnd(maxUnitLength))}`);
 		}

@@ -6,7 +6,7 @@ import { alwaysUndefined, toEsTarget } from './constants';
 import { TextFormat } from './text-formatter';
 import { bundleDeclarations } from './dts/declaration-bundler';
 import { closeOnExit } from './decorators/close-on-exit';
-import { logPerformance } from './decorators/performance-logger';
+import { flushPerformanceLog, logPerformance } from './decorators/performance-logger';
 import { BuildError, ConfigurationError } from './errors';
 import { dedupeDiagnostics, handleTypeErrors } from './project/diagnostics';
 import { defaultCommandLineOptions, resolveConfiguration } from './project/configuration';
@@ -14,7 +14,7 @@ import { buildFingerprint } from './project/build-fingerprint';
 import { OutputPathValidator } from './project/output-paths';
 import { EsbuildRunner } from './project/esbuild-runner';
 import { CompilationContext } from './project/compilation-context';
-import { ProjectWatcher } from './watch/project-watcher';
+import { ProjectWatcher, type FileSystemEventHandler } from './watch/project-watcher';
 import { RebuildQueue, formatPendingChangeSummary, isRenameEvent } from './watch/rebuild-queue';
 import { FileManager } from './file-manager';
 import { processManager } from './process-manager';
@@ -90,18 +90,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 			sourceText: (path) => this.#compilationContext.sourceText(path),
 			rebuild: (changes) => this.#triggerRebuild(changes)
 		});
-		this.#projectWatcher = new ProjectWatcher({
-			directory: this.#directory,
-			include: this.#configuration.include,
-			exclude: this.#configuration.exclude,
-			watch: this.#buildConfiguration.watch,
-			onChange: (event, stats, path, nextPath) => {
-				const relativePath = this.#relativeToProject(path);
-				if (!(this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(relativePath) || this.#pluginDependencies.has(relativePath))) { return }
-
-				this.#rebuildQueue.enqueue(event, stats, path, nextPath);
-			}
-		});
+		this.#projectWatcher = new ProjectWatcher({ directory: this.#directory, include: this.#configuration.include, exclude: this.#configuration.exclude, watch: this.#buildConfiguration.watch, onChange: this.#onChangeHandler });
 	}
 
 	/**
@@ -134,23 +123,20 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env['npm_package_version']}${this.#configuration.compilerOptions.incremental && this.#configuration.buildCache?.isValid() ? ' [incremental]' : ''}`);
 
 		try {
-			const processes: Array<Promise<WrittenFile[]>> = [];
+			let settledOutputPhases: Array<PromiseSettledResult<WrittenFile[]>> = [];
 			const { currentFingerprint, fingerprintMatched, force, cleanEnabled } = await this.#resolveBuildPlan();
+			flushPerformanceLog();
 
 			const filesWereEmitted = await this.#typeCheck();
 
 			if ((filesWereEmitted || force || this.#pluginInvalidated) && !this.#configuration.compilerOptions.noEmit) {
 				if (cleanEnabled) { await this.clean() }
-
-				// Process declarations if enabled
-				if (this.#configuration.compilerOptions.declaration) { processes.push(this.#processDeclarations()) }
-
-				if (!this.#configuration.compilerOptions.emitDeclarationOnly) { processes.push(this.#transpile()) }
+				settledOutputPhases = await this.#runOutputPhases();
 			}
 
-			const writtenOutputs = this.#collectWrittenOutputs(await Promise.allSettled(processes));
+			const writtenOutputs = this.#collectWrittenOutputs(settledOutputPhases);
 			if (writtenOutputs !== undefined) {
-				this.#finalizeBuildArtifacts({ currentFingerprint, fingerprintMatched }, processes.length > 0 || this.#configuration.compilerOptions.noEmit ? writtenOutputs : undefined);
+				this.#finalizeBuildArtifacts({ currentFingerprint, fingerprintMatched }, settledOutputPhases.length > 0 || this.#configuration.compilerOptions.noEmit ? writtenOutputs : undefined);
 			}
 		} catch (error) {
 			this.#handleBuildError(error);
@@ -174,6 +160,18 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 				}
 			}
 		}
+	}
+
+	/** Runs declaration bundling and transpilation concurrently. */
+	@logPerformance('Bundle', [ 'Process Declarations', 'Transpile' ])
+	async #runOutputPhases() {
+		const processes: Array<Promise<WrittenFile[]>> = [];
+
+		if (this.#configuration.compilerOptions.declaration) { processes.push(this.#processDeclarations()) }
+
+		if (!this.#configuration.compilerOptions.emitDeclarationOnly) { processes.push(this.#transpile()) }
+
+		return Promise.allSettled(processes);
 	}
 
 	/**
@@ -213,7 +211,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	}
 
 	/** Clears state after all asynchronous build and cleanup work has stopped. */
-	#clearRuntimeState(): void {
+	#clearRuntimeState() {
 		this.#buildDependencies = new Set();
 		this.#pluginDependencies.clear();
 		this.#rebuildQueue.clear();
@@ -224,7 +222,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * Reports rejected declaration/transpile phase results.
 	 * @param settled - Settled declaration/transpile phase results
 	 */
-	#collectWrittenOutputs(settled: ReadonlyArray<PromiseSettledResult<WrittenFile[]>>): WrittenFile[] | undefined {
+	#collectWrittenOutputs(settled: ReadonlyArray<PromiseSettledResult<WrittenFile[]>>) {
 		const writtenOutputs: WrittenFile[] = [];
 		let succeeded = true;
 
@@ -252,7 +250,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * @param context - Build artifact finalization inputs
 	 * @param writtenOutputs - Outputs written by the completed phases, when phases ran
 	 */
-	#finalizeBuildArtifacts({ currentFingerprint, fingerprintMatched }: BuildFinalizeContext, writtenOutputs?: ReadonlyArray<WrittenFile>): void {
+	#finalizeBuildArtifacts({ currentFingerprint, fingerprintMatched }: BuildFinalizeContext, writtenOutputs?: ReadonlyArray<WrittenFile>) {
 		if (writtenOutputs !== undefined && this.#configuration.buildCache !== undefined) {
 			this.#configuration.buildCache.setExpectedOutputArtifacts(writtenOutputs.map(({ path }) => Paths.absolute(this.#directory, path)));
 		}
@@ -264,9 +262,24 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	}
 
 	/**
+	 * Handles filesystem change events for the project.
+	 * @param event - Type of filesystem event
+	 * @param stats - Filesystem statistics for the affected path
+	 * @param path - Absolute path of the affected file or directory
+	 * @param nextPath - Absolute path of the next location for rename events, if applicable
+	 */
+	#onChangeHandler: FileSystemEventHandler = (event, stats, path, nextPath) => {
+		const relativePath = this.#relativeToProject(path);
+		if (!(this.#configuration.compilerOptions.noEmit || this.#buildDependencies.has(relativePath) || this.#pluginDependencies.has(relativePath))) { return }
+
+		this.#rebuildQueue.enqueue(event, stats, path, nextPath);
+	};
+
+	/**
 	 * Resolves build planning decisions (cache/fingerprint/clean strategy) for the current run.
 	 * @returns Build execution plan used by {@link build}
 	 */
+	@logPerformance('Initialization')
 	async #resolveBuildPlan(): Promise<BuildPlan> {
 		await this.#validateOutputPaths();
 		const buildCache = this.#configuration.buildCache;
@@ -285,7 +298,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * Validates cleanup and declaration output paths before filesystem mutation.
 	 * @throws {ConfigurationError} when a path can remove inputs or escape the output directory
 	 */
-	async #validateOutputPaths(): Promise<void> {
+	async #validateOutputPaths() {
 		const outputDirectory = await this.#outputPathValidator.validateOutputDirectory();
 
 		if (!this.#configuration.compilerOptions.declaration) { return }
@@ -305,7 +318,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * @returns True if files were emitted (or non-incremental build), false if no changes detected
 	 */
 	@logPerformance('Type-checking/Emit')
-	async #typeCheck(): Promise<boolean> {
+	async #typeCheck() {
 		await this.#fileManager.initialize();
 
 		const allDiagnostics = this.#compilationContext.collectDiagnostics(this.#fileManager.fileWriter);
@@ -337,7 +350,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * Returns the cached entry point map, resolving it once on first use.
 	 * @returns Mutable entry point map for the current build cycle
 	 */
-	async #currentEntryPoints(): Promise<EntryPoints<AbsolutePath>> {
+	async #currentEntryPoints() {
 		return this.#entryPoints ??= { ...(await resolveEntryPoints(this.#directory, this.#configuredEntryPoints)) };
 	}
 
@@ -346,7 +359,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * @param path - Absolute path to convert
 	 * @returns Project-relative path
 	 */
-	#relativeToProject(path: AbsolutePath): RelativePath {
+	#relativeToProject(path: AbsolutePath) {
 		return Paths.relative(this.#directory, path);
 	}
 
@@ -356,7 +369,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * @param timeoutMs Maximum time to wait for asynchronous cleanup in milliseconds.
 	 * @returns A promise that resolves when both cleanup operations settle.
 	 */
-	async #drainCleanup(drain: Promise<PromiseSettledResult<void>[]>, timeoutMs: number): Promise<void> {
+	async #drainCleanup(drain: Promise<PromiseSettledResult<void>[]>, timeoutMs: number) {
 		try {
 			const { promise, reject } = Promise.withResolvers<undefined>();
 
@@ -379,7 +392,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * Processes declaration files.
 	 * @returns A promise that resolves to an array of written files after processing declarations.
 	 */
-	@logPerformance('Bundle Declarations')
+	@logPerformance('Process Declarations')
 	async #processDeclarations() {
 		// If not bundling, just write declaration files to disk
 		if (!this.#buildConfiguration.bundle) { return this.#fileManager.writeFiles(this.#directory) }
@@ -408,7 +421,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 * Applies filtered watcher events and rebuilds the project.
 	 * @param pendingFileChanges - Meaningful watcher changes selected by the rebuild queue
 	 */
-	async #triggerRebuild(pendingFileChanges: ReadonlyArray<PendingFileChange>): Promise<void> {
+	async #triggerRebuild(pendingFileChanges: ReadonlyArray<PendingFileChange>) {
 		Logger.clear();
 		Logger.info(`Rebuilding project: ${formatPendingChangeSummary(pendingFileChanges)}`);
 

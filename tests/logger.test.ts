@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isWrittenFiles, colorize, prettyBytes, Logger } from 'src/logger';
+import { colorize, prettyBytes, Logger } from 'src/logger';
+import { isWrittenFiles } from 'src/files';
 import type { WrittenFile, PerformanceSubStep, RelativePath } from 'src/@types';
 
 // eslint-disable-next-line no-control-regex
 const ansiEscapePattern = /\x1b\[[0-9;]*m/;
 
 describe('isWrittenFiles', () => {
-	const matrix: [string, unknown[], boolean][] = [
+	const matrix: [string, unknown, boolean][] = [
 		['valid WrittenFile array', [{ path: 'a.js', size: 100 }], true],
 		['multiple WrittenFiles', [{ path: 'a.js', size: 100 }, { path: 'b.js', size: 200 }], true],
 		['empty array', [], true],
@@ -14,7 +15,11 @@ describe('isWrittenFiles', () => {
 		['array with null', [null], false],
 		['object missing path', [{ size: 100 }], false],
 		['object missing size', [{ path: 'a.js' }], false],
-		['non-array', [42], false],
+		['object with wrong path type', [{ path: 42, size: 100 }], false],
+		['object with wrong size type', [{ path: 'a.js', size: '100' }], false],
+		['number', 42, false],
+		['object', { path: 'a.js', size: 100 }, false],
+		['null', null, false],
 	];
 
 	it.each(matrix)('returns correct result for %s', (_desc, data, expected) => {
@@ -213,6 +218,20 @@ describe('Logger', () => {
 			];
 			Logger.subSteps(steps);
 			expect(consoleSpy).not.toHaveBeenCalled();
+		});
+
+		it('shows grouped sub-steps below the threshold and nests their files', () => {
+			const steps: PerformanceSubStep[] = [
+				{ name: 'Fast', ms: 1, duration: '1ms', result: [{ path: 'dist/index.js' as RelativePath, size: 100 }] },
+			];
+
+			Logger.subSteps(steps, true);
+
+			expect(consoleSpy).toHaveBeenCalledTimes(2);
+			expect(consoleSpy.mock.calls[0][0]).toContain('Fast');
+			expect(consoleSpy.mock.calls[0][0]).toContain('(1ms)');
+			expect(consoleSpy.mock.calls[1][0]).toContain('     └─');
+			expect(consoleSpy.mock.calls[1][0]).toContain('dist/index.js');
 		});
 	});
 
