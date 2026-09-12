@@ -1,3 +1,10 @@
+## [3.0.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.1...v3.0.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **dts:** prevent multi-declarator variable ranges from swallowing merged declarations ([ee76be9](https://github.com/D1g1talEntr0py/tsbuild/commit/ee76be91bf0ad6734d26c220c14465225e5ceef1))
+
 ## [3.0.1](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.0...v3.0.1) (2026-09-06)
 
 
