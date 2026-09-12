@@ -80,6 +80,13 @@ describe('DeclarationProcessor', () => {
 				expect(result.code).toContain('declare const a=1;');
 				expect(result.code).toContain('declare const b=2;');
 			});
+
+			it('keeps multi-declarator variable ranges from swallowing later merged declarations', () => {
+				const result = DeclarationProcessor.preProcess(parse('export const a = 1, b = 2;\nexport interface a { value: string; }'));
+				expect(result.code.indexOf('declare const a = 1;')).toBeLessThan(result.code.indexOf('interface a'));
+				expect(result.code.indexOf('declare const b = 2;')).toBeLessThan(result.code.indexOf('interface a'));
+				expect(result.code).toContain('interface a { value: string; }');
+			});
 		});
 
 		describe('exports', () => {

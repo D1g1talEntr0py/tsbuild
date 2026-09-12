@@ -1,4 +1,4 @@
-import ts, {
+import {
 	canHaveModifiers,
 	forEachChild,
 	isClassDeclaration,
@@ -27,7 +27,9 @@ import ts, {
 	type ModuleDeclaration,
 	type FileReference,
 	type SourceFile,
-	type Declaration
+	type Declaration,
+	type Statement,
+	type VariableDeclaration
 } from 'typescript';
 import MagicString from 'magic-string';
 import { BundleError } from '../errors';
@@ -61,7 +63,7 @@ export class UnsupportedSyntaxError extends BundleError {
  * - Removing redundant exports like `{ Foo as Foo }` within namespaces
  */
 export class DeclarationProcessor {
-	private constructor() {}
+	private constructor() { throw new Error('DeclarationProcessor is a static class and cannot be instantiated.') }
 
 	/**
 	 * Pre-processes a declaration file before bundling.
@@ -144,12 +146,14 @@ export class DeclarationProcessor {
 		}
 
 		/**
-		 * Creates a NameRange for the given node.
+		 * Creates a NameRange spanning the given statement.
 		 * @param node The node to create the NameRange for.
+		 * @param start The start position of the range. Defaults to the node's start.
+		 * @param end The end position of the range. Defaults to the node's end.
 		 * @returns The created NameRange.
 		 */
-		function createNameRange(node: ts.Statement): NameRange {
-			return [ getStart(node), getEnd(node) ] as NameRange;
+		function createNameRange(node: Statement | VariableDeclaration, start: number = getStart(node), end: number = getEnd(node)) {
+			return [ start, end ] as NameRange;
 		}
 
 		/**
@@ -369,10 +373,10 @@ export class DeclarationProcessor {
 					// we do reordering after splitting
 					const decls = declarations.slice();
 					const first = decls.shift()!;
-					pushNamedNode(first.name.getText(), [ getStart(node), first.getEnd() ] as NameRange);
+					pushNamedNode(first.name.getText(), createNameRange(first, first.getFullStart(), first.getEnd()));
 					for (const declaration of decls) {
 						if (isIdentifier(declaration.name)) {
-							pushNamedNode(declaration.name.getText(), [ declaration.getFullStart(), declaration.getEnd() ] as NameRange);
+							pushNamedNode(declaration.name.getText(), createNameRange(declaration, declaration.getFullStart(), declaration.getEnd()));
 						}
 					}
 				}
