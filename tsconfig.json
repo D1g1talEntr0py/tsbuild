@@ -1,5 +1,5 @@
 {
-	"$schema": "https://json.schemastore.org/tsbuild.json",
+	"$schema": "./schema.json",
 	"compilerOptions": {
 		"declaration": true,
 		"isolatedDeclarations": true,
