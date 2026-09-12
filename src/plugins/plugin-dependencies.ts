@@ -10,7 +10,7 @@ const parseableSourceExtensionPattern = /\.[jt]sx?$/;
  * @param node Current syntax node
  * @param specifiers Destination for discovered specifiers
  */
-function collectModuleSpecifiers(node: Node, specifiers: string[]): void {
+function collectModuleSpecifiers(node: Node, specifiers: string[]) {
 	if ((isImportDeclaration(node) || isExportDeclaration(node)) && node.moduleSpecifier !== undefined && isStringLiteral(node.moduleSpecifier)) {
 		specifiers.push(node.moduleSpecifier.text);
 	}

@@ -6,7 +6,9 @@ import { brotliDecompressSync } from 'node:zlib';
 import { cacheDirectory, defaultCleanOptions, dtsCacheFile, isString, dtsCacheVersion as version } from './constants';
 import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration } from './@types';
 
-type PersistedBuildCache = BuildCache & { outputArtifacts?: string[] };
+interface PersistedBuildCache extends BuildCache {
+	outputArtifacts?: string[];
+}
 
 /** Handles persistent caching of pre-processed declaration files for incremental builds. */
 export class IncrementalBuildCache implements BuildCacheManager {
@@ -140,12 +142,20 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	}
 
 	/**
+	 * Custom inspection tag for type.
+	 * @returns The string 'IncrementalBuildCache'
+	 */
+	get [Symbol.toStringTag](): string {
+		return 'IncrementalBuildCache';
+	}
+
+	/**
 	 * Enforces consistency between TypeScript's incremental state (`.tsbuildinfo`) and the versioned declaration cache. Both must be valid together:
 	 * when the build-info file exists but the matching dts cache is absent — manually deleted, partially cleared, or left behind after a cache-version
 	 * bump (the versioned filename no longer matches) — the incremental program would skip emit while no cached declarations exist, yielding broken bundles
 	 * with unresolved internal imports. Removing the orphaned build-info forces the next program to perform a full emit, restoring a consistent state.
 	 */
-	#enforceIncrementalConsistency(): void {
+	#enforceIncrementalConsistency() {
 		// Cold build: no incremental state to couple.
 		if (!existsSync(this.#buildInfoPath)) { return }
 
@@ -160,7 +170,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * Validates the compressed cache synchronously before TypeScript reads build-info.
 	 * @returns True when the cache payload has the expected version and shape
 	 */
-	#isPersistedCacheValid(): boolean {
+	#isPersistedCacheValid() {
 		try {
 			const cache = deserialize(brotliDecompressSync(readFileSync(this.#cacheFilePath))) as Partial<PersistedBuildCache>;
 			return cache.version === version && cache.files instanceof Map && (cache.fingerprint === undefined || typeof cache.fingerprint === 'string' || typeof cache.fingerprint === 'boolean') && (cache.outputArtifacts === undefined || Array.isArray(cache.outputArtifacts) && cache.outputArtifacts.every(isString));
@@ -190,13 +200,5 @@ export class IncrementalBuildCache implements BuildCacheManager {
 			// Cache doesn't exist or couldn't be read - this is fine for first build
 			return undefined;
 		}
-	}
-
-	/**
-	 * Custom inspection tag for type.
-	 * @returns The string 'IncrementalBuildCache'
-	 */
-	get [Symbol.toStringTag](): string {
-		return 'IncrementalBuildCache';
 	}
 }

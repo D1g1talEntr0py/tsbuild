@@ -43,10 +43,10 @@ type Constructor<P extends unknown[] = unknown[], R = unknown> = new (...args: P
 interface Closable { close: () => void | Promise<void> };
 type ClosableConstructor = Constructor<any[], Closable>;
 
-type PerformanceSubStep = { name: string; duration: string; ms: number };
-type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[], notes?: string[] };
+type PerformanceSubStep = { name: string; duration: string; ms: number; result?: WrittenFile[] };
+type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[], notes?: string[], overheadMs?: number };
 type DetailedPerformanceMeasureOptions<R> = Modify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
-type DetailedPerformanceEntry<D> = PerformanceEntry & { detail: PerformanceEntryDetail<D> };
+interface DetailedPerformanceEntry<D> extends PerformanceEntry { detail: PerformanceEntryDetail<D> };
 
 type Pattern = string | RegExp;
 

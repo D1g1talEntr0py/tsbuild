@@ -56,12 +56,12 @@ const filterEmpty = (open: string, close: string, replace: string = open, at: nu
  * @param format A format name recognized by node:util's `styleText` (see `util.inspect.colors`).
  * @returns A tuple of the open and close ANSI escape sequences.
  */
-const styleTextCodes = (format: InspectColor): [open: string, close: string] => {
+const styleTextCodes = (format: InspectColor) => {
 	const probe = '\0';
 	const wrapped = styleText(format, probe, { validateStream: false });
 	const index = wrapped.indexOf(probe);
 
-	return [ wrapped.slice(0, index), wrapped.slice(index + 1) ];
+	return [ wrapped.slice(0, index), wrapped.slice(index + 1) ] as const;
 };
 
 /**
@@ -70,7 +70,7 @@ const styleTextCodes = (format: InspectColor): [open: string, close: string] => 
  * @param replace Optional replacement ANSI code string.
  */
 const generateTextFormatter = (format: InspectColor, replace?: string): FormatSupplier => {
-	const [open, close] = styleTextCodes(format);
+	const [ open, close ] = styleTextCodes(format);
 	return filterEmpty(open, close, replace);
 };
 

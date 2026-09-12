@@ -144,7 +144,7 @@ function wrapAsIife(text: string, globalName?: string) {
  * @param minify The primary build's minify setting
  * @returns An array of written IIFE output files
  */
-async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap'], minify: BuildOptions['minify']): Promise<OutputFile[]> {
+async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap'], minify: BuildOptions['minify']) {
 	const { build: esbuild } = await import('esbuild');
 	const fileContents = new Map<string, string>();
 

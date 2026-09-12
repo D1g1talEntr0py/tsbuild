@@ -67,7 +67,7 @@ function normalizeEntryPoints(entryPoints: EntryPoints<RelativePath> | RelativeP
  * @param name The package name, optionally scoped
  * @returns The unscoped name
  */
-function unscope(name: string): string {
+function unscope(name: string) {
 	const slash = name.indexOf('/');
 
 	return slash === -1 ? name : name.slice(slash + 1);
@@ -244,7 +244,7 @@ async function resolveEntryPoints(directory: AbsolutePath, entries: Record<strin
  * @param entryPoint - Configured entry path
  * @returns Expanded entry mapping for this entry
  */
-async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string): Promise<EntryPoints<AbsolutePath>> {
+async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string) {
 	const resolvedPath = Paths.absolute(directory, entryPoint);
 
 	if (await Paths.isDirectory(resolvedPath)) { return expandDirectoryEntryPoints(resolvedPath) }
@@ -259,7 +259,7 @@ async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoi
  * @param directory - Absolute directory path
  * @returns Entry mapping with one key per file in the directory
  */
-async function expandDirectoryEntryPoints(directory: AbsolutePath): Promise<EntryPoints<AbsolutePath>> {
+async function expandDirectoryEntryPoints(directory: AbsolutePath) {
 	const entries: EntryPoints<AbsolutePath> = {};
 
 	for (const file of (await Files.readDirectory(directory)).sort()) {

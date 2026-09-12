@@ -6,9 +6,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { discoverLocalDependencies } from './plugin-dependencies';
 import { nodeModulesPathPattern, typeScriptExtensionExpression } from '../constants';
 import type { Plugin } from 'esbuild';
-import type { NamespacedUnregister } from '@d1g1tal/tsnode/api';
 import type { CompilerOptions } from 'typescript';
+import type { NamespacedUnregister, OnImport } from '@d1g1tal/tsnode/api';
 import type { PluginReference, PluginFactory, AbsolutePath } from '../@types';
+
+type PluginScope = {
+	handle: NamespacedUnregister | undefined;
+	parentURL: string;
+	compilerOptions: CompilerOptions;
+	dependencies: Set<AbsolutePath>;
+};
 
 /** Per-project options controlling the isolated tsnode scope used to load local TypeScript plugins. */
 export type PluginScopeOptions = {
@@ -21,7 +28,7 @@ export type PluginScopeOptions = {
 };
 
 /** Result of resolving a project's configured plugins into esbuild Plugin objects. */
-export type PluginResolution = Disposable & {
+export interface PluginResolution extends Disposable {
 	plugins: Plugin[];
 	/**
 	 * Absolute paths of local TypeScript files loaded through the tsnode plugin scope — the
@@ -29,7 +36,7 @@ export type PluginResolution = Disposable & {
 	 * Empty when none of the configured plugins required TypeScript support.
 	 */
 	dependencies: ReadonlySet<AbsolutePath>;
-};
+}
 
 /**
  * Checks whether a value is an esbuild Plugin object (has `name` string and `setup` function).
@@ -38,6 +45,7 @@ export type PluginResolution = Disposable & {
  */
 function isPlugin(value: unknown): value is Plugin {
 	if (typeof value !== 'object' || value === null) { return false }
+
 	return 'name' in value && typeof value.name === 'string' && 'setup' in value && typeof value.setup === 'function';
 }
 
@@ -60,7 +68,7 @@ function isFactory(value: unknown): value is PluginFactory {
  * @param resolvedPath The specifier resolved against the project directory
  * @returns True when the plugin should be loaded through the tsnode scope
  */
-function isLocalTypeScriptPlugin(specifier: string, resolvedPath: string): boolean {
+function isLocalTypeScriptPlugin(specifier: string, resolvedPath: string) {
 	return Paths.isPath(specifier) && typeScriptExtensionExpression.test(resolvedPath);
 }
 
@@ -70,14 +78,15 @@ function isLocalTypeScriptPlugin(specifier: string, resolvedPath: string): boole
  * @param projectDir The project root directory for resolving relative paths
  * @returns True when at least one entry is a local TypeScript plugin reference
  */
-function requiresPluginScope(plugins: (Plugin | PluginReference)[], projectDir: string): boolean {
+function requiresPluginScope(plugins: (Plugin | PluginReference)[], projectDir: string) {
 	for (const entry of plugins) {
 		if (isPlugin(entry)) { continue }
 
 		const specifier = typeof entry === 'string' ? entry : entry[0];
-		const resolvedPath = Paths.isPath(specifier) ? resolve(projectDir, specifier) : specifier;
 
-		if (isLocalTypeScriptPlugin(specifier, resolvedPath)) { return true }
+		if (isLocalTypeScriptPlugin(specifier, Paths.isPath(specifier) ? resolve(projectDir, specifier) : specifier)) {
+			return true;
+		}
 	}
 
 	return false;
@@ -90,21 +99,22 @@ function requiresPluginScope(plugins: (Plugin | PluginReference)[], projectDir: 
  * @param scope The tsnode scope handle (when created) and stable parent URL for scoped imports
  * @returns The resolved esbuild Plugin
  */
-async function resolveReference(reference: PluginReference, projectDir: string, scope: { handle: NamespacedUnregister | undefined; parentURL: string; compilerOptions: CompilerOptions; dependencies: Set<AbsolutePath> }): Promise<Plugin> {
+async function resolveReference(reference: PluginReference, projectDir: string, { handle, parentURL, compilerOptions, dependencies }: PluginScope) {
 	const [ specifier, options ] = typeof reference === 'string' ? [ reference, undefined ] : reference;
 	const resolved = Paths.isPath(specifier) ? resolve(projectDir, specifier) : specifier;
 	const isLocalTypeScript = isLocalTypeScriptPlugin(specifier, resolved);
 
 	let module: Record<string, unknown>;
+
 	try {
-		module = (scope.handle && isLocalTypeScript) ? await scope.handle.import(resolved, scope.parentURL) as Record<string, unknown> : await import(resolved) as Record<string, unknown>;
+		module = handle && isLocalTypeScript ? await handle.import(resolved, parentURL) : await import(resolved) as Record<string, unknown>;
 	} catch (error) {
 		throw new ConfigurationError(`Failed to load plugin "${specifier}": ${error instanceof Error ? error.message : String(error)}`);
 	}
 
 	if (isLocalTypeScript) {
-		for (const dependency of discoverLocalDependencies(resolved as AbsolutePath, scope.compilerOptions)) {
-			scope.dependencies.add(dependency);
+		for (const dependency of discoverLocalDependencies(resolved as AbsolutePath, compilerOptions)) {
+			dependencies.add(dependency);
 		}
 	}
 
@@ -147,28 +157,25 @@ async function resolveReference(reference: PluginReference, projectDir: string, 
  * @param scopeOptions Namespace/tsconfig path/compiler options used to isolate and resolve this project's TypeScript plugin scope
  * @returns Resolved esbuild Plugin objects, the discovered local TypeScript dependency graph, and a dispose callback
  */
-export async function resolvePlugins(plugins: (Plugin | PluginReference)[], projectDir: string, scopeOptions: PluginScopeOptions): Promise<PluginResolution> {
+export async function resolvePlugins(plugins: (Plugin | PluginReference)[], projectDir: string, { namespace, tsconfigPath: tsconfig, compilerOptions }: PluginScopeOptions): Promise<PluginResolution> {
 	const dependencies = new Set<AbsolutePath>();
+	/**
+	 * Records local files loaded while the scoped plugin graph is active.
+	 * @param url Loaded module URL
+	 */
+	const onImport: OnImport = (url) => {
+		if (!url.startsWith('file:')) { return }
+
+		const path = fileURLToPath(url);
+		if (!nodeModulesPathPattern.test(path)) { dependencies.add(Paths.absolute(path)) }
+	};
 
 	let handle: NamespacedUnregister | undefined;
 	if (requiresPluginScope(plugins, projectDir)) {
-		handle = (await import('@d1g1tal/tsnode/api')).register({
-			namespace: scopeOptions.namespace,
-			tsconfig: scopeOptions.tsconfigPath,
-			/**
-			 * Records local files loaded while the scoped plugin graph is active.
-			 * @param url Loaded module URL
-			 */
-			onImport(url) {
-				if (!url.startsWith('file:')) { return }
-
-				const path = fileURLToPath(url);
-				if (!nodeModulesPathPattern.test(path)) { dependencies.add(Paths.absolute(path)) }
-			}
-		});
+		handle = (await import('@d1g1tal/tsnode/api')).register({ namespace, tsconfig, onImport });
 	}
 
-	const scope = { handle, parentURL: pathToFileURL(scopeOptions.tsconfigPath).href, compilerOptions: scopeOptions.compilerOptions, dependencies };
+	const scope = { handle, parentURL: pathToFileURL(tsconfig).href, compilerOptions, dependencies };
 
 	try {
 		const resolved: Plugin[] = [];
@@ -178,8 +185,7 @@ export async function resolvePlugins(plugins: (Plugin | PluginReference)[], proj
 
 		return { plugins: resolved, dependencies, [Symbol.dispose]: () => handle?.unregister() };
 	} catch (error) {
-		// Loading failed before the caller ever receives a dispose handle — unregister here so the
-		// scope never leaks past this function on any failure path.
+		// Loading failed before the caller ever receives a dispose handle. Unregister here so the scope never leaks past this function on any failure path.
 		handle?.unregister();
 		throw error;
 	}

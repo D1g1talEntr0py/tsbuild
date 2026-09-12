@@ -3,7 +3,7 @@ import { ConfigurationError } from '../errors';
 import { Paths } from '../paths';
 import type { AbsolutePath } from '../@types';
 
-const isSameOrDescendant = (parent: AbsolutePath, candidate: AbsolutePath): boolean => {
+const isSameOrDescendant = (parent: AbsolutePath, candidate: AbsolutePath) => {
 	const path = Paths.relative(parent, candidate);
 	return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith('../'));
 };

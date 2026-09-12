@@ -19,6 +19,15 @@ import type { AbsolutePath, EntryPoints, JsonString, Plugin, ProjectBuildConfigu
 type RunnerBuildOptions = Pick<ProjectBuildConfiguration, 'watch' | 'iife' | 'plugins' | 'noExternal' | 'env' | 'bundle' | 'packages' | 'platform' | 'sourceMap' | 'target' | 'banner' | 'footer' | 'outDir' | 'splitting' | 'minify'>;
 type RunnerOptions = { directory: AbsolutePath; compilerOptions: CompilerOptions; configFilePath: AbsolutePath; buildOptions: RunnerBuildOptions };
 
+/**
+ * Narrows a caught esbuild error to its structured failure shape (`{ errors, warnings }`).
+ * esbuild rejects with a plain object, not necessarily an Error instance.
+ * @param error - The caught value to narrow
+ */
+function isBuildFailure(error: unknown): error is BuildFailure {
+	return typeof error === 'object' && error !== null && Array.isArray((error as BuildFailure).errors);
+}
+
 /** Owns esbuild execution, plugin scopes, and reusable watch resources. */
 export class EsbuildRunner implements AsyncDisposable {
 	#dependencyPaths?: Promise<string[]>;
@@ -139,7 +148,7 @@ export class EsbuildRunner implements AsyncDisposable {
 		} catch (error) {
 			if (error instanceof BuildError) { throw error }
 
-			const { errors } = error as Partial<BuildFailure>;
+			const errors = isBuildFailure(error) ? error.errors : undefined;
 			const message = errors !== undefined && errors.length > 0 ? (await formatMessages(errors, { kind: 'error', color: true })).join(sys.newLine) : castError(error).message;
 
 			Logger.error(message);
@@ -180,7 +189,7 @@ export class EsbuildRunner implements AsyncDisposable {
 	 * @param warnings - Build warnings
 	 * @param errors - Build errors
 	 */
-	async #reportEsbuildErrors(formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>, warnings: Message[], errors: Message[]): Promise<void> {
+	async #reportEsbuildErrors(formatMessages: (messages: Message[], options: { kind: 'warning' | 'error'; color: boolean }) => Promise<string[]>, warnings: Message[], errors: Message[]) {
 		for (const [ kind, logEntryType, messages ] of [[ BuildMessageType.WARNING, Logger.EntryType.Warn, warnings ], [ BuildMessageType.ERROR, Logger.EntryType.Error, errors ]] as const) {
 			if (messages.length > 0) {
 				for (const message of await formatMessages(messages, { kind, color: true })) { Logger.log(message, logEntryType) }
@@ -196,7 +205,7 @@ export class EsbuildRunner implements AsyncDisposable {
 	 * Prepares ordered plugins and a fresh scope that remains active through esbuild settlement.
 	 * @returns Plugins, output buffers, defines, dependencies, and the optional plugin resource
 	 */
-	async #configureTranspileOptions(): Promise<{ plugins: Plugin[]; iifeFiles: OutputFile[] | undefined; define: Record<string, string>; pluginDependencies: ReadonlySet<AbsolutePath>; pluginResolution: Disposable | undefined }> {
+	async #configureTranspileOptions() {
 		this.#assertSupportedDecoratorConfiguration();
 		const plugins: Plugin[] = [];
 		let iifeFiles: OutputFile[] | undefined;
@@ -227,7 +236,7 @@ export class EsbuildRunner implements AsyncDisposable {
 	}
 
 	/** Rejects unsupported legacy decorator compiler options before plugin setup. */
-	#assertSupportedDecoratorConfiguration(): void {
+	#assertSupportedDecoratorConfiguration() {
 		if (this.#compilerOptions.experimentalDecorators || this.#compilerOptions.emitDecoratorMetadata) {
 			throw new ConfigurationError('Legacy decorators are not supported. Remove "experimentalDecorators"/"emitDecoratorMetadata" from tsconfig.json and migrate to TC39 standard decorators.');
 		}
@@ -237,7 +246,7 @@ export class EsbuildRunner implements AsyncDisposable {
 	 * Expands configured environment values into esbuild definitions.
 	 * @returns Serialized import.meta.env definitions
 	 */
-	#buildDefineMap(): Record<string, string> {
+	#buildDefineMap() {
 		const define: Record<string, string> = {};
 		if (this.#buildOptions.env === undefined) { return define }
 

@@ -277,6 +277,14 @@ export class FileManager implements Closable {
 	};
 
 	/**
+	 * Custom inspection method for better type representation.
+	 * @returns The string 'FileManager'
+	 */
+	get [Symbol.toStringTag]() {
+		return 'FileManager';
+	}
+
+	/**
 	 * Pre-processes all declaration files captured during emit.
 	 * Runs createSourceFile + DeclarationProcessor.preProcess for each pending file,
 	 * then clears the pending queue.
@@ -294,12 +302,4 @@ export class FileManager implements Closable {
 
 		this.#pendingFiles.length = 0;
 	};
-
-	/**
-	 * Custom inspection method for better type representation.
-	 * @returns The string 'FileManager'
-	 */
-	get [Symbol.toStringTag]() {
-		return 'FileManager';
-	}
 }

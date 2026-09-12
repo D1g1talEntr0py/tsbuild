@@ -38,13 +38,29 @@ const nodeModules = '/node_modules/';
 const emptySet: ReadonlySet<string> = new Set();
 
 /**
+ * Import/export module specifiers are always string literals in parsed declaration files.
+ * @param moduleSpecifier - The module specifier expression node from an import/export declaration
+ */
+function moduleSpecifierText(moduleSpecifier: Node) {
+	return (moduleSpecifier as StringLiteral).text;
+}
+
+/**
+ * Normalizes a path through TypeScript's `sys` and brands it as absolute.
+ * @param path - The path to normalize
+ */
+function resolveAbsolutePath(path: string) {
+	return sys.resolvePath(path) as AbsolutePath;
+}
+
+/**
  * Merges structured external imports from the same module into single import statements.
  * Pure Map aggregation — no regex, no text parsing.
  *
  * @param imports - Structured external imports collected from all modules
  * @returns Array of merged, deduplicated import statement strings
  */
-function mergeImports(imports: ExternalImport[]): string[] {
+function mergeImports(imports: ExternalImport[]) {
 	// Map key: `${isType ? 'type:' : ''}${specifier}` so type-only and value imports stay separate
 	const merged = new Map<string, { specifier: string; isType: boolean; names: Set<string> }>();
 	const raw = new Set<string>();
@@ -117,7 +133,7 @@ class DeclarationBundler {
 			// Check in-memory declarations first (both project and external), then disk when resolve is enabled
 			return this.#declarationFiles.has(fileName) || this.#externalDeclarationFiles.has(fileName) || this.#options.resolve && sys.fileExists(fileName);
 		},
-		readFile: (fileName: AbsolutePath): string | undefined => {
+		readFile: (fileName: AbsolutePath) => {
 			const cached = this.#declarationFiles.get(fileName) ?? this.#externalDeclarationFiles.get(fileName);
 			// Return the code from the CachedDeclaration
 			if (cached) { return cached.code }
@@ -139,8 +155,7 @@ class DeclarationBundler {
 		},
 		directoryExists: (dirName: AbsolutePath) => {
 			// O(1) Set lookup using pre-computed directory prefixes
-			const normalizedDir = dirName.endsWith('/') ? dirName.slice(0, -1) : dirName;
-			return this.#declarationDirs.has(normalizedDir) || (this.#options.resolve ? sys.directoryExists(dirName) : false);
+			return this.#declarationDirs.has(dirName.endsWith('/') ? dirName.slice(0, -1) : dirName) || (this.#options.resolve ? sys.directoryExists(dirName) : false);
 		},
 		getCurrentDirectory: () => this.#options.currentDirectory,
 		/* v8 ignore next */
@@ -155,7 +170,7 @@ class DeclarationBundler {
 		// Normalize all declaration file paths to ensure consistent lookups
 		// This handles cases where paths may be relative or use different separators
 		for (const [ filePath, cachedDecl ] of dtsBundleOptions.declarationFiles) {
-			this.#declarationFiles.set(sys.resolvePath(filePath) as AbsolutePath, cachedDecl);
+			this.#declarationFiles.set(resolveAbsolutePath(filePath), cachedDecl);
 		}
 
 		// Pre-compute all ancestor directory prefixes for O(1) directoryExists lookups
@@ -190,7 +205,7 @@ class DeclarationBundler {
 	 * @param sourcePath - Absolute path to a source file (.ts, .tsx)
 	 * @returns The corresponding .d.ts path, or the original source path if no declaration exists
 	 */
-	#sourceToDeclarationPath(sourcePath: AbsolutePath): AbsolutePath {
+	#sourceToDeclarationPath(sourcePath: AbsolutePath) {
 		// Check cache first to avoid redundant lookups during multi-entry-point bundling
 		const cached = this.#sourceToDeclarationCache.get(sourcePath);
 		if (cached !== undefined) { return cached }
@@ -248,7 +263,7 @@ class DeclarationBundler {
 	 * @param containingFile - The file containing the import
 	 * @returns Resolved file path or undefined
 	 */
-	#resolveModule(importPath: string, containingFile: string): AbsolutePath | undefined {
+	#resolveModule(importPath: string, containingFile: string) {
 		// Create cache key (resolve option is constant for bundler lifetime)
 		const cacheKey = `${importPath}|${containingFile}`;
 
@@ -282,8 +297,9 @@ class DeclarationBundler {
 	 */
 	#buildModuleGraph(entryPoint: AbsolutePath): ModuleDependencyGraph {
 		const modules = new Map<string, ModuleInfo>();
-		const visited: Set<string> = new Set();
-		const bundledSpecifiers = new Map<string, Set<string>>(); // Maps module path to bundled import specifiers
+		const visited = new Set<string>();
+		// Maps module path to bundled import specifiers
+		const bundledSpecifiers = new Map<string, Set<string>>();
 
 		/**
 		 * Recursively visit and process a module and its dependencies
@@ -291,7 +307,7 @@ class DeclarationBundler {
 		 */
 		const visit = (path: AbsolutePath): void => {
 			// Normalize the path to ensure we don't visit the same file twice with different path representations
-			path = sys.resolvePath(path) as AbsolutePath;
+			path = resolveAbsolutePath(path);
 
 			if (visited.has(path)) { return }
 
@@ -322,7 +338,7 @@ class DeclarationBundler {
 			// Extract and resolve imports in a single pass through statements
 			for (const statement of sourceFile.statements) {
 				if ((isImportDeclaration(statement) || isExportDeclaration(statement)) && statement.moduleSpecifier) {
-					const specifier = (statement.moduleSpecifier as StringLiteral).text;
+					const specifier = moduleSpecifierText(statement.moduleSpecifier);
 
 					// Skip explicit external modules
 					if (this.#matchExternal(specifier)) { continue }
@@ -373,7 +389,9 @@ class DeclarationBundler {
 			if (visiting.has(path)) {
 				const cyclePath = [ ...visitStack.slice(visitStack.indexOf(path)), path ].map((p) => Paths.relative(this.#options.currentDirectory, p)).join(' -> ');
 				Logger.warn(`Circular dependency detected: ${cyclePath}`);
+
 				visited.add(path);
+
 				return;
 			}
 
@@ -384,6 +402,7 @@ class DeclarationBundler {
 			if (!module) {
 				visiting.delete(path);
 				visitStack.pop();
+
 				return;
 			}
 
@@ -505,7 +524,7 @@ class DeclarationBundler {
 		// Process all statements using the source file AST
 		for (const statement of sourceFile.statements) {
 			if (isImportDeclaration(statement)) {
-				const moduleSpecifier = (statement.moduleSpecifier as StringLiteral).text;
+				const moduleSpecifier = moduleSpecifierText(statement.moduleSpecifier);
 				const resolvedPath = this.#resolveModule(moduleSpecifier, modulePath);
 				const resolvedExports = resolvedPath === undefined ? undefined : dependencyExports.get(resolvedPath);
 				const importClause = statement.importClause;
@@ -559,8 +578,9 @@ class DeclarationBundler {
 			} else if (isExportDeclaration(statement)) {
 				// Export from another module: export { X } from './module'
 				if (statement.moduleSpecifier) {
-					if (statement.exportClause && isNamedExports(statement.exportClause) && bundledImportPaths.has((statement.moduleSpecifier as StringLiteral).text)) {
-						const resolvedPath = this.#resolveModule((statement.moduleSpecifier as StringLiteral).text, modulePath);
+					const exportModuleSpecifier = moduleSpecifierText(statement.moduleSpecifier);
+					if (statement.exportClause && isNamedExports(statement.exportClause) && bundledImportPaths.has(exportModuleSpecifier)) {
+						const resolvedPath = this.#resolveModule(exportModuleSpecifier, modulePath);
 						const resolvedExports = resolvedPath === undefined ? undefined : dependencyExports.get(resolvedPath);
 						if (resolvedExports) {
 							for (const { name, propertyName, isTypeOnly } of statement.exportClause.elements) {
@@ -572,7 +592,7 @@ class DeclarationBundler {
 					}
 					// Keep external or unresolved re-exports verbatim so public APIs are preserved.
 					// Only strip re-exports that were actually bundled into the combined output.
-					if (bundledImportPaths.has((statement.moduleSpecifier as StringLiteral).text)) { magic.remove(statement.pos, statement.end) }
+					if (bundledImportPaths.has(exportModuleSpecifier)) { magic.remove(statement.pos, statement.end) }
 
 					continue;
 				}
@@ -658,7 +678,7 @@ class DeclarationBundler {
 	 * @param bundledSpecifiers - Map of module paths to their bundled import specifiers
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
-	#combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>): string {
+	#combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>) {
 		// Use Sets directly to deduplicate as we collect — avoids intermediate arrays + later `new Set(array)` round-trips
 		const typeReferencesSet = new Set<string>();
 		const fileReferencesSet = new Set<string>();
@@ -820,7 +840,7 @@ class DeclarationBundler {
 	 * @param compilerOptions - Minimal compiler options with outDir and rootDir
 	 * @returns Resolved declaration entry point path
 	 */
-	#resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions): AbsolutePath | undefined {
+	#resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions) {
 		// Convert source path to declaration path and normalize to POSIX format (TypeScript expects forward slashes)
 		const dtsEntryPoint = sys.resolvePath(entryPoint.endsWith(FileExtension.DTS) ? entryPoint : this.#sourceToDeclarationPath(entryPoint)) as AbsolutePath;
 

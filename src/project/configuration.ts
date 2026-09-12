@@ -24,7 +24,7 @@ const jsonIifeKeys = [ 'globalName' ] as const;
  * @param path - Dot-delimited path to the object
  * @param keys - Valid keys for the object
  */
-function validateJsonObjectKeys(value: unknown, path: string, keys: readonly string[]): void {
+function validateJsonObjectKeys(value: unknown, path: string, keys: readonly string[]) {
 	if (value === null || typeof value !== 'object' || Array.isArray(value)) { return }
 
 	const allowedKeys = new Set(keys);
@@ -36,11 +36,19 @@ function validateJsonObjectKeys(value: unknown, path: string, keys: readonly str
 }
 
 /**
+ * Narrows a value to a non-array JSON object.
+ * @param value - The value to narrow
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
  * Validates the JSON-only tsbuild configuration surface.
  * @param tsbuild - Raw tsbuild value read from tsconfig.json
  */
-function validateJsonTsbuildConfiguration(tsbuild: unknown): void {
-	if (tsbuild !== null && typeof tsbuild === 'object' && !Array.isArray(tsbuild)) {
+function validateJsonTsbuildConfiguration(tsbuild: unknown) {
+	if (isPlainObject(tsbuild)) {
 		for (const option of [ 'clearCache', 'force', 'minify', 'watch' ]) {
 			if (option in tsbuild) { throw new ConfigurationError(`Configuration option "tsbuild.${option}" is CLI-only; use the "--${option}" command-line option.`) }
 		}
@@ -48,13 +56,12 @@ function validateJsonTsbuildConfiguration(tsbuild: unknown): void {
 
 	validateJsonObjectKeys(tsbuild, 'tsbuild', jsonTsbuildKeys);
 
-	if (tsbuild === null || typeof tsbuild !== 'object' || Array.isArray(tsbuild)) { return }
+	if (!isPlainObject(tsbuild)) { return }
 
-	const config = tsbuild as Record<string, unknown>;
-	validateJsonObjectKeys(config['dts'], 'tsbuild.dts', jsonDtsKeys);
-	validateJsonObjectKeys(config['banner'], 'tsbuild.banner', jsonBannerFooterKeys);
-	validateJsonObjectKeys(config['footer'], 'tsbuild.footer', jsonBannerFooterKeys);
-	validateJsonObjectKeys(config['iife'], 'tsbuild.iife', jsonIifeKeys);
+	validateJsonObjectKeys(tsbuild['dts'], 'tsbuild.dts', jsonDtsKeys);
+	validateJsonObjectKeys(tsbuild['banner'], 'tsbuild.banner', jsonBannerFooterKeys);
+	validateJsonObjectKeys(tsbuild['footer'], 'tsbuild.footer', jsonBannerFooterKeys);
+	validateJsonObjectKeys(tsbuild['iife'], 'tsbuild.iife', jsonIifeKeys);
 }
 
 /**

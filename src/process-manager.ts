@@ -66,7 +66,7 @@ class ProcessManager implements Closable {
 	};
 
 	/** Performs closeable cleanup and detaches process listeners. */
-	async #runCleanup(): Promise<void> {
+	async #runCleanup() {
 		const pendingCleanup: Promise<void>[] = [];
 
 		for (const [ index, closeable ] of [ ...this.#closeableClasses ].entries()) {
@@ -81,6 +81,7 @@ class ProcessManager implements Closable {
 				Logger.error(`Error while closing ${resourceLabel}...`, error instanceof Error ? error.stack : error);
 			}
 		}
+
 		this.close();
 		await Promise.all(pendingCleanup);
 	}

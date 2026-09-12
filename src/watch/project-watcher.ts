@@ -5,13 +5,15 @@ import { flushPerformanceLog } from '../decorators/performance-logger';
 import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { AbsolutePath, RelativePath, ProjectBuildConfiguration } from '../@types';
 
+export type FileSystemEventHandler = (event: FileSystemEvent, stats: WatchrStats, path: AbsolutePath, nextPath?: AbsolutePath) => void;
+
 /** Immutable configuration and event boundary for a project's watcher. */
 export type ProjectWatcherOptions = {
 	directory: AbsolutePath;
 	include?: readonly string[];
 	exclude?: readonly string[];
 	watch: ProjectBuildConfiguration['watch'];
-	onChange: (event: FileSystemEvent, stats: WatchrStats, path: AbsolutePath, nextPath?: AbsolutePath) => void;
+	onChange: FileSystemEventHandler;
 };
 
 const globCharacters = /[*?\\[\]!].*$/;
@@ -65,6 +67,7 @@ export class ProjectWatcher {
 		this.#fileWatcher?.close();
 		const pathsToIgnore = [ ...exclude ?? [], ...watch.ignore ?? [] ];
 		const ignore = (path: string) => pathsToIgnore.some((pattern) => path.includes(`/${pattern}/`) || path.endsWith(`/${pattern}`));
+		// watchr reports plain strings; they are always absolute since targets are built from Paths.absolute()
 		const fileSystemEventHandler = (event: FileSystemEvent, stats: WatchrStats, path: string, nextPath?: string) => onChange(event, stats, path as AbsolutePath, nextPath as AbsolutePath | undefined);
 
 		this.#fileWatcher = new Watchr(targets, { ...watch, ignore }, fileSystemEventHandler);

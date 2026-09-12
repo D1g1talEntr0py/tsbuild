@@ -11,7 +11,7 @@ type ExternalModulesPluginOptions = { dependencies?: Pattern[], noExternal?: Pat
  * @param key The tsconfig paths key.
  * @returns An exact string or anchored wildcard pattern.
  */
-const createPathAliasPattern = (key: string): Pattern => {
+const createPathAliasPattern = (key: string) => {
 	const wildcardIndex = key.indexOf('*');
 
 	if (wildcardIndex === -1) { return key }
@@ -27,7 +27,7 @@ export const externalModulesPlugin = ({ dependencies = [], noExternal = [], path
 		 * Configure the plugin to handle external modules
 		 * @param build The esbuild build instance
 		 */
-		setup(build): void {
+		setup(build) {
 			const external = true;
 			const matchNoExternal = createPatternMatcher(noExternal, { allowSubpaths: true });
 			const matchDependencies = createPatternMatcher(dependencies, { allowSubpaths: true });
