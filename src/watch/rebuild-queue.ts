@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { Files } from '../files';
+import { isErrnoException } from '../errors';
 import type { WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
 import type { AbsolutePath, PendingFileChange } from '../@types';
 
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
 type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
-type QueuedPendingChange = PendingFileChange & { version: number };
+interface QueuedPendingChange extends PendingFileChange {
+	version: number;
+}
 
 /** Inputs needed to filter watcher events and dispatch serial rebuilds. */
 export type RebuildQueueOptions = {
@@ -176,7 +179,7 @@ export class RebuildQueue {
 	 * Removes a queued change and its path-index entries.
 	 * @param key - Pending-change map key to remove
 	 */
-	#deletePendingChange(key: string): void {
+	#deletePendingChange(key: string) {
 		const change = this.#pendingChanges.get(key);
 
 		if (change === undefined) { return }
@@ -189,7 +192,7 @@ export class RebuildQueue {
 	}
 
 	/** Starts or extends the suppression window for follow-up edits to renamed paths. */
-	#activateRenameCycle(): void {
+	#activateRenameCycle() {
 		if (this.#stopped) { return }
 
 		const timeoutMs = this.#options.renameTimeoutMs;
@@ -206,12 +209,12 @@ export class RebuildQueue {
 	}
 
 	/** Returns whether the rename suppression deadline has not yet passed. */
-	#isRenameCycleActive(): boolean {
+	#isRenameCycleActive() {
 		return performance.now() <= this.#renameCycleDeadline;
 	}
 
 	/** Queues one rebuild after Watchr's rename-pairing window. */
-	#requestRebuild(): void {
+	#requestRebuild() {
 		if (this.#stopped) { return }
 
 		if (this.#rebuildInFlight) {
@@ -248,7 +251,7 @@ export class RebuildQueue {
 	 * Drains and stabilizes pending events before invoking the serial rebuild callback.
 	 * @param expectedRevision - Queue revision captured at dispatch
 	 */
-	async #triggerRebuild(expectedRevision: number): Promise<void> {
+	async #triggerRebuild(expectedRevision: number) {
 		if (this.#stopped || this.#pendingChanges.size === 0) { return }
 
 		if (this.#queueRevision !== expectedRevision) {
@@ -308,7 +311,7 @@ export class RebuildQueue {
 	}
 
 	/** Drains queued watcher events, including events arriving during content hashing. */
-	async #collectPendingFileChanges(): Promise<QueuedPendingChange[]> {
+	async #collectPendingFileChanges() {
 		const pendingFileChanges: QueuedPendingChange[] = [];
 		while (this.#pendingChanges.size > 0) {
 			const queuedChanges = [ ...this.#pendingChanges.values() ];
@@ -333,7 +336,7 @@ export class RebuildQueue {
 	 * Size changes bypass hashing; other read failures remain meaningful changes.
 	 * @param change - Versioned pending watcher event
 	 */
-	async #isContentModified(change: QueuedPendingChange): Promise<boolean> {
+	async #isContentModified(change: QueuedPendingChange) {
 		const { event, path, nextPath, version } = change;
 
 		if (nextPath !== undefined || event !== 'change') { return true }
@@ -377,7 +380,7 @@ export class RebuildQueue {
 		} catch (error) {
 			if (this.#stopped) { return false }
 
-			const code = (error as NodeJS.ErrnoException).code;
+			const code = isErrnoException(error) ? error.code : undefined;
 
 			if (code === 'ENOENT') {
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }

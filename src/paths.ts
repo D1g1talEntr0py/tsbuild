@@ -1,7 +1,9 @@
+import { isErrnoException } from './errors';
 import { lstat, realpath } from 'node:fs/promises';
 import { dirname, relative, resolve, join, type ParsedPath, parse } from 'node:path';
 import type { Path, AbsolutePath, RelativePath, ConditionalPath } from './@types';
-const isMissingPathError = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+const isMissingPathError = (error: unknown): boolean => isErrnoException(error) && error.code === 'ENOENT';
 
 /**
  * Class for path manipulations.

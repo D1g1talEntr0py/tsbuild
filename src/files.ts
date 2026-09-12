@@ -3,6 +3,7 @@ import { serialize, deserialize } from 'node:v8';
 import { defaultCleanOptions, defaultDirOptions, Encoding, FileExtension } from './constants';
 import { brotliDecompress, brotliCompress, constants as brotliConstants } from 'node:zlib';
 import { Paths } from './paths';
+import { isErrnoException } from './errors';
 import { fileURLToPath } from 'node:url';
 import { access, chmod, constants as fsConstants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { LanguageVariant, ScriptTarget, SyntaxKind, createScanner } from 'typescript';
@@ -15,6 +16,21 @@ type WriteEntry = { path: AbsolutePath | string; data: WritableData; options?: W
 const removalBatchSize = 32;
 const writeBatchSize = 32;
 const makeDirMapper = (directory: string) => mkdir(directory, defaultDirOptions);
+
+/**
+ * Checks if the given object is a WrittenFile.
+ * @param writtenFile The object to check.
+ * @returns True if the object is a WrittenFile, false otherwise.
+ */
+export const isWrittenFile = (writtenFile: unknown): writtenFile is WrittenFile =>
+	writtenFile !== null && typeof writtenFile === 'object' && !Array.isArray(writtenFile) && 'path' in writtenFile && typeof writtenFile.path === 'string' && 'size' in writtenFile && typeof writtenFile.size === 'number';
+
+/**
+ * Checks if the given array contains only WrittenFile objects.
+ * @param data The value to check.
+ * @returns True if all elements in the array are WrittenFile objects, false otherwise.
+ */
+export const isWrittenFiles = (data: unknown): data is WrittenFile[] => Array.isArray(data) ? data.every(isWrittenFile) : false;
 
 /**
  * A class for handling file operations such as reading, writing, compressing, and decompressing files.
@@ -32,7 +48,7 @@ export class Files {
 			return true;
 		} catch (error) {
 			// File does not exist - check for any error with ENOENT code
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return false }
+			if (isErrnoException(error) && error.code === 'ENOENT') { return false }
 			// Other errors (e.g., permissions issues)
 			throw error;
 		}
@@ -51,7 +67,7 @@ export class Files {
 			entries = await readdir(directory);
 		} catch (error) {
 			// Directory doesn't exist - create it so callers can write into it
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+			if (isErrnoException(error) && error.code === 'ENOENT') {
 				await mkdir(directory, defaultDirOptions);
 				return;
 			}
@@ -272,7 +288,8 @@ export class Files {
 	 * @param encoding The encoding to use when reading the file. Default is UTF-8.
 	 * @returns The file contents as a string.
 	 */
-	static async read<T extends string | Buffer = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
+	static async read<T extends string = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
+		// Brand the result as T (e.g. JsonString<X>) — encoding is always set, so this always reads as a string
 		return readFile(this.normalizePath(filePath), { encoding }) as Promise<T>;
 	}
 
@@ -293,10 +310,12 @@ export class Files {
 	 */
 	static normalizePath(path: Path): AbsolutePath {
 		if (path.startsWith('file://')) { return fileURLToPath(path) as AbsolutePath }
+
 		if (path.startsWith('/')) { return path as AbsolutePath }
-		// Paths that don't start with / or file:// must be valid URLs
-		// or else they're invalid relative paths
+
+		// Paths that don't start with / or file:// must be valid URLs or else they're invalid relative paths
 		if (!path.includes('://')) { throw new TypeError(`Files.normalizePath requires an absolute path, got: ${path}`) }
+
 		return new URL(path, import.meta.url).pathname as AbsolutePath;
 	}
 
@@ -321,11 +340,7 @@ export class Files {
 			[brotliConstants.BROTLI_PARAM_QUALITY]: 5
 		};
 
-		return new Promise<Buffer>((resolve, reject) => brotliCompress(
-			buffer,
-			{ params },
-			(error, result) => error ? reject(error) : resolve(result)
-		));
+		return new Promise<Buffer>((resolve, reject) => brotliCompress(buffer, { params }, (error, result) => error ? reject(error) : resolve(result)));
 	}
 
 	/**
@@ -335,6 +350,7 @@ export class Files {
 	 * @returns The deserialized object.
 	 */
 	static async readCompressed<T = unknown>(path: Path): Promise<T> {
+		// Deserializing arbitrary persisted state is an inherent boundary cast, like JSON.parse
 		return deserialize(await this.decompressBuffer(await readFile(this.normalizePath(path)))) as T;
 	}
 
@@ -347,6 +363,7 @@ export class Files {
 	static async writeCompressed<T>(path: Path, data: T): Promise<void> {
 		const normalizedPath = this.normalizePath(path);
 		await mkdir(dirname(normalizedPath), defaultDirOptions);
+
 		return writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
 	}
 
@@ -356,12 +373,12 @@ export class Files {
 	 * @param size Optional size of the data. If provided, it will be used directly.
 	 * @returns The resolved size of the data.
 	 */
-	static #resolveFileSize(data: WritableData, size?: number): number {
+	static #resolveFileSize(data: WritableData, size?: number) {
 		switch (true) {
-			case size !== undefined: return size;
-			case typeof data === 'string': return Buffer.byteLength(data);
-			case ArrayBuffer.isView(data): return data.byteLength;
-			default: return 0;
+			case size !== undefined: { return size }
+			case typeof data === 'string': { return Buffer.byteLength(data) }
+			case ArrayBuffer.isView(data): { return data.byteLength }
+			default: { return 0 }
 		}
 	}
 }

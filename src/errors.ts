@@ -45,3 +45,9 @@ export class ConfigurationError extends BuildError {
 }
 
 export const castError = (exception: unknown): Error => exception instanceof Error ? exception : new Error(typeof exception === 'string' ? exception : 'Unknown error');
+
+/**
+ * Narrows a caught value to Node's errno-carrying Error shape (e.g. ENOENT/EIO from fs calls).
+ * @param error - The caught value to narrow
+ */
+export const isErrnoException = (error: unknown): error is NodeJS.ErrnoException => error instanceof Error && 'code' in error;
