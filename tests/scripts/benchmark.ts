@@ -182,7 +182,6 @@ export function transform${id}<T>(values: ReadonlyArray<T>, mapper: (v: T) => T)
 		include: [ 'src/**/*' ],
 		tsbuild: {
 			entryPoints: { index: './src/index.ts' },
-			outDir: './dist',
 		},
 	}, null, 2));
 }
