@@ -283,6 +283,20 @@ describe('FileManager', () => {
 			expect(written).toContain('from "./bar.js"');
 			expect(written).toContain('from "pkg"');
 		});
+
+		it('rewrites extension-less relative side-effect import specifiers', async () => {
+			const manager = new FileManager();
+			await manager.initialize();
+			manager.fileWriter('side-effect.d.ts', 'import "./polyfill";\nimport \'./other.js\';\nimport "pkg";\nexport declare class Foo {}');
+			manager.finalize();
+
+			await manager.writeFiles(tempDir);
+
+			const written = await fsReadFile('side-effect.d.ts', 'utf8');
+			expect(written).toContain('import "./polyfill.js"');
+			expect(written).toContain('import \'./other.js\'');
+			expect(written).toContain('import "pkg"');
+		});
 	});
 
 	describe('resolveEntryPoints', () => {

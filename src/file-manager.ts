@@ -7,7 +7,7 @@ import type { AbsolutePath, BuildCacheManager, CachedDeclaration, Closable, Writ
 
 const noop = (): void => { /* no-op */ };
 const localFileIdentifier = /\.[a-z]+$/i;
-const relativeSpecifierPattern = /(from\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
+const relativeSpecifierPattern = /((?:from|import)\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
 
 /**
  * Rewrites extension-less relative specifiers in declaration output to include `.js`.
