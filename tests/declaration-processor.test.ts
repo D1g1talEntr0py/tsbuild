@@ -99,10 +99,16 @@ describe('DeclarationProcessor', () => {
 				expect(result.code).toContain('export { MyClass, MyInterface, MyType }');
 			});
 
-			it('removes empty export statements', () => {
+			it('preserves empty export statements like any other export', () => {
 				const result = DeclarationProcessor.preProcess(parse('export {};\nexport class MyClass {}'));
-				const matches = result.code.match(/export\s*{/g);
-				expect(matches?.length).toBe(1);
+				expect(result.code).toContain('export {};');
+				expect(result.code).toContain('export { MyClass };');
+			});
+
+			it('preserves the module marker for a global augmentation with no other exports', () => {
+				const result = DeclarationProcessor.preProcess(parse('export {};\ndeclare global {\n\tinterface Map<K, V> { foo(): void; }\n}'));
+				expect(result.code).toContain('declare global');
+				expect(result.code.match(/export\s*{\s*}/g)?.length).toBe(1);
 			});
 
 			it('strips type keyword from export type statements', () => {

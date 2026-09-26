@@ -362,6 +362,40 @@ export declare const Theme: { color: string; };`],
 			expect(content).toContain('export { a };');
 		});
 
+		it('emits a single module marker when the bundle has no other exports', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'import "./polyfill";\nexport {};\ndeclare global {\n\tinterface Map<K, V> { foo(): void; }\n}'],
+					[join(cwd, 'src/polyfill.d.ts'), 'export {};\ndeclare global {\n\tinterface Set<T> { bar(): void; }\n}'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).toContain('interface Map<K, V>');
+			expect(content).toContain('interface Set<T>');
+			expect(content.match(/export\s*{\s*}/g)?.length).toBe(1);
+			expect(content.trimEnd().endsWith('export {};')).toBe(true);
+		});
+
+		it('does not write a declaration for entries or dependencies that only contain the module marker', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/index.d.ts'), 'import "./empty";\nexport declare const a: number;'],
+					[join(cwd, 'src/empty.d.ts'), 'export {};'],
+					[join(cwd, 'src/cli.d.ts'), 'export {};'],
+				]),
+				entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath, cli: join(cwd, 'src/cli.d.ts') as AbsolutePath },
+			});
+
+			const result = await bundleDeclarations(options);
+			expect(result.map(({ path }) => path)).toEqual([ 'dist/index.d.ts' ]);
+			const content = TestHelper.readFile(join(outDir, 'index.d.ts'));
+			expect(content).not.toMatch(/export\s*{\s*}/);
+			expect(content).toContain('export { a };');
+		});
+
 		it('strips default exports', async () => {
 			const options = makeOptions({
 				declarationFiles: TestHelper.createDeclarationFilesMap([

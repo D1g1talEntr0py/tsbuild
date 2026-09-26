@@ -14,7 +14,6 @@ import {
 	isLiteralTypeNode,
 	isModuleBlock,
 	isModuleDeclaration,
-	isNamedExports,
 	isNamespaceExport,
 	isStringLiteral,
 	isTypeAliasDeclaration,
@@ -297,15 +296,8 @@ export class DeclarationProcessor {
 		// Pass 1: Walk through all statements and process them
 		for (const node of sourceFile.statements) {
 			if (isExportDeclaration(node)) {
-				// Handle export declarations
-				// Check if this is an empty export (export {};) - these are module markers from TypeScript
-				// We should remove them since we generate our own consolidated export statement
-				if (node.exportClause && isNamedExports(node.exportClause) && node.exportClause.elements.length === 0 && !node.moduleSpecifier) {
-					// Remove empty export statements
-					code.remove(getStart(node), getEnd(node));
-				}
 				// Handle 'export type' declarations - keep them but strip the 'type' keyword
-				else if (node.isTypeOnly) {
+				if (node.isTypeOnly) {
 					// Find the 'type' keyword position (after 'export' and before the export clause or 'from')
 					const exportKeywordEnd = node.getStart() + 'export'.length;
 					const nextTokenStart = node.exportClause?.getStart() ?? node.moduleSpecifier?.getStart() ?? node.getEnd();

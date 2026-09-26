@@ -597,29 +597,25 @@ class DeclarationBundler {
 					continue;
 				}
 
-				// Standalone export: export { X, Y, Z } or export type { A, B }
+				// Standalone export: export { X, Y, Z }, export type { A, B }, or the empty module marker export {}
 				if (statement.exportClause && isNamedExports(statement.exportClause)) {
-					// Check if this is an empty export (export {};). These are used by TypeScript to mark a file as a module
-					// Collect exported names
-					if (statement.exportClause.elements.length > 0) {
-						for (const { name, propertyName } of statement.exportClause.elements) {
-							const localName = propertyName?.text ?? name.text;
-							const mappedLocalName = exportsMapper(localName);
-							const exported = { localName: mappedLocalName, exportedName: name.text, isType: statement.isTypeOnly };
-							// Categorize as type or value. Values take precedence (classes/enums are both)
-							if (valueIdentifiers.has(localName) || localBindings.has(localName) && !statement.isTypeOnly) {
-								valueExports.push(exported);
-							} else if (typeIdentifiers.has(localName) || localBindings.has(localName)) {
-								typeExports.push(exported);
-							} else {
-								// Unknown, assume value (safer default)
-								valueExports.push(exported);
-							}
+					for (const { name, propertyName } of statement.exportClause.elements) {
+						const localName = propertyName?.text ?? name.text;
+						const mappedLocalName = exportsMapper(localName);
+						const exported = { localName: mappedLocalName, exportedName: name.text, isType: statement.isTypeOnly };
+						// Categorize as type or value. Values take precedence (classes/enums are both)
+						if (valueIdentifiers.has(localName) || localBindings.has(localName) && !statement.isTypeOnly) {
+							valueExports.push(exported);
+						} else if (typeIdentifiers.has(localName) || localBindings.has(localName)) {
+							typeExports.push(exported);
+						} else {
+							// Unknown, assume value (safer default)
+							valueExports.push(exported);
 						}
-
-						// Remove the export statement
-						magic.remove(statement.pos, statement.end);
 					}
+
+					// Remove the export statement
+					magic.remove(statement.pos, statement.end);
 				}
 			} else if (isExportAssignment(statement)) {
 				// Handle export default assignment: export default ...
@@ -806,6 +802,9 @@ class DeclarationBundler {
 			if (finalTypeExports.length > 0) {
 				outputParts.push(`export type { ${finalTypeExports.sort((a, b) => a.exportedName.localeCompare(b.exportedName)).map(({ localName, exportedName }) => localName === exportedName ? localName : `${localName} as ${exportedName}`).join(', ')} };`);
 			}
+		} else if (codeBlocks.length > 0) {
+			// Keep the bundle a module so `declare global` stays valid and locals stay module-scoped
+			outputParts.push('', 'export {};');
 		}
 
 		return outputParts.join(newLine);
