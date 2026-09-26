@@ -1,3 +1,11 @@
+## [3.0.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.2...v3.0.3) (2026-09-26)
+
+
+### Bug Fixes
+
+* **dts:** preserve module markers in declaration bundles ([9c5a2de](https://github.com/D1g1talEntr0py/tsbuild/commit/9c5a2de3abac7d8d231b06dba698f0beada70f8c))
+* **file-manager:** rewrite side-effect import specifiers ([4103457](https://github.com/D1g1talEntr0py/tsbuild/commit/4103457d7605332fd84f8d255cc377d589397bb6))
+
 ## [3.0.2](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.1...v3.0.2) (2026-09-12)
 
 
