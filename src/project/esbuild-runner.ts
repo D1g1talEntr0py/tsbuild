@@ -73,8 +73,17 @@ export class EsbuildRunner implements AsyncDisposable {
 	 */
 	async run(entryPoints: EntryPoints<AbsolutePath>): Promise<WrittenFile[]> {
 		const { build: esbuild, context: createEsbuildContext, formatMessages } = await import('esbuild');
-		const { plugins, iifeFiles, define, pluginDependencies, pluginResolution } = await this.#configureTranspileOptions();
-		using _ = pluginResolution;
+		const { plugins, iifeFiles } = await this.#configureTranspileOptions();
+
+		using pluginResolution = this.#buildOptions.plugins?.length ? await resolvePlugins(this.#buildOptions.plugins, this.#directory, {
+			namespace: `tsbuild-plugins:${randomUUID()}`,
+			tsconfigPath: this.#configFilePath,
+			compilerOptions: this.#compilerOptions
+		}) : undefined;
+
+		if (pluginResolution !== undefined) { plugins.push(...pluginResolution.plugins) }
+
+		const define = this.#buildDefineMap();
 		const writtenFiles: WrittenFile[] = [];
 		const canReuseContext = this.#buildOptions.watch.enabled && this.#buildOptions.iife === undefined && !this.#buildOptions.plugins?.length;
 		const defineKey = Json.serialize(define);
@@ -99,7 +108,7 @@ export class EsbuildRunner implements AsyncDisposable {
 				write: false,
 				metafile: true,
 				treeShaking: true,
-				logLevel: 'warning',
+				logLevel: 'silent',
 				absWorkingDir: this.#directory,
 				tsconfigRaw: {
 					compilerOptions: {
@@ -156,8 +165,7 @@ export class EsbuildRunner implements AsyncDisposable {
 			throw new BundleError(message);
 		} finally {
 			this.#pluginDependencies.clear();
-			for (const dependency of pluginDependencies) { this.#pluginDependencies.add(dependency) }
-
+			for (const dependency of pluginResolution?.dependencies ?? []) { this.#pluginDependencies.add(dependency) }
 		}
 	}
 
@@ -169,18 +177,13 @@ export class EsbuildRunner implements AsyncDisposable {
 		await context?.dispose();
 	}
 
-	/** Releases reusable resources once; the caller must first await its active build. */
-	dispose(): Promise<void> {
-		return this.#disposePromise ??= this.invalidateContext();
-	}
-
 	/**
 	 * Releases reusable resources once; the caller must first await its active build.
 	 * This method is called automatically when the runner is used in a `using` statement.
 	 * @returns Promise that resolves when the runner has released its resources
 	 */
 	[Symbol.asyncDispose](): Promise<void> {
-		return this.dispose();
+		return this.#disposePromise ??= this.invalidateContext();
 	}
 
 	/**
@@ -202,14 +205,16 @@ export class EsbuildRunner implements AsyncDisposable {
 	}
 
 	/**
-	 * Prepares ordered plugins and a fresh scope that remains active through esbuild settlement.
-	 * @returns Plugins, output buffers, defines, dependencies, and the optional plugin resource
+	 * Prepares built-in plugins before the run resolves user plugins in its own disposable scope.
+	 * @returns Built-in plugins and optional IIFE output buffers
 	 */
 	async #configureTranspileOptions() {
 		this.#assertSupportedDecoratorConfiguration();
+
 		const plugins: Plugin[] = [];
 		let iifeFiles: OutputFile[] | undefined;
 		let plugin: Plugin | undefined;
+
 		if (this.#buildOptions.iife) {
 			({ files: iifeFiles, plugin } = createIifePluginHandle(this.#buildOptions.iife === true ? undefined : this.#buildOptions.iife));
 			plugins.push(plugin);
@@ -219,20 +224,7 @@ export class EsbuildRunner implements AsyncDisposable {
 			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths ?? [], noExternal: this.#buildOptions.noExternal, paths: this.#compilerOptions.paths }));
 		}
 
-		let pluginDependencies: ReadonlySet<AbsolutePath> = new Set();
-		let pluginResolution: Disposable | undefined;
-		if (this.#buildOptions.plugins?.length) {
-			const { plugins: resolvedPlugins, dependencies, ...resolution } = await resolvePlugins(this.#buildOptions.plugins, this.#directory, {
-				namespace: `tsbuild-plugins:${randomUUID()}`,
-				tsconfigPath: this.#configFilePath,
-				compilerOptions: this.#compilerOptions
-			});
-			plugins.push(...resolvedPlugins);
-			pluginDependencies = dependencies;
-			pluginResolution = resolution;
-		}
-
-		return { plugins, iifeFiles, define: this.#buildDefineMap(), pluginDependencies, pluginResolution };
+		return { plugins, iifeFiles };
 	}
 
 	/** Rejects unsupported legacy decorator compiler options before plugin setup. */

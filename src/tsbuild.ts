@@ -25,7 +25,6 @@ if (help) {
 		console.log(`  ${`-${short}, --${long}`.padEnd(20)} ${description}`);
 	}
 
-	console.log();
 	process.exitCode = 0;
 } else if (version) {
 	// Handle version option
@@ -35,7 +34,7 @@ if (help) {
 	try {
 		const { TypeScriptProject } = await import('./type-script-project');
 
-		const project = new TypeScriptProject(projectDirectory, { compilerOptions: { ...(noEmit !== undefined ? { noEmit } : {}) } }, args);
+		const project = new TypeScriptProject(projectDirectory, { compilerOptions: noEmit !== undefined ? { noEmit } : {} }, args);
 
 		// Use the project as a resource that will be automatically cleaned up when the process exits, unless in watch mode.
 		await using _resource = project.isWatchMode ? null : project;

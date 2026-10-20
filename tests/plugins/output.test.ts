@@ -41,7 +41,7 @@ function outputFile(path: string, text: string): OutputFile {
 }
 
 function lazyOutputFile(path: string, text: string, onText: () => void): OutputFile {
-	const file = { path, contents: Buffer.from(text), hash: 'hash' } as OutputFile;
+	const file = { path, contents: Buffer.from(text), hash: 'hash', text } as OutputFile;
 	Object.defineProperty(file, 'text', { enumerable: true, get: () => { onText(); return text } });
 	return file;
 }

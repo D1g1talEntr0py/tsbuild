@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { access, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';
+import { Paths } from '../../src/paths';
 import { processManager } from '../../src/process-manager';
 import { TestHelper } from '../scripts/test-helper';
 
@@ -32,7 +33,7 @@ describe('TypeScriptProject - Integration Builds', () => {
 		await expect(access(join(dir, 'dist/keep.js'))).resolves.toBeUndefined();
 		await expect(access(join(dir, 'dist/remove.js'))).resolves.toBeUndefined();
 
-		const project2 = new TypeScriptProject(dir, { tsbuild: { clean: true, entryPoints: { keep: './src/keep.ts' } } });
+		const project2 = new TypeScriptProject(dir, { tsbuild: { clean: true, entryPoints: { keep: Paths.relative(dir, join(dir, 'src/keep.ts')) } } });
 		await project2.build();
 		project2.close();
 
@@ -211,18 +212,20 @@ describe('TypeScriptProject - Integration Builds', () => {
 		});
 		cleanup = c;
 
-		const logSpy = vi.spyOn(console, 'log');
+		const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
 		const project = new TypeScriptProject(dir);
-		await project.build();
-		project.close();
+		try {
+			await project.build();
+			project.close();
 
-		expect(process.exitCode).toBe(2);
+			expect(process.exitCode).toBe(2);
 
-		const unresolvedImportReports = logSpy.mock.calls.filter(([message]) =>
-			typeof message === 'string' && message.includes('tsbuild-test-nonexistent-package')).length;
-		expect(unresolvedImportReports).toBe(1);
-
-		logSpy.mockRestore();
+			const unresolvedImportReports = logSpy.mock.calls.filter(([message]) =>
+				typeof message === 'string' && message.includes('tsbuild-test-nonexistent-package')).length;
+			expect(unresolvedImportReports).toBe(1);
+		} finally {
+			logSpy.mockRestore();
+		}
 	});
 });

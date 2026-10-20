@@ -16,7 +16,7 @@ function configuration(overrides: Partial<ProjectBuildConfiguration> = {}): Proj
 		sourceMap: false,
 		noExternal: [],
 		dts: { resolve: false },
-		watch: { enabled: false, recursive: true, persistent: true, ignoreInitial: true },
+		watch: { enabled: false, recursive: true, persistent: true, emitInitial: false },
 		...overrides
 	};
 }
@@ -47,7 +47,7 @@ describe('buildFingerprint', () => {
 	});
 
 	it('ignores non-fingerprinted options and entry promise identity', () => {
-		const config = configuration({ force: true, clean: false, packages: 'bundle', plugins: [], outDir: Paths.absolute('/elsewhere'), entryPoints: Promise.resolve({ other: Paths.absolute('/other.ts') }), watch: { enabled: true, recursive: false, persistent: false, ignoreInitial: false } });
+		const config = configuration({ force: true, clean: false, packages: 'bundle', plugins: [], outDir: Paths.absolute('/elsewhere'), entryPoints: Promise.resolve({ other: Paths.absolute('/other.ts') }), watch: { enabled: true, recursive: false, persistent: false, emitInitial: true } });
 		expect(buildFingerprint(config, { strict: true, noEmit: true })).toBe(buildFingerprint(configuration(), {}));
 	});
 

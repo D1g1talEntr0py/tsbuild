@@ -3,8 +3,10 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { createIifePluginHandle } from 'src/plugins/iife';
 import type { IifePluginHandle } from 'src/plugins/iife';
-import type { PluginBuild } from 'esbuild';
+import type { BuildResult, PluginBuild } from 'esbuild';
 import { TestHelper } from '../scripts/test-helper';
+
+type OnEndCallback = Parameters<PluginBuild['onEnd']>[0];
 
 function getOutputText(instance: IifePluginHandle, suffix: string): string {
 	const file = instance.files.find(({ path }) => path.endsWith(suffix));
@@ -44,7 +46,7 @@ describe('iifePlugin', () => {
 
 		it('produces no files when onEnd receives an empty output list', async () => {
 			const { plugin, files } = createIifePluginHandle();
-			let onEndCallback: ((result: BuildResult) => Promise<void> | void) | undefined;
+			let onEndCallback: OnEndCallback | undefined;
 			const build: Partial<PluginBuild> = {
 				initialOptions: { outdir: '/tmp/out', entryPoints: { index: '/tmp/src/index.ts' } } as PluginBuild['initialOptions'],
 				onEnd: (callback) => { onEndCallback = callback },
@@ -58,7 +60,7 @@ describe('iifePlugin', () => {
 
 		it('produces no files when there are no configured entry points', async () => {
 			const { plugin, files } = createIifePluginHandle();
-			let onEndCallback: ((result: BuildResult) => Promise<void> | void) | undefined;
+			let onEndCallback: OnEndCallback | undefined;
 			const build: Partial<PluginBuild> = {
 				initialOptions: { outdir: '/tmp/out' } as PluginBuild['initialOptions'],
 				onEnd: (callback) => { onEndCallback = callback },

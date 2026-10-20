@@ -9,32 +9,43 @@ const isMissingPathError = (error: unknown): boolean => isErrnoException(error) 
  * Class for path manipulations.
  */
 export class Paths {
-	private constructor() { /* Static class - no instantiation */ }
+	private constructor() { throw new Error('Static class - cannot be instantiated') }
 
 	/**
 	 * Computes the absolute path by joining the provided segments.
 	 * @param paths Array of path segments to join.
 	 */
-	static absolute(...paths: string[] | Path[]): AbsolutePath {
-		return resolve(...paths) as AbsolutePath;
-	}
+	static absolute = resolve as (...paths: string[] | Path[]) => AbsolutePath;
 
 	/**
 	 * Computes the relative path from one location to another.
 	 * @param from The starting location.
 	 * @param to The target location.
 	 */
-	static relative(from: string, to: string): RelativePath {
-		return relative(from, to) as RelativePath;
-	}
+	static relative = relative as (from: string, to: string) => RelativePath;
 
 	/**
 	 * Parses a path string into its component parts.
 	 * @param path The path to parse.
 	 */
-	static parse(path: string): ParsedPath {
-		return parse(path);
-	}
+	static parse: (path: string) => ParsedPath = parse;
+
+	/**
+	 * Joins multiple path segments into a single path.
+	 * When the first segment is an AbsolutePath, returns AbsolutePath.
+	 * Otherwise, returns RelativePath.
+	 * @param first - The first path segment (determines if result is absolute)
+	 * @param rest - Additional path segments to join
+	 * @returns The joined path
+	 */
+	static join = join as <T extends string | Path>(first: T, ...rest: (string | Path)[]) => ConditionalPath<T>;
+
+	/**
+	 * Gets the directory name of the given path.
+	 * @param path - The path to get the directory name for
+	 * @returns The directory name as an absolute path
+	 */
+	static directoryName = dirname as (path: string | Path) => AbsolutePath;
 
 	/**
 	 * Resolves existing symlink components while preserving non-existent suffixes.
@@ -42,18 +53,18 @@ export class Paths {
 	 * @returns The canonical path, including any non-existent trailing components
 	 */
 	static async canonical(path: string | Path): Promise<AbsolutePath> {
-		const absolutePath = resolve(path);
+		const absolutePath = Paths.absolute(path);
 		const missingParts: string[] = [];
 		let currentPath = absolutePath;
 
 		while (true) {
 			try {
-				return resolve(await realpath(currentPath), ...missingParts.reverse()) as AbsolutePath;
+				return Paths.absolute(await realpath(currentPath), ...missingParts.reverse());
 			} catch (error) {
 				if (!isMissingPathError(error)) { throw error }
 
-				const parentPath = dirname(currentPath);
-				if (parentPath === currentPath) { return absolutePath as AbsolutePath }
+				const parentPath = Paths.directoryName(currentPath);
+				if (parentPath === currentPath) { return absolutePath }
 
 				missingParts.push(currentPath.slice(parentPath.length + (parentPath === '/' ? 0 : 1)));
 				currentPath = parentPath;
@@ -94,22 +105,6 @@ export class Paths {
 	static isPath<T extends Path>(path: T | string): path is T {
 		if (path.length === 0) { return false }
 
-		if (path.startsWith('/') || path === '.' || path === '..') { return true }
-
-		if (path.startsWith('./') || path.startsWith('../')) { return true }
-
-		return false;
-	}
-
-	/**
-	 * Joins multiple path segments into a single path.
-	 * When the first segment is an AbsolutePath, returns AbsolutePath.
-	 * Otherwise, returns RelativePath.
-	 * @param first - The first path segment (determines if result is absolute)
-	 * @param rest - Additional path segments to join
-	 * @returns The joined path
-	 */
-	static join<T extends string | Path>(first: T, ...rest: (string | Path)[]): ConditionalPath<T> {
-		return join(first, ...rest) as ConditionalPath<T>;
+		return path.startsWith('/') || path.startsWith('./') || path.startsWith('../') || path === '.' || path === '..';
 	}
 }

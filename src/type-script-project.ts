@@ -86,7 +86,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 		this.#outputPathValidator = new OutputPathValidator(this.#directory, this.#configuration.configFilePath, rootNames, this.#buildConfiguration.outDir);
 		this.#esbuildRunner = new EsbuildRunner({ directory: this.#directory, compilerOptions: this.#configuration.compilerOptions, configFilePath: this.#configuration.configFilePath, buildOptions: this.#buildConfiguration });
 		this.#rebuildQueue = new RebuildQueue({
-			renameTimeoutMs: this.#buildConfiguration.watch['renameTimeout'] ?? 150,
+			renameTimeoutMs: this.#buildConfiguration.watch.renameTimeout ?? 150,
 			sourceText: (path) => this.#compilationContext.sourceText(path),
 			rebuild: (changes) => this.#triggerRebuild(changes)
 		});
@@ -164,7 +164,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 
 	/** Runs declaration bundling and transpilation concurrently. */
 	@logPerformance('Bundle', [ 'Process Declarations', 'Transpile' ])
-	async #runOutputPhases() {
+	#runOutputPhases() {
 		const processes: Array<Promise<WrittenFile[]>> = [];
 
 		if (this.#configuration.compilerOptions.declaration) { processes.push(this.#processDeclarations()) }
@@ -192,9 +192,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 		processManager.removeCloseable(this);
 
 		this.#rebuildQueue.stop();
-
-		const runCleanupProcesses = () => Promise.allSettled([ this.#fileManager.flush(), this.#esbuildRunner.dispose() ]);
-
+		const runCleanupProcesses = () => Promise.allSettled([ this.#fileManager.flush(), this.#esbuildRunner[Symbol.asyncDispose]() ]);
 		const drain = this.#buildCompletion === undefined ? runCleanupProcesses() : this.#buildCompletion.then(runCleanupProcesses);
 
 		this.#closePromise = this.#drainCleanup(drain, timeoutMs).finally(() => this.#fileManager.close());

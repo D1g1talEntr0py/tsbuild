@@ -42,7 +42,9 @@ export const prettyBytes = (bytes: number): { value: string; unit: string } => {
 
 /** A simple logger class with different log levels and formatting */
 export class Logger {
-	private constructor() {}
+	private constructor() {
+		throw new Error('Logger is a static class and cannot be instantiated.');
+	}
 
 	static readonly EntryType = {
 		Info: 'info',
@@ -93,6 +95,7 @@ export class Logger {
 	 */
 	static subSteps(steps: PerformanceSubStep[], grouped = false): void {
 		const visible = grouped ? steps : steps.filter(({ ms }) => ms >= 5);
+
 		if (visible.length === 0) { return }
 
 		let maxNameLength = 0;
@@ -100,7 +103,9 @@ export class Logger {
 		for (let i = 0, length = visible.length; i < length; i++) {
 			const { name, duration } = visible[i];
 			const formattedDuration = grouped ? `(${duration})` : duration;
+
 			if (name.length > maxNameLength) { maxNameLength = name.length }
+
 			if (formattedDuration.length > maxDurationLength) { maxDurationLength = formattedDuration.length }
 		}
 
@@ -108,8 +113,10 @@ export class Logger {
 			const { name, duration, result = [] } = visible[i];
 			const isLast = i === length - 1;
 			const formattedDuration = (grouped ? `(${duration})` : duration).padStart(maxDurationLength);
+
 			console.log(`${TextFormat.dim(isLast ? '  └─' : '  ├─')} ${TextFormat.bold(name.padEnd(maxNameLength))} ${grouped ? TextFormat.dim(formattedDuration) : TextFormat.cyan(formattedDuration)}`);
-			if (Array.isArray(result) && isWrittenFiles(result) && result.length > 0) { Logger.#files(result, isLast ? '     ' : '  │  ') }
+
+			if (Array.isArray(result) && isWrittenFiles(result) && result.length > 0) { Logger.#displayFileStatistics(result, isLast ? '     ' : '  │  ') }
 		}
 	}
 
@@ -164,7 +171,7 @@ export class Logger {
 			if (isWrittenFiles(data)) {
 				// Only log the message if it's not empty
 				if (message) { console.log(colorize(type, message, true)) }
-				Logger.#files(data);
+				Logger.#displayFileStatistics(data);
 			} else {
 				console.log(colorize(type, message, true), ...data);
 			}
@@ -178,7 +185,7 @@ export class Logger {
 	 * @param files - The array of WrittenFile objects to log.
 	 * @param indentation - Prefix applied before each file tree branch.
 	 */
-	static #files(files: WrittenFile[], indentation = '  ') {
+	static #displayFileStatistics(files: WrittenFile[], indentation = '  ') {
 		let maxPathLength = 0;
 		let maxValueLength = 0;
 		let maxUnitLength = 0;
@@ -189,7 +196,9 @@ export class Logger {
 			const { value, unit } = prettyBytes(size);
 
 			if (path.length > maxPathLength) { maxPathLength = path.length }
+
 			if (value.length > maxValueLength) { maxValueLength = value.length }
+
 			if (unit.length > maxUnitLength) { maxUnitLength = unit.length }
 
 			formatted.push({ path, value, unit });

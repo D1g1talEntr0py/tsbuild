@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { Paths } from '../paths';
 import { Logger } from '../logger';
 import { ConfigurationError } from '../errors';
@@ -8,13 +7,20 @@ import { nodeModulesPathPattern, typeScriptExtensionExpression } from '../consta
 import type { Plugin } from 'esbuild';
 import type { CompilerOptions } from 'typescript';
 import type { NamespacedUnregister, OnImport } from '@d1g1tal/tsnode/api';
-import type { PluginReference, PluginFactory, AbsolutePath } from '../@types';
+import type { PluginDescriptor, PluginIdentifier, PluginFactory, AbsolutePath, PackageSpecifier, PluginSpecifier } from '../@types';
 
 type PluginScope = {
 	handle: NamespacedUnregister | undefined;
 	parentURL: string;
 	compilerOptions: CompilerOptions;
 	dependencies: Set<AbsolutePath>;
+};
+
+/** A normalized plugin reference, including its resolved import target and optional local TypeScript path. */
+type PluginReference = {
+	descriptor: PluginDescriptor;
+	resolved: PackageSpecifier | AbsolutePath;
+	localTypeScriptPath: AbsolutePath | undefined;
 };
 
 /** Per-project options controlling the isolated tsnode scope used to load local TypeScript plugins. */
@@ -28,7 +34,7 @@ export type PluginScopeOptions = {
 };
 
 /** Result of resolving a project's configured plugins into esbuild Plugin objects. */
-export interface PluginResolution extends Disposable {
+export interface PluginConfiguration extends Disposable {
 	plugins: Plugin[];
 	/**
 	 * Absolute paths of local TypeScript files loaded through the tsnode plugin scope — the
@@ -59,61 +65,48 @@ function isFactory(value: unknown): value is PluginFactory {
 }
 
 /**
- * Checks whether a plugin specifier is a local TypeScript source file that needs tsnode's
- * on-demand TypeScript support. Bare/package specifiers are intentionally excluded — published
- * plugin packages are expected to ship pre-compiled JavaScript, and routing them through the
- * project's tsconfig-scoped loader could leak this project's path aliases/compiler options into
- * an unrelated package's module graph.
- * @param specifier The original plugin specifier as written in configuration
- * @param resolvedPath The specifier resolved against the project directory
- * @returns True when the plugin should be loaded through the tsnode scope
+ * Normalizes a plugin reference and caches its import target and TypeScript path, if any.
+ * @param reference The raw plugin reference from configuration
+ * @param projectDir The project root directory for resolving local paths
+ * @returns The normalized plugin reference
  */
-function isLocalTypeScriptPlugin(specifier: string, resolvedPath: string) {
-	return Paths.isPath(specifier) && typeScriptExtensionExpression.test(resolvedPath);
-}
+function resolvePluginReference(reference: PluginIdentifier, projectDir: AbsolutePath): PluginReference {
+	let specifier: PluginSpecifier;
+	let resolved: PackageSpecifier | AbsolutePath;
+	let localTypeScriptPath: AbsolutePath | undefined;
+	const rawSpecifier = typeof reference === 'string' ? reference : reference[0];
 
-/**
- * Determines whether any configured plugin reference requires the tsnode plugin scope.
- * @param plugins The array of plugins and/or plugin references
- * @param projectDir The project root directory for resolving relative paths
- * @returns True when at least one entry is a local TypeScript plugin reference
- */
-function requiresPluginScope(plugins: (Plugin | PluginReference)[], projectDir: string) {
-	for (const entry of plugins) {
-		if (isPlugin(entry)) { continue }
-
-		const specifier = typeof entry === 'string' ? entry : entry[0];
-
-		if (isLocalTypeScriptPlugin(specifier, Paths.isPath(specifier) ? resolve(projectDir, specifier) : specifier)) {
-			return true;
-		}
+	if (Paths.isPath(rawSpecifier)) {
+		specifier = rawSpecifier;
+		resolved = Paths.absolute(projectDir, specifier);
+		localTypeScriptPath = typeScriptExtensionExpression.test(resolved) ? resolved : undefined;
+	} else {
+		specifier = rawSpecifier as PackageSpecifier;
+		resolved = specifier;
 	}
 
-	return false;
+	return { descriptor: typeof reference === 'string' ? specifier : [ specifier, reference[1] ], resolved, localTypeScriptPath };
 }
 
 /**
  * Resolves a single plugin reference (string or tuple) to an esbuild Plugin.
- * @param reference The plugin reference to resolve
- * @param projectDir The project root directory for resolving relative paths
+ * @param entry The plugin reference and its pre-resolved path classification
  * @param scope The tsnode scope handle (when created) and stable parent URL for scoped imports
  * @returns The resolved esbuild Plugin
  */
-async function resolveReference(reference: PluginReference, projectDir: string, { handle, parentURL, compilerOptions, dependencies }: PluginScope) {
-	const [ specifier, options ] = typeof reference === 'string' ? [ reference, undefined ] : reference;
-	const resolved = Paths.isPath(specifier) ? resolve(projectDir, specifier) : specifier;
-	const isLocalTypeScript = isLocalTypeScriptPlugin(specifier, resolved);
+async function resolveReference({ descriptor, resolved, localTypeScriptPath }: PluginReference, { handle, parentURL, compilerOptions, dependencies }: PluginScope) {
+	const [ specifier, options ] = typeof descriptor === 'string' ? [ descriptor, undefined ] : descriptor;
 
 	let module: Record<string, unknown>;
 
 	try {
-		module = handle && isLocalTypeScript ? await handle.import(resolved, parentURL) : await import(resolved) as Record<string, unknown>;
+		module = handle && localTypeScriptPath ? await handle.import(localTypeScriptPath, parentURL) : await import(resolved) as Record<string, unknown>;
 	} catch (error) {
 		throw new ConfigurationError(`Failed to load plugin "${specifier}": ${error instanceof Error ? error.message : String(error)}`);
 	}
 
-	if (isLocalTypeScript) {
-		for (const dependency of discoverLocalDependencies(resolved as AbsolutePath, compilerOptions)) {
+	if (localTypeScriptPath !== undefined) {
+		for (const dependency of discoverLocalDependencies(localTypeScriptPath, compilerOptions)) {
 			dependencies.add(dependency);
 		}
 	}
@@ -157,8 +150,11 @@ async function resolveReference(reference: PluginReference, projectDir: string, 
  * @param scopeOptions Namespace/tsconfig path/compiler options used to isolate and resolve this project's TypeScript plugin scope
  * @returns Resolved esbuild Plugin objects, the discovered local TypeScript dependency graph, and a dispose callback
  */
-export async function resolvePlugins(plugins: (Plugin | PluginReference)[], projectDir: string, { namespace, tsconfigPath: tsconfig, compilerOptions }: PluginScopeOptions): Promise<PluginResolution> {
+export async function resolvePlugins(plugins: Array<Plugin | PluginIdentifier>, projectDir: AbsolutePath, { namespace, tsconfigPath: tsconfig, compilerOptions }: PluginScopeOptions): Promise<PluginConfiguration> {
+	let handle: NamespacedUnregister | undefined;
 	const dependencies = new Set<AbsolutePath>();
+	const resolved: Plugin[] = [];
+	const parentURL = pathToFileURL(tsconfig).href;
 	/**
 	 * Records local files loaded while the scoped plugin graph is active.
 	 * @param url Loaded module URL
@@ -167,25 +163,28 @@ export async function resolvePlugins(plugins: (Plugin | PluginReference)[], proj
 		if (!url.startsWith('file:')) { return }
 
 		const path = fileURLToPath(url);
+
 		if (!nodeModulesPathPattern.test(path)) { dependencies.add(Paths.absolute(path)) }
 	};
 
-	let handle: NamespacedUnregister | undefined;
-	if (requiresPluginScope(plugins, projectDir)) {
-		handle = (await import('@d1g1tal/tsnode/api')).register({ namespace, tsconfig, onImport });
-	}
-
-	const scope = { handle, parentURL: pathToFileURL(tsconfig).href, compilerOptions, dependencies };
-
 	try {
-		const resolved: Plugin[] = [];
 		for (const entry of plugins) {
-			resolved.push(isPlugin(entry) ? entry : await resolveReference(entry, projectDir, scope));
+			if (isPlugin(entry)) {
+				resolved.push(entry);
+				continue;
+			}
+
+			const reference = resolvePluginReference(entry, projectDir);
+
+			if (handle === undefined && reference.localTypeScriptPath !== undefined) {
+				handle = (await import('@d1g1tal/tsnode/api')).register({ namespace, tsconfig, onImport });
+			}
+
+			resolved.push(await resolveReference(reference, { handle, parentURL, compilerOptions, dependencies }));
 		}
 
 		return { plugins: resolved, dependencies, [Symbol.dispose]: () => handle?.unregister() };
 	} catch (error) {
-		// Loading failed before the caller ever receives a dispose handle. Unregister here so the scope never leaks past this function on any failure path.
 		handle?.unregister();
 		throw error;
 	}

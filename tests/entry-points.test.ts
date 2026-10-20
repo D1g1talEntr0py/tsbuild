@@ -5,9 +5,12 @@ import { Files } from 'src/files';
 import { Paths } from 'src/paths';
 import { ConfigurationError } from 'src/errors';
 import type { PackageJson } from 'src/entry-points';
+import type { RelativePath } from '../src/@types';
 
 vi.mock('node:fs', async () => (await import('memfs')).fs);
 vi.mock('node:fs/promises', async () => (await import('memfs')).fs.promises);
+
+const relativePath = (path: string): RelativePath => path as RelativePath;
 
 describe('resolveEntryPoints', () => {
 	const directory = Paths.absolute('/project');
@@ -157,18 +160,18 @@ describe('subpathToEntryName', () => {
 
 describe('normalizeEntryPoints', () => {
 	it('uses source filename stems for array entries', () => {
-		expect(normalizeEntryPoints(['./src/index.ts', './src/cli.ts'])).toEqual({
+		expect(normalizeEntryPoints([relativePath('./src/index.ts'), relativePath('./src/cli.ts')])).toEqual({
 			index: './src/index.ts',
 			cli: './src/cli.ts'
 		});
 	});
 
 	it('preserves object entry point names', () => {
-		expect(normalizeEntryPoints({ main: './src/index.ts' })).toEqual({ main: './src/index.ts' });
+		expect(normalizeEntryPoints({ main: relativePath('./src/index.ts') })).toEqual({ main: './src/index.ts' });
 	});
 
 	it('rejects duplicate source filename stems', () => {
-		expect(() => normalizeEntryPoints(['./src/first/index.ts', './src/second/index.ts'])).toThrow('Duplicate entry point stem: index');
+		expect(() => normalizeEntryPoints([relativePath('./src/first/index.ts'), relativePath('./src/second/index.ts')])).toThrow('Duplicate entry point stem: index');
 	});
 });
 

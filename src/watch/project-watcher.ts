@@ -2,7 +2,7 @@ import { Paths } from '../paths';
 import { Logger } from '../logger';
 import { defaultSourceDirectory } from '../constants';
 import { flushPerformanceLog } from '../decorators/performance-logger';
-import type { Watchr, WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
+import type { Watchr, WatchrStats, FileSystemEvent, WatchrEventHandler } from '@d1g1tal/watchr';
 import type { AbsolutePath, RelativePath, ProjectBuildConfiguration } from '../@types';
 
 export type FileSystemEventHandler = (event: FileSystemEvent, stats: WatchrStats, path: AbsolutePath, nextPath?: AbsolutePath) => void;
@@ -49,7 +49,7 @@ export class ProjectWatcher {
 
 		const { directory, include, exclude, watch, onChange } = this.#options;
 		const targets: AbsolutePath[] = [];
-		const addTarget = (candidate: AbsolutePath): void => {
+		const addTarget = (candidate: AbsolutePath) => {
 			if (targets.some((existing) => candidate === existing || candidate.startsWith(`${existing}/`))) { return }
 			targets.push(candidate);
 		};
@@ -60,28 +60,62 @@ export class ProjectWatcher {
 
 		for (const dependency of pluginDependencies) { addTarget(Paths.absolute(directory, dependency)) }
 
-		if (this.#fileWatcher !== undefined && !this.#fileWatcher.isClosed() && targets.length === this.#watchedPaths.length && targets.every((target, index) => target === this.#watchedPaths[index])) {
-			return;
+		// Reuse the existing watcher if the watched paths haven't changed.
+		if (this.#fileWatcher !== undefined && this.#fileWatcher.state !== 'closed' && targets.length === this.#watchedPaths.length && targets.every(this.#targetIsWatched, this)) {
+			return await this.#start(this.#fileWatcher);
 		}
 
 		this.#fileWatcher?.close();
-		const pathsToIgnore = [ ...exclude ?? [], ...watch.ignore ?? [] ];
-		const ignore = (path: string) => pathsToIgnore.some((pattern) => path.includes(`/${pattern}/`) || path.endsWith(`/${pattern}`));
-		// watchr reports plain strings; they are always absolute since targets are built from Paths.absolute()
-		const fileSystemEventHandler = (event: FileSystemEvent, stats: WatchrStats, path: string, nextPath?: string) => onChange(event, stats, path as AbsolutePath, nextPath as AbsolutePath | undefined);
-
-		this.#fileWatcher = new Watchr(targets, { ...watch, ignore }, fileSystemEventHandler);
+		this.#fileWatcher = undefined;
 		this.#watchedPaths = targets;
 
-		await this.#fileWatcher.readyLock;
+		if (targets.length === 0) { return }
 
+		const pathsToIgnore = [ ...exclude ?? [], ...watch.ignore ?? [] ];
+		const ignore = (path: string) => pathsToIgnore.some((pattern) => path.includes(`/${pattern}/`) || path.endsWith(`/${pattern}`));
+
+		// watchr reports plain strings; they are always absolute since targets are built from Paths.absolute()
+		const fileSystemEventHandler: WatchrEventHandler = (event) => {
+			if (event.type === 'rename' || event.type === 'renameDir') {
+				onChange(event.type, event.stats, event.from as AbsolutePath, event.to as AbsolutePath);
+			} else {
+				onChange(event.type, event.stats, event.path as AbsolutePath, undefined);
+			}
+		};
+		const { enabled: _enabled, renameTimeout = 25, ...watchOptions } = watch;
+		const fileWatcher = new Watchr(targets, { ...watchOptions, renameTimeout, ignore, handlers: { all: fileSystemEventHandler, error: (error) => Logger.error(`Watcher error: ${error.message}`) } });
+
+		this.#fileWatcher = fileWatcher;
+
+		await this.#start(fileWatcher);
+
+		// Notify that the watcher has started and is actively watching the specified targets.
 		setImmediate(() => {
-			if (this.#fileWatcher?.isClosed() ?? true) { return }
+			if (this.#closed || this.#fileWatcher !== fileWatcher || fileWatcher.state !== 'watching') { return }
 
 			flushPerformanceLog();
 			Logger.info(`Watching for changes in: ${targets.join(', ')}`);
 		});
 	}
+
+	/**
+	 * Awaits startup while allowing terminal owner shutdown to cancel it.
+	 * @param fileWatcher - The watcher whose startup is owned by this project
+	 */
+	async #start(fileWatcher: Watchr): Promise<void> {
+		try { await fileWatcher.start() } catch (error) {
+			if (this.#closed && error instanceof Error && error.message === 'watcher closed before becoming ready.') { return }
+			throw error;
+		}
+	}
+
+	/**
+	 * Checks if the given target is currently being watched at the specified index.
+	 * @param target - The target path to check.
+	 * @param index - The index at which to check the target.
+	 * @returns `true` if the target is being watched at the specified index, otherwise `false`.
+	 */
+	#targetIsWatched = (target: AbsolutePath, index: number) => target === this.#watchedPaths[index];
 
 	/** Stops the current watcher immediately and permanently disables reconciliation. */
 	close(): void {

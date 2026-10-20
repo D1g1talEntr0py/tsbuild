@@ -85,6 +85,7 @@ class PerformanceLogger implements Closable {
 		// Stage 3 decorator function
 		return function<T, A extends unknown[], R>(targetMethod: MethodFunction<T, A, R>, context: ClassMethodDecoratorContext<T, MethodFunction<T, A, R>>): MethodFunction<T, A, R> {
 			const propertyKey = String(context.name);
+
 			return function(this: T, ...args: A): R {
 				const invoke = (): R => {
 					const startTime = performance.mark(propertyKey).startTime;
@@ -131,8 +132,8 @@ class PerformanceLogger implements Closable {
 				if (process.exitCode) {
 					Logger.error(`✗ Build failed in ${TextFormat.cyan(PerformanceLogger.#formatDuration(duration))}\n`);
 				} else {
-					if (typeof overheadMs === 'number') { Logger.step(`Overhead ${TextFormat.dim(`(${PerformanceLogger.#formatDuration(overheadMs)})`)}`) }
-					Logger.step(`Completed in ${TextFormat.cyan(PerformanceLogger.#formatDuration(duration))}\n`);
+					if (typeof overheadMs === 'number') { Logger.log(`  Overhead ${TextFormat.yellow(`(${PerformanceLogger.#formatDuration(overheadMs)})`)}`, 'info') }
+					Logger.step(`Completed in ${TextFormat.blueBright(PerformanceLogger.#formatDuration(duration))}\n`);
 				}
 			} else {
 				Logger.step(`${message} ${TextFormat.dim(`(${PerformanceLogger.#formatDuration(duration)})`)}`);

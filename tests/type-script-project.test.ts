@@ -26,14 +26,12 @@ vi.mock('../src/dts/declaration-bundler', async (importOriginal) => {
 	return { ...actual, bundleDeclarations: vi.fn(actual.bundleDeclarations) };
 });
 
-// Watchr emits an 'error' event when a watched path is deleted during tmpdir cleanup.
-// Add a no-op error listener to prevent unhandled-error escalation in tests.
+// Temporary fixture removal may cause operational errors during cleanup.
 vi.mock('@d1g1tal/watchr', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@d1g1tal/watchr')>();
 	class SafeWatchr extends actual.Watchr {
 		constructor(...args: ConstructorParameters<typeof actual.Watchr>) {
-			super(...args);
-			this.on('error', () => {});
+			super(args[0], { ...args[1], handlers: { ...args[1]?.handlers, error: () => {} } });
 		}
 	}
 	return { ...actual, Watchr: SafeWatchr };
@@ -54,6 +52,7 @@ describe('TypeScriptProject', () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject();
 			cleanup = c;
 			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
+			const logSpy = vi.spyOn(Logger, 'log').mockImplementation(() => {});
 			const subStepsSpy = vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
 
 			try {
@@ -68,7 +67,8 @@ describe('TypeScriptProject', () => {
 				const duration = (label: string) => Number(/\((\d+)ms\)/.exec(messages.find(message => message.includes(label)) ?? '')?.[1]);
 				const groupedSteps = subStepsSpy.mock.calls.flatMap(([ steps ]) => steps);
 				const completed = Number(/Completed in (\d+)ms/.exec(messages.find(message => message.includes('Completed in')) ?? '')?.[1]);
-				const overhead = duration('Overhead');
+				const overheadMessage = logSpy.mock.calls.map(([ message ]) => message).find(message => message.includes('Overhead')) ?? '';
+				const overhead = Number(/\((\d+)ms\)/.exec(overheadMessage)?.[1]);
 
 				expect(initializationIndex).toBeGreaterThanOrEqual(0);
 				expect(typeCheckIndex).toBeGreaterThan(initializationIndex);
@@ -78,6 +78,7 @@ describe('TypeScriptProject', () => {
 				expect(completed).toBe(duration('Initialization') + duration('Type-checking/Emit') + duration('Bundle') + overhead);
 			} finally {
 				stepSpy.mockRestore();
+				logSpy.mockRestore();
 				subStepsSpy.mockRestore();
 			}
 		});
@@ -603,7 +604,7 @@ describe('TypeScriptProject', () => {
 			await first.build();
 			first.close();
 
-			const second = new TypeScriptProject(dir, { clearCache: true });
+			const second = new TypeScriptProject(dir, {}, { clearCache: true, force: false, watch: false, minify: false });
 			await second.build();
 			second.close();
 
@@ -841,7 +842,7 @@ describe('TypeScriptProject', () => {
 			await project1.close();
 			const output1 = await readFile(join(dir, 'dist/index.js'), 'utf8');
 
-			const project2 = new TypeScriptProject(dir, {}, { force: false, watch: false, minify: true });
+			const project2 = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: false, minify: true });
 			await project2.build();
 			await project2.close();
 			const output2 = await readFile(join(dir, 'dist/index.js'), 'utf8');
@@ -861,7 +862,7 @@ describe('TypeScriptProject', () => {
 			await project1.build();
 			project1.close();
 
-			const project2 = new TypeScriptProject(dir, {}, { force: true, watch: false, minify: false });
+			const project2 = new TypeScriptProject(dir, {}, { clearCache: false, force: true, watch: false, minify: false });
 			await project2.build();
 			project2.close();
 
@@ -1030,7 +1031,7 @@ describe('TypeScriptProject', () => {
 			});
 			cleanup = c;
 
-			const project = new TypeScriptProject(dir, { tsbuild: { clean: false } }, { force: false, watch: true, minify: false });
+			const project = new TypeScriptProject(dir, { tsbuild: { clean: false } }, { clearCache: false, force: false, watch: true, minify: false });
 			await project.build();
 			await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -1058,8 +1059,8 @@ describe('TypeScriptProject', () => {
 			let disposeContext: (() => Promise<void>) | undefined;
 			let disposed = false;
 			let build: Promise<void> | undefined;
-			const watcherListenerSpy = vi.spyOn(Watchr.prototype, 'on');
-			const project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+			const watcherStartSpy = vi.spyOn(Watchr.prototype, 'start');
+			const project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 
 			try {
 				contextMock.mockImplementation(async (options) => {
@@ -1094,7 +1095,7 @@ describe('TypeScriptProject', () => {
 
 				expect(events).toEqual([ 'disposed', 'closed' ]);
 				expect(disposeSpy).toHaveBeenCalledOnce();
-				expect(watcherListenerSpy).not.toHaveBeenCalled();
+				expect(watcherStartSpy).not.toHaveBeenCalled();
 				expect(process.exitCode).toBeUndefined();
 			} finally {
 				releaseContext.resolve();
@@ -1104,7 +1105,7 @@ describe('TypeScriptProject', () => {
 					if (!disposed) { await disposeContext?.() }
 				} finally {
 					disposeSpy?.mockRestore();
-					watcherListenerSpy.mockRestore();
+					watcherStartSpy.mockRestore();
 					contextMock.mockImplementation(originalContext);
 				}
 			}
@@ -1212,7 +1213,7 @@ describe('TypeScriptProject', () => {
 			});
 			cleanup = c;
 
-			const project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+			const project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 			await project.build();
 			const watchContext = await vi.mocked(context).mock.results.at(-1)!.value;
 			const dispose = watchContext.dispose.bind(watchContext);

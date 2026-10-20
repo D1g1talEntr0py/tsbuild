@@ -51,6 +51,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	/** Invalidates the build cache by removing the cache directory. */
 	invalidate(): void {
 		this.#invalidated = true;
+
 		try { rmSync(this.#cacheDirectoryPath, defaultCleanOptions) } catch { /* Ignore */ }
 	}
 
@@ -108,6 +109,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	async save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void> {
 		// set before await so fingerprintMatches() sees it immediately
 		this.#savedFingerprint = fingerprint;
+
 		await Files.writeCompressed(this.#cacheFilePath, { version, files: source, fingerprint, outputArtifacts: this.#expectedOutputArtifacts });
 	}
 
@@ -172,8 +174,8 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	#isPersistedCacheValid() {
 		try {
-			const cache = deserialize(brotliDecompressSync(readFileSync(this.#cacheFilePath))) as Partial<PersistedBuildCache>;
-			return cache.version === version && cache.files instanceof Map && (cache.fingerprint === undefined || typeof cache.fingerprint === 'string' || typeof cache.fingerprint === 'boolean') && (cache.outputArtifacts === undefined || Array.isArray(cache.outputArtifacts) && cache.outputArtifacts.every(isString));
+			const { version, files, fingerprint, outputArtifacts } = deserialize(brotliDecompressSync(readFileSync(this.#cacheFilePath))) as Partial<PersistedBuildCache>;
+			return version === version && files instanceof Map && (fingerprint === undefined || typeof fingerprint === 'string' || typeof fingerprint === 'boolean') && (outputArtifacts === undefined || Array.isArray(outputArtifacts) && outputArtifacts.every(isString));
 		} catch {
 			return false;
 		}

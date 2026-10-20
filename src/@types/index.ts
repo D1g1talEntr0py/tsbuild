@@ -6,23 +6,21 @@ import type { PerformanceEntry, PerformanceMeasureOptions } from 'node:perf_hook
 
 declare global {
 	interface ImportMeta {
-		env?: {
-			tsbuild_version?: string;
-		};
+		env?: { tsbuild_version?: string };
 	}
 }
 
-type Prettify<T> = T extends infer U ? { [K in keyof U]: U[K] } : never;
+type Expand<T> = T extends infer U ? { [K in keyof U]: U[K] } : never;
 type KnownKeys<T> = keyof RemoveIndex<T>;
-type MarkRequired<T, K extends keyof T> = Prettify<T & { [P in K]-?: T[P] }>;
+type MarkRequired<T, K extends keyof T> = Expand<T & { [P in K]-?: T[P] }>;
 type RemoveIndex<T> = { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
-type PrettyModify<T, R extends Partial<Record<keyof T, unknown>>> = Prettify<Omit<T, keyof R> & R>;
 type Modify<T, R extends Partial<Record<keyof T, unknown>>> = Omit<T, keyof R> & R;
+type ExpandedModify<T, R extends Partial<Record<keyof T, unknown>>> = Expand<Omit<T, keyof R> & R>;
 
 type Optional<T> = T | undefined | void;
 type OptionalReturn<T extends (...args: any[]) => any> = Optional<ReturnType<T>>;
 
-type Mutable<T> = Prettify<{
+type Mutable<T> = Expand<{
   -readonly [K in keyof T]: T[K];
 }>;
 
@@ -88,6 +86,12 @@ type RelativePath = Brand<string, 'RelativePath'>;
 /** A file system path that can be either absolute or relative */
 type Path = AbsolutePath | RelativePath;
 
+/** A module specifier loaded by Node rather than treated as a filesystem path, usually a package name. */
+type PackageSpecifier = Brand<string, 'PackageSpecifier'>;
+
+/** A plugin location: either a bare module specifier or a filesystem path. */
+type PluginSpecifier = PackageSpecifier | Path;
+
 type ConditionalPath<T extends string | Path> = T extends AbsolutePath ? AbsolutePath : T extends RelativePath ? RelativePath : Path;
 
 // JSON types
@@ -106,8 +110,8 @@ type IifeOptions = {
 	globalName?: string;
 };
 
-type WatchOptions = PrettyModify<WatchrOptions, { enabled: boolean, recursive?: boolean, persistent?: boolean, ignoreInitial?: boolean, ignore?: string[] }>;
-type WatchConfiguration = MarkRequired<WatchOptions, 'recursive' | 'persistent' | 'ignoreInitial'>;
+type WatchOptions = ExpandedModify<Omit<WatchrOptions, 'handlers'>, { enabled: boolean, recursive?: boolean, persistent?: boolean, emitInitial?: boolean, ignore?: string[] }>;
+type WatchConfiguration = MarkRequired<WatchOptions, 'recursive' | 'persistent' | 'emitInitial'>;
 type PendingFileChange = { event: FileSystemEvent; path: AbsolutePath; nextPath?: AbsolutePath; };
 type JsxRenderingMode = NonNullable<Required<TsconfigRaw>['compilerOptions']['jsx']>;
 
@@ -137,15 +141,14 @@ type BuildOptions = {
 	/** Produce additional IIFE output alongside ESM. Set to `true` for default IIFE or provide options. */
 	iife?: boolean | IifeOptions;
 	/** Custom esbuild plugins (Plugin objects via programmatic API, or string/tuple references via config) */
-	plugins?: (Plugin | PluginReference)[];
+	plugins?: Array<Plugin | PluginIdentifier>;
 };
 
-/**
- * A reference to an esbuild plugin resolved at build time.
- * - `string` — bare npm specifier or relative path to a plugin module
- * - `[string, Record<string, unknown>]` — module specifier with options passed to the factory function
- */
-type PluginReference = string | [string, Record<string, unknown>];
+/** Raw plugin reference accepted from tsconfig.json or the programmatic API. */
+type PluginIdentifier = string | [string, Record<string, unknown>];
+
+/** A plugin descriptor representing a normalized plugin reference, including its specifier and optional configuration options. */
+type PluginDescriptor = PluginSpecifier | [PluginSpecifier, Record<string, unknown>];
 
 type PluginFactory = (options: Record<string, unknown> | undefined) => unknown;
 
@@ -156,16 +159,16 @@ type CommandLineOptions = {
 	minify: boolean;
 };
 
-type BuildConfiguration = PrettyModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { force: boolean, minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
+type BuildConfiguration = ExpandedModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { force: boolean, minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
 
 type EntryPoints<out T extends Path> = Record<string, T>;
 
 /** Project build options used internally (includes values from both tsbuild config and compiler options) */
-type ProjectBuildConfiguration = Readonly<Modify<BuildConfiguration, { entryPoints?: Promise<EntryPoints<AbsolutePath>> }> & {
+type ProjectBuildConfiguration = Expand<Readonly<Modify<BuildConfiguration, { entryPoints?: Promise<EntryPoints<AbsolutePath>> }> & {
 	target: EsTarget,
 	outDir: AbsolutePath,
 	sourceMap: boolean | 'inline' | 'external' | 'both'
-}>;
+}>>;
 
 type TypeScriptCompilerOptions = Modify<Pick<CompilerOptions, KnownKeys<CompilerOptions>>, { target?: ScriptTarget }>;
 type TypeScriptCompilerConfiguration = MarkRequired<TypeScriptCompilerOptions, 'target' | 'outDir' | 'noEmit' | 'sourceMap' | 'lib' | 'incremental' | 'tsBuildInfoFile'>;
@@ -289,11 +292,14 @@ export type {
 	Path,
 	AbsolutePath,
 	RelativePath,
+	PackageSpecifier,
+	PluginSpecifier,
 	ConditionalPath,
 	LogEntryType,
 	EsTarget,
 	CachedDeclaration,
-	PluginReference,
+	PluginDescriptor,
+	PluginIdentifier,
 	PluginFactory,
 	CommandLineOptions,
 	IifeOptions,

@@ -20,7 +20,7 @@ vi.mock('node:fs/promises', async () => (await import('memfs')).fs.promises);
 
 const directory = Paths.absolute('/project');
 const entryPoints = { index: Paths.absolute(directory, 'src/index.ts') };
-const result: BuildResult = { errors: [], warnings: [], metafile: { inputs: {}, outputs: {} } };
+const result: BuildResult = { errors: [], warnings: [], outputFiles: [], metafile: { inputs: {}, outputs: {} }, mangleCache: undefined };
 const rebuild = vi.fn<BuildContext['rebuild']>();
 const dispose = vi.fn<BuildContext['dispose']>();
 const buildContext: BuildContext = { rebuild, dispose, watch: vi.fn(), serve: vi.fn(), cancel: vi.fn() };
@@ -31,7 +31,7 @@ function createRunner(overrides: Partial<ConstructorParameters<typeof EsbuildRun
 		configFilePath: Paths.absolute(directory, 'tsconfig.json'),
 		compilerOptions,
 		buildOptions: {
-			watch: { enabled: true, recursive: true, persistent: true, ignoreInitial: true },
+			watch: { enabled: true, recursive: true, persistent: true, emitInitial: false },
 			noExternal: [], bundle: true, sourceMap: false, target: 'ESNext', outDir: Paths.absolute(directory, 'dist'), splitting: true, minify: false,
 			...overrides
 		}
@@ -60,7 +60,8 @@ function outputResult(name: string, text: string): BuildResult {
 	return {
 		errors: [], warnings: [],
 		outputFiles: [{ path, text, contents: Buffer.from(text), hash: name }],
-		metafile: { inputs: {}, outputs: { [path]: { entryPoint: 'src/index.ts', inputs: {}, imports: [], exports: [], bytes: Buffer.byteLength(text) } } }
+		metafile: { inputs: {}, outputs: { [path]: { entryPoint: 'src/index.ts', inputs: {}, imports: [], exports: [], bytes: Buffer.byteLength(text) } } },
+		mangleCache: undefined
 	};
 }
 
@@ -97,7 +98,7 @@ describe('EsbuildRunner', () => {
 		expect(context).toHaveBeenCalledTimes(1);
 		expect(rebuild).toHaveBeenCalledTimes(2);
 		expect(build).not.toHaveBeenCalled();
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 	});
 
 	it('recreates the watch context when expanded environment definitions change', async () => {
@@ -111,7 +112,7 @@ describe('EsbuildRunner', () => {
 		expect(context).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(context).mock.calls[1]?.[0]?.define).toEqual({ 'import.meta.env.value': '"second"' });
 		expect(rebuild).toHaveBeenCalledTimes(2);
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 	});
 
 	it('invalidates a context once and creates a replacement with renamed entries', async () => {
@@ -123,7 +124,7 @@ describe('EsbuildRunner', () => {
 		await runner.run(renamedEntries);
 		expect(context).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(context).mock.calls[1]?.[0]?.entryPoints).toEqual(renamedEntries);
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 		expect(dispose).toHaveBeenCalledTimes(2);
 	});
 
@@ -132,12 +133,12 @@ describe('EsbuildRunner', () => {
 		await runner.run(entryPoints);
 		const pending = Promise.withResolvers<void>();
 		dispose.mockReturnValue(pending.promise);
-		const closing = runner.dispose();
-		expect(runner.dispose()).toBe(closing);
+		const closing = runner[Symbol.asyncDispose]();
+		expect(runner[Symbol.asyncDispose]()).toBe(closing);
 		expect(dispose).toHaveBeenCalledTimes(1);
 		pending.resolve();
 		await closing;
-		expect(runner.dispose()).toBe(closing);
+		expect(runner[Symbol.asyncDispose]()).toBe(closing);
 	});
 
 	it('disposes a context created during an active run after that run drains', async () => {
@@ -150,7 +151,7 @@ describe('EsbuildRunner', () => {
 		});
 		const running = runner.run(entryPoints);
 		await started.promise;
-		const closing = running.then(() => runner.dispose());
+		const closing = running.then(() => runner[Symbol.asyncDispose]());
 		expect(dispose).not.toHaveBeenCalled();
 		creating.resolve(buildContext);
 		await closing;
@@ -161,22 +162,22 @@ describe('EsbuildRunner', () => {
 		const runner = createRunner();
 		await runner.run(entryPoints);
 		dispose.mockRejectedValue(new Error('dispose failed'));
-		const closing = runner.dispose();
+		const closing = runner[Symbol.asyncDispose]();
 		await expect(closing).rejects.toThrow('dispose failed');
-		expect(runner.dispose()).toBe(closing);
+		expect(runner[Symbol.asyncDispose]()).toBe(closing);
 		expect(dispose).toHaveBeenCalledOnce();
 	});
 
 	it('can dispose without ever creating a context', async () => {
 		const runner = createRunner();
-		await runner.dispose();
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
+		await runner[Symbol.asyncDispose]();
 		expect(context).not.toHaveBeenCalled();
 		expect(dispose).not.toHaveBeenCalled();
 	});
 
 	it.each([
-		{ watch: { enabled: false, recursive: true, persistent: true, ignoreInitial: true } },
+		{ watch: { enabled: false, recursive: true, persistent: true, emitInitial: false } },
 		{ iife: false },
 		{ iife: true },
 		{ iife: { globalName: 'Library' } },
@@ -195,7 +196,7 @@ describe('EsbuildRunner', () => {
 		await runner.run(entryPoints);
 		expect(context).toHaveBeenCalledOnce();
 		expect(resolvePlugins).not.toHaveBeenCalled();
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 	});
 
 	it('forwards build and compiler options without changing esbuild defaults', async () => {
@@ -206,12 +207,12 @@ describe('EsbuildRunner', () => {
 		const runner = createRunner({ packages: 'bundle', platform: 'browser', target: 'ES2024', sourceMap: 'external', banner: { js: 'banner' }, footer: { js: 'footer' }, minify: true }, compilerOptions);
 		await runner.run(entryPoints);
 		expect(context).toHaveBeenCalledWith(expect.objectContaining({
-			format: 'esm', write: false, metafile: true, treeShaking: true, logLevel: 'warning', absWorkingDir: directory,
+			format: 'esm', write: false, metafile: true, treeShaking: true, logLevel: 'silent', absWorkingDir: directory,
 			entryPoints, bundle: true, packages: 'bundle', platform: 'browser', sourcemap: 'external', target: 'ES2024', banner: { js: 'banner' }, footer: { js: 'footer' },
 			outdir: '/project/dist', splitting: true, chunkNames: '[hash]', minify: true, supported: { decorators: false },
 			tsconfigRaw: { compilerOptions: { ...compilerOptions, jsx: 'react-jsx', target: 'ES2024' } }, define: {}
 		}));
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 	});
 
 	it('resets reusable output state even when the next rebuild writes nothing', async () => {
@@ -219,7 +220,7 @@ describe('EsbuildRunner', () => {
 		vi.mocked(context).mockImplementation(async (options) => {
 			const plugins = await setupPlugins(options);
 			rebuild.mockImplementationOnce(() => plugins.finish(outputResult('index.js', 'first')))
-				.mockImplementationOnce(() => plugins.finish({ errors: [], warnings: [] }))
+				.mockImplementationOnce(() => plugins.finish({ ...result, errors: [], warnings: [] }))
 				.mockResolvedValueOnce(result);
 			return buildContext;
 		});
@@ -227,7 +228,7 @@ describe('EsbuildRunner', () => {
 		await expect(runner.run(entryPoints)).resolves.toEqual([]);
 		await expect(runner.run(entryPoints)).resolves.toEqual([]);
 		expect(vol.readFileSync('/project/dist/index.js', 'utf8')).toBe('first');
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 	});
 
 	it('returns only the current run outputs for one-shot builds', async () => {
@@ -264,7 +265,7 @@ describe('EsbuildRunner', () => {
 		const runner = createRunner({ noExternal: [ 'bundled' ] });
 		await expect(runner.run(entryPoints)).resolves.toEqual([]);
 		expect(vi.mocked(context).mock.calls[0]?.[0]?.plugins?.map(({ name }) => name)).toEqual([ 'esbuild:external-modules', 'tsbuild:write-output' ]);
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 	});
 
 	it('does not read metadata or register external handling without noExternal', async () => {
@@ -273,7 +274,15 @@ describe('EsbuildRunner', () => {
 		await runner.run(entryPoints);
 		expect(read).not.toHaveBeenCalled();
 		expect(vi.mocked(context).mock.calls[0]?.[0]?.plugins?.map(({ name }) => name)).toEqual([ 'tsbuild:write-output' ]);
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
+	});
+
+	it('disposes the original plugin resolution object', async () => {
+		const resolution = { plugins: [], dependencies: new Set<AbsolutePath>(), [Symbol.dispose]: vi.fn() };
+		vi.mocked(resolvePlugins).mockResolvedValue(resolution);
+		await createRunner({ plugins: [ './plugin.ts' ] }).run(entryPoints);
+		expect(resolution[Symbol.dispose]).toHaveBeenCalledOnce();
+		expect(resolution[Symbol.dispose].mock.contexts).toEqual([ resolution ]);
 	});
 
 	it('keeps plugin scopes alive through async onEnd and snapshots dependencies before disposal', async () => {
@@ -397,7 +406,7 @@ describe('EsbuildRunner', () => {
 	});
 
 	it('preserves the no-metafile early return before reporting diagnostics', async () => {
-		vi.mocked(build).mockResolvedValue({ errors: [ message('error') ], warnings: [ message('warning') ] });
+		vi.mocked(build).mockResolvedValue({ errors: [ message('error') ], warnings: [ message('warning') ] } as unknown as BuildResult);
 		await expect(createRunner({ iife: false }).run(entryPoints)).resolves.toEqual([]);
 		expect(formatMessages).not.toHaveBeenCalled();
 	});
@@ -432,7 +441,7 @@ describe('EsbuildRunner', () => {
 		await expect(runner.run(entryPoints)).rejects.toThrow('rebuild failed');
 		await runner.run(entryPoints);
 		expect(context).toHaveBeenCalledTimes(2);
-		await runner.dispose();
+		await runner[Symbol.asyncDispose]();
 		expect(dispose).toHaveBeenCalledOnce();
 	});
 });

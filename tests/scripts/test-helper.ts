@@ -1,4 +1,4 @@
-import { vol, DirectoryJSON } from 'memfs';
+import { vol, type DirectoryJSON } from 'memfs';
 import { vi } from 'vitest';
 import { resolve, join, dirname, isAbsolute, extname } from 'node:path';
 import type { Loader, Plugin } from 'esbuild';

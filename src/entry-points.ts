@@ -159,6 +159,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 	if (packageJson.exports !== undefined) {
 		if (typeof packageJson.exports === 'string' || Array.isArray(packageJson.exports)) {
 			const outputPath = resolveConditionalExport(packageJson.exports);
+
 			if (outputPath !== undefined) {
 				const resolvedSourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
 				if (resolvedSourcePath) { entryPoints[stemOf(resolvedSourcePath)] = resolvedSourcePath }
@@ -195,6 +196,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 		const legacyPath = packageJson.module ?? packageJson.main;
 		if (legacyPath !== undefined) {
 			const sourcePath = outputToSourcePath(legacyPath, outDir, sourceDir);
+
 			if (sourcePath) {
 				entryPoints['index'] = sourcePath;
 				hasEntries = true;

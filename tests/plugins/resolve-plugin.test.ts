@@ -170,6 +170,17 @@ describe('resolvePlugins', () => {
 			vi.doUnmock('plain-js-plugin');
 		});
 
+		it('does not treat a bare TypeScript-looking specifier as a local plugin', async () => {
+			vi.doMock('bare-plugin.ts', () => ({ default: () => validPlugin }));
+
+			const result = await resolvePlugins([ 'bare-plugin.ts' ], projectDir, scopeOptions);
+
+			expect(result.plugins).toEqual([ validPlugin ]);
+			expect(result.dependencies.size).toBe(0);
+
+			vi.doUnmock('bare-plugin.ts');
+		});
+
 		describe('with a real local TypeScript plugin', () => {
 			let dir: string;
 			let compilerOptions: CompilerOptions;
@@ -212,6 +223,14 @@ describe('resolvePlugins', () => {
 				expect(result.plugins[0]?.name).toBe('hello-from-alias-util-default');
 
 				expect(() => result[Symbol.dispose]()).not.toThrow();
+			});
+
+			it('loads an absolute local TypeScript plugin through the scope', async () => {
+				const result = await resolvePlugins([ join(dir, 'plugin.ts') ], dir, { namespace: 'resolve-plugin-absolute-ts-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
+
+				expect(result.plugins[0]?.name).toBe('hello-from-alias-util-default');
+
+				result[Symbol.dispose]();
 			});
 
 			it('tracks the plugin and its local module graph as dependencies, excluding node_modules', async () => {

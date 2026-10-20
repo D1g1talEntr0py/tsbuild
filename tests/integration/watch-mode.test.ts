@@ -5,7 +5,10 @@ import { TypeScriptProject } from '../../src/type-script-project';
 import { processManager } from '../../src/process-manager';
 import { Files } from '../../src/files';
 import { Logger } from '../../src/logger';
+import { Paths } from '../../src/paths';
+import { ProjectWatcher } from '../../src/watch/project-watcher';
 import { TestHelper } from '../scripts/test-helper';
+import { WatchrStats, type WatchrEventHandler } from '@d1g1tal/watchr';
 import type { AbsolutePath } from '../../src/@types';
 
 // Wraps the named export so rebuild's direct call to it (proving oldProgram reuse, not a
@@ -15,38 +18,22 @@ vi.mock('typescript', async (importOriginal) => {
 	return { ...actual, createEmitAndSemanticDiagnosticsBuilderProgram: vi.fn(actual.createEmitAndSemanticDiagnosticsBuilderProgram) };
 });
 
-// When a watched path is removed (tmpdir cleanup after close(), or a rebuild's directory
-// re-scan racing teardown), watchr surfaces a "Path not found" condition two ways: as an
-// 'error' event, and as a rejection from its async watchPath() re-scan. Neither is a real
-// failure in tests. SafeWatchr handles both: a no-op 'error' listener for the event form,
-// and a guarded wrapper around the instance's watchPath() for the rejection form. watchPath
-// is TS-private, so it is wrapped at runtime; all real watching/rebuild behavior is preserved.
+// Temporary fixture removal may cause operational errors during cleanup.
 vi.mock('@d1g1tal/watchr', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@d1g1tal/watchr')>();
 	class SafeWatchr extends actual.Watchr {
 		constructor(...args: ConstructorParameters<typeof actual.Watchr>) {
-			super(...args);
-			this.on('error', () => {});
-			watchCallback = args[2] as ((event: string, stats: { size: number; modifiedTimeMs: number }, path: string, nextPath?: string) => void) | undefined;
-
-			const self = this as unknown as { watchPath: (...args: unknown[]) => Promise<unknown> };
-			const watchPath = self.watchPath.bind(self);
-			self.watchPath = async (...args: unknown[]): Promise<unknown> => {
-				try {
-					return await watchPath(...args);
-				} catch (error) {
-					// Path removed mid-watch (tmpdir cleanup) — expected teardown race in tests.
-					if (error instanceof Error && error.message.includes('Path not found')) { return }
-					throw error;
-				}
-			};
+			super(args[0], { ...args[1], handlers: { ...args[1]?.handlers, error: () => {} } });
+			const all = args[1]?.handlers?.all;
+			watchCallback = typeof all === 'function' ? all : all?.handler;
 		}
 	}
 	return { ...actual, Watchr: SafeWatchr };
 });
 
 const readUtf8 = (path: string): Promise<string> => readFile(path, 'utf8');
-let watchCallback: ((event: string, stats: { size: number; modifiedTimeMs: number }, path: string, nextPath?: string) => void) | undefined;
+let watchCallback: WatchrEventHandler<'all'> | undefined;
+const eventStats = (size: number, modifiedTimeMs: number): WatchrStats => ({ size, modifiedTimeMs } as WatchrStats);
 
 describe('TypeScriptProject - Watch Mode', () => {
 	let cleanup: (() => Promise<void>) | undefined;
@@ -55,6 +42,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 	afterEach(async () => {
 		project?.close();
 		project = undefined;
+		watchCallback = undefined;
 		processManager.close();
 		await cleanup?.();
 		cleanup = undefined;
@@ -68,7 +56,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 		await expect(stat(join(dir, '.tsbuild', 'tsconfig.tsbuildinfo'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -78,6 +66,26 @@ describe('TypeScriptProject - Watch Mode', () => {
 		expect(() => project!.close()).not.toThrow();
 	});
 
+	it('rejects watcher startup for a missing required target without a watching banner', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject();
+		cleanup = c;
+		const infoSpy = vi.spyOn(Logger, 'info');
+		const watcher = new ProjectWatcher({
+			directory: Paths.absolute(dir),
+			include: [ 'missing-source' ],
+			watch: { enabled: true, recursive: true, persistent: true, emitInitial: false },
+			onChange: vi.fn()
+		});
+		try {
+			await expect(watcher.reconcile(new Set())).rejects.toThrow();
+			await new Promise<void>(resolve => setImmediate(resolve));
+			expect(infoSpy.mock.calls.some(([ message ]) => message.startsWith('Watching for changes in:'))).toBe(false);
+		} finally {
+			watcher.close();
+			infoSpy.mockRestore();
+		}
+	});
+
 	it('triggers a rebuild when a watched source file changes', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
@@ -85,7 +93,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -112,7 +120,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -162,7 +170,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -211,12 +219,12 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
 		const infoSpy = vi.spyOn(Logger, 'info');
-		watchCallback?.('add', { size: 0, modifiedTimeMs: 0 }, join(dir, 'src/index.ts'));
+		watchCallback?.({ type: 'add', stats: WatchrStats.synthetic(false, 0), path: join(dir, 'src/index.ts'), initial: false });
 
 		await vi.waitFor(() => {
 			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
@@ -233,7 +241,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -256,7 +264,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -274,14 +282,14 @@ describe('TypeScriptProject - Watch Mode', () => {
 		const readSpy = vi.spyOn(Files, 'read').mockImplementation(async (path) => {
 			if (!duplicateQueued && path === indexPath) {
 				duplicateQueued = true;
-				watchCallback?.('change', { size: changedStats.size, modifiedTimeMs: changedStats.mtimeMs }, indexPath);
+				watchCallback?.({ type: 'change', stats: eventStats(changedStats.size, changedStats.mtimeMs), path: indexPath, initial: false });
 				await readBlocked;
 			}
 
 			return originalRead(path as AbsolutePath);
 		});
 
-		watchCallback?.('change', { size: changedStats.size, modifiedTimeMs: changedStats.mtimeMs }, indexPath);
+		watchCallback?.({ type: 'change', stats: eventStats(changedStats.size, changedStats.mtimeMs), path: indexPath, initial: false });
 		releaseRead?.();
 
 		await vi.waitFor(async () => {
@@ -302,7 +310,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -330,7 +338,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -354,9 +362,9 @@ describe('TypeScriptProject - Watch Mode', () => {
 			return originalRead(path as AbsolutePath);
 		});
 
-		watchCallback?.('change', { size: firstStats.size, modifiedTimeMs: firstStats.mtimeMs }, firstPath);
+		watchCallback?.({ type: 'change', stats: eventStats(firstStats.size, firstStats.mtimeMs), path: firstPath, initial: false });
 		await readHasStarted;
-		setImmediate(() => watchCallback?.('change', { size: secondStats.size, modifiedTimeMs: secondStats.mtimeMs }, secondPath));
+		setImmediate(() => watchCallback?.({ type: 'change', stats: eventStats(secondStats.size, secondStats.mtimeMs), path: secondPath, initial: false }));
 		releaseRead();
 
 		try {
@@ -378,7 +386,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -405,7 +413,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -432,7 +440,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -470,7 +478,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -490,11 +498,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 		const infoSpy = vi.spyOn(Logger, 'info');
 
 		// Fire the corresponding watcher events back-to-back, as VS Code / editors may emit them.
-		watchCallback?.('rename', { size: 0, modifiedTimeMs: 0 }, pathA, pathB);
-		watchCallback?.('rename', { size: 0, modifiedTimeMs: 0 }, pathB, pathC);
-		watchCallback?.('rename', { size: 0, modifiedTimeMs: 0 }, pathC, pathD);
+		watchCallback?.({ type: 'rename', stats: WatchrStats.synthetic(false, 0), from: pathA, to: pathB, initial: false });
+		watchCallback?.({ type: 'rename', stats: WatchrStats.synthetic(false, 0), from: pathB, to: pathC, initial: false });
+		watchCallback?.({ type: 'rename', stats: WatchrStats.synthetic(false, 0), from: pathC, to: pathD, initial: false });
 		const indexStats = await stat(indexPath);
-		watchCallback?.('change', { size: indexStats.size, modifiedTimeMs: indexStats.mtimeMs }, indexPath);
+		watchCallback?.({ type: 'change', stats: eventStats(indexStats.size, indexStats.mtimeMs), path: indexPath, initial: false });
 
 		await vi.waitFor(() => {
 			const rebuildLogs = infoSpy.mock.calls.filter(([ message ]) => typeof message === 'string' && message.startsWith('Rebuilding project:'));
@@ -519,7 +527,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -545,7 +553,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		infoSpy.mockRestore();
 	});
 
-	it('does not crash when watchr emits a rename without stats', async () => {
+	it('does not crash when watchr emits a rename with synthetic stats', async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: {
 				'src/index.ts': 'export const version = 1;',
@@ -555,7 +563,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -564,7 +572,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		await rename(oldPath, newPath);
 
 		expect(() => {
-			watchCallback?.('rename', undefined as unknown as { size: number; modifiedTimeMs: number }, oldPath, newPath);
+			watchCallback?.({ type: 'rename', stats: WatchrStats.synthetic(false), from: oldPath, to: newPath, initial: false });
 		}).not.toThrow();
 
 		await new Promise<void>((resolve) => setImmediate(resolve));
@@ -578,7 +586,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -609,7 +617,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -619,8 +627,8 @@ describe('TypeScriptProject - Watch Mode', () => {
 		const readSpy = vi.spyOn(Files, 'read');
 		readSpy.mockClear();
 
-		watchCallback?.('change', { size: previousStats.size + 1, modifiedTimeMs: previousStats.modifiedTimeMs + 1 }, filePath);
-		watchCallback?.('change', previousStats, filePath);
+		watchCallback?.({ type: 'change', stats: eventStats(previousStats.size + 1, previousStats.modifiedTimeMs + 1), path: filePath, initial: false });
+		watchCallback?.({ type: 'change', stats: eventStats(previousStats.size, previousStats.modifiedTimeMs), path: filePath, initial: false });
 
 		await vi.waitFor(() => {
 			const targetedReads = readSpy.mock.calls.filter(([path]) => path === filePath);

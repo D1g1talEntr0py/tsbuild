@@ -120,7 +120,7 @@ export function resolveConfiguration(directory: AbsolutePath, typeScriptOptions:
 		packages: noExternal.length > 0 ? undefined : (platform === Platform.BROWSER ? 'bundle' : 'external'),
 		platform,
 		dts: { resolve: platform !== Platform.NODE, entryPoints: bundle ? undefined : [] },
-		watch: { enabled: watch, recursive: true, ignoreInitial: true, persistent: true, renameTimeout: 150 },
+		watch: { enabled: watch, recursive: true, emitInitial: false, persistent: true, renameTimeout: 150 },
 		entryPoints: inferredEntryPoints ?? (bundle ? { [defaultEntryPoint]: defaultEntryFile } : { src: defaultSourceDirectory })
 	};
 

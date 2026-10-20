@@ -15,6 +15,11 @@ type WriteEntry = { path: AbsolutePath | string; data: WritableData; options?: W
 
 const removalBatchSize = 32;
 const writeBatchSize = 32;
+
+/**
+ * Creates a directory if it does not exist.
+ * @param directory The path to the directory to create.
+ */
 const makeDirMapper = (directory: string) => mkdir(directory, defaultDirOptions);
 
 /**
@@ -36,7 +41,7 @@ export const isWrittenFiles = (data: unknown): data is WrittenFile[] => Array.is
  * A class for handling file operations such as reading, writing, compressing, and decompressing files.
  */
 export class Files {
-	private constructor() { /* Static class - no instantiation */ }
+	private constructor() { throw new Error('Static class - no instantiation') }
 
 	/**
 	 * Check if a file exists.
@@ -63,23 +68,25 @@ export class Files {
 	 */
 	static async empty(directory: Path | string): Promise<void> {
 		let entries: string[];
-		try {
-			entries = await readdir(directory);
-		} catch (error) {
+
+		try { entries = await readdir(directory) } catch (error) {
 			// Directory doesn't exist - create it so callers can write into it
 			if (isErrnoException(error) && error.code === 'ENOENT') {
 				await mkdir(directory, defaultDirOptions);
+
 				return;
 			}
+
 			throw error;
 		}
 
 		if (entries.length === 0) { return }
 
+		const removalMapper = (entry: string) => rm(join(directory, entry), defaultCleanOptions);
+
 		// Keep removal concurrency bounded to avoid thread pool thrash on very large trees.
 		for (let i = 0, length = entries.length; i < length; i += removalBatchSize) {
-			const batch = entries.slice(i, i + removalBatchSize);
-			await Promise.all(batch.map((entry) => rm(join(directory, entry), defaultCleanOptions)));
+			await Promise.all(entries.slice(i, i + removalBatchSize).map(removalMapper));
 		}
 	}
 
@@ -278,9 +285,7 @@ export class Files {
 	 * @param filePath The file path.
 	 * @param mode Numeric mode bits (e.g. `0o755`).
 	 */
-	static async chmod(filePath: Path | string, mode: number): Promise<void> {
-		return chmod(filePath, mode);
-	}
+	static chmod: (filePath: Path | string, mode: number) => Promise<void> = chmod;
 
 	/**
 	 * Load a file and return its contents as a string.
@@ -288,7 +293,7 @@ export class Files {
 	 * @param encoding The encoding to use when reading the file. Default is UTF-8.
 	 * @returns The file contents as a string.
 	 */
-	static async read<T extends string = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
+	static read<T extends string = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
 		// Brand the result as T (e.g. JsonString<X>) — encoding is always set, so this always reads as a string
 		return readFile(this.normalizePath(filePath), { encoding }) as Promise<T>;
 	}
@@ -298,9 +303,7 @@ export class Files {
 	 * @param directoryPath The path to the directory.
 	 * @returns An array of file and directory names within the specified directory.
 	 */
-	static async readDirectory(directoryPath: Path): Promise<string[]> {
-		return readdir(directoryPath);
-	}
+	static readDirectory: (directoryPath: Path) => Promise<string[]> = readdir;
 
 	/**
 	 * Normalize a file path to an absolute path.

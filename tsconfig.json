@@ -3,7 +3,7 @@
 	"compilerOptions": {
 		"declaration": true,
 		"isolatedDeclarations": true,
-		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
 		"forceConsistentCasingInFileNames": true,
 		"noImplicitOverride": true,
 		"noImplicitReturns": true,

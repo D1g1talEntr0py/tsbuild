@@ -48,7 +48,7 @@ describe('resolveConfiguration', () => {
 		const config = resolveConfiguration(projectDirectory, {}, defaultCommandLineOptions);
 		expect(defaultCommandLineOptions).toEqual({ clearCache: false, force: false, watch: false, minify: false });
 		expect(config).toMatchObject({ directory: projectDirectory, configFilePath, clean: true, rootNames: [ '/project/src/index.ts' ], configFileParsingDiagnostics: [] });
-		expect(config.tsbuild).toMatchObject({ bundle: true, splitting: true, minify: false, force: false, sourceMap: false, noExternal: [], packages: 'external', platform: 'node', dts: { resolve: false }, entryPoints: { index: defaultEntryFile }, watch: { enabled: false, recursive: true, ignoreInitial: true, persistent: true, renameTimeout: 150 } });
+		expect(config.tsbuild).toMatchObject({ bundle: true, splitting: true, minify: false, force: false, sourceMap: false, noExternal: [], packages: 'external', platform: 'node', dts: { resolve: false }, entryPoints: { index: defaultEntryFile }, watch: { enabled: false, recursive: true, emitInitial: false, persistent: true, renameTimeout: 150 } });
 		expect(config.compilerOptions).toMatchObject({ ...compilerOptionOverrides, outDir: '/project/dist', noEmit: false, sourceMap: false, incremental: true, tsBuildInfoFile: buildInfoPath, lib: [], types: [ 'node' ] });
 		expect(config.buildCache).toBeInstanceOf(IncrementalBuildCache);
 		expect(vol.existsSync(buildInfoPath)).toBe(false);

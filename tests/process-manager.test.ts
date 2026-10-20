@@ -166,7 +166,7 @@ describe('ProcessManager', () => {
 		});
 
 		it('does not re-enter cleanup when exit fires during cleanup', () => {
-			const closable: Closable = { close: vi.fn(() => process.emit('exit', 0)) };
+			const closable: Closable = { close: vi.fn(() => { process.emit('exit', 0) }) };
 			processManager.addCloseable(closable);
 
 			process.emit('exit', 0);

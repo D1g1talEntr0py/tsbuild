@@ -26,8 +26,8 @@ const compilerOptionOverrides: CompilerOptionOverrides = {
 
 /** Maps TypeScript ScriptTarget enum to esbuild-compatible EsTarget string */
 const scriptTargetToEsTarget: Record<ScriptTarget, EsTarget> = {
-	[ScriptTarget.ES3]: 'ES6',
-	[ScriptTarget.ES5]: 'ES6',
+	[ScriptTarget.ES3]: 'ES2015',
+	[ScriptTarget.ES5]: 'ES2015',
 	[ScriptTarget.ES2015]: 'ES2015',
 	[ScriptTarget.ES2016]: 'ES2016',
 	[ScriptTarget.ES2017]: 'ES2017',

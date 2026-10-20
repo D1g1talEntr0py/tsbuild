@@ -1,5 +1,7 @@
 import type { JsonString } from './@types';
 
+type Replacer = (key: string, value: unknown) => unknown;
+
 /**
  * A utility class for JSON serialization and deserialization.
  */
@@ -10,9 +12,7 @@ export class Json {
 	 * @param transformer An optional function to transform the parsed values.
 	 * @returns The parsed object of type T.
 	 */
-	static parse<T>(jsonString: JsonString<T>, transformer?: (key: string, value: unknown) => unknown): T {
-		return JSON.parse(jsonString, transformer) as T;
-	}
+	static parse: <T>(jsonString: JsonString<T>, transformer?: Replacer) => T = JSON.parse;
 
 	/**
 	 * Serialize an object of type T into a JSON string.
@@ -21,7 +21,5 @@ export class Json {
 	 * @param space An optional string or number to use for indentation in the output JSON string.
 	 * @returns The serialized JSON string.
 	 */
-	static serialize<T>(data: T, replacer?: (key: string, value: unknown) => unknown, space?: string | number): JsonString<T> {
-		return JSON.stringify(data, replacer, space) as JsonString<T>;
-	}
+	static serialize: <T>(data: T, replacer?: Replacer, space?: string | number) => JsonString<T> = JSON.stringify as <T>(data: T, replacer?: Replacer, space?: string | number) => JsonString<T>;
 }

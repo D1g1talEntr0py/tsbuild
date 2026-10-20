@@ -4,7 +4,7 @@ import { Paths } from '../../src/paths';
 import { Logger } from '../../src/logger';
 import { flushPerformanceLog } from '../../src/decorators/performance-logger';
 import type { ProjectWatcherOptions } from '../../src/watch/project-watcher';
-import type { Watchr, WatchrStats } from '@d1g1tal/watchr';
+import type { Watchr, WatchrStats, WatchrState } from '@d1g1tal/watchr';
 
 const boundary = vi.hoisted(() => ({
 	create: vi.fn(),
@@ -12,22 +12,35 @@ const boundary = vi.hoisted(() => ({
 	instances: [] as Array<{
 		targets: ConstructorParameters<typeof Watchr>[0];
 		options: ConstructorParameters<typeof Watchr>[1];
-		callback: ConstructorParameters<typeof Watchr>[2];
-		close: ReturnType<typeof vi.fn>;
-		closed: boolean;
+		start: () => Promise<unknown>;
+		close: () => void;
+		state: WatchrState;
 	}>
 }));
 
 vi.mock('@d1g1tal/watchr', () => ({
 	Watchr: class {
-		closed = false;
-		readyLock = boundary.ready;
-		close = vi.fn(() => { this.closed = true });
-		constructor(public targets: ConstructorParameters<typeof Watchr>[0], public options: ConstructorParameters<typeof Watchr>[1], public callback: ConstructorParameters<typeof Watchr>[2]) {
-			boundary.create(targets, options, callback);
+		state: WatchrState = 'idle';
+		#cancel = Promise.withResolvers<void>();
+		start = vi.fn(async () => {
+			this.state = 'starting';
+			try {
+				await Promise.race([ boundary.ready, this.#cancel.promise ]);
+				this.state = 'watching';
+				return this;
+			} catch (error) {
+				this.state = 'closed';
+				throw error;
+			}
+		});
+		close = vi.fn(() => {
+			if (this.state === 'starting') { this.#cancel.reject(new Error('watcher closed before becoming ready.')) }
+			this.state = 'closed';
+		});
+		constructor(public targets: ConstructorParameters<typeof Watchr>[0], public options: ConstructorParameters<typeof Watchr>[1]) {
+			boundary.create(targets, options);
 			boundary.instances.push(this);
 		}
-		isClosed(): boolean { return this.closed }
 	}
 }));
 
@@ -39,7 +52,7 @@ const nextTurn = (): Promise<void> => new Promise((resolve) => setImmediate(reso
 let watcher: ProjectWatcher;
 
 function options(overrides: Partial<ProjectWatcherOptions> = {}): ProjectWatcherOptions {
-	return { directory, watch: { enabled: true, recursive: true, persistent: true, ignoreInitial: true }, onChange: vi.fn(), ...overrides };
+	return { directory, watch: { enabled: true, recursive: true, persistent: true, emitInitial: false }, onChange: vi.fn(), ...overrides };
 }
 
 beforeEach(() => {
@@ -71,7 +84,9 @@ describe('ProjectWatcher', () => {
 	it('keeps an explicitly empty include list empty', async () => {
 		watcher = new ProjectWatcher(options({ include: [] }));
 		await watcher.reconcile(dependencies());
-		expect(boundary.instances[0]!.targets).toEqual([]);
+		expect(boundary.create).not.toHaveBeenCalled();
+		await nextTurn();
+		expect(Logger.info).not.toHaveBeenCalled();
 	});
 
 	it('reuses active watchers with identical targets without another banner', async () => {
@@ -107,18 +122,18 @@ describe('ProjectWatcher', () => {
 		boundary.instances[0]!.close();
 		await watcher.reconcile(dependencies());
 		expect(boundary.create).toHaveBeenCalledTimes(2);
-		expect(boundary.instances[1]!.closed).toBe(false);
+		expect(boundary.instances[1]!.state).toBe('watching');
 	});
 
 	it('passes watch options through and matches excludes and ignores literally by path segment or suffix', async () => {
 		const configuration = options({ exclude: [ 'dist', 'nested/excluded', '**/generated' ] });
 		configuration.watch.ignore = [ 'node_modules', 'skip.ts' ];
-		configuration.watch.debounce = 17;
 		configuration.watch.renameTimeout = 23;
 		watcher = new ProjectWatcher(configuration);
 		await watcher.reconcile(dependencies());
 		const actual = boundary.instances[0]!.options;
-		expect(actual).toEqual({ ...configuration.watch, ignore: expect.any(Function) });
+		const { enabled: _enabled, ...watchOptions } = configuration.watch;
+		expect(actual).toEqual({ ...watchOptions, ignore: expect.any(Function), handlers: { all: expect.any(Function), error: expect.any(Function) } });
 		const ignore = actual!.ignore;
 		if (typeof ignore !== 'function') { throw new Error('Expected an ignore predicate') }
 		for (const path of [ '/project/dist', '/project/dist/index.ts', '/project/nested/excluded/file.ts', '/project/node_modules/lib.ts', '/project/src/skip.ts', '/project/**/generated/file.ts' ]) {
@@ -141,14 +156,17 @@ describe('ProjectWatcher', () => {
 		const onChange = vi.fn<ProjectWatcherOptions['onChange']>();
 		watcher = new ProjectWatcher(options({ onChange }));
 		await watcher.reconcile(dependencies('build/plugin.ts'));
-		const callback = boundary.instances[0]!.callback;
+		const callback = boundary.instances[0]!.options!.handlers!.all;
+		if (typeof callback !== 'function') { throw new Error('Expected an all handler') }
 		const stats = { size: 12, modifiedTimeMs: 34 } as WatchrStats;
-		callback?.('change', stats, '/project/build/plugin.ts');
-		callback?.('rename', stats, '/project/src/index.ts', '/project/src/renamed.ts');
-		callback?.('change', stats, '/project/src/untracked.ts');
+		callback({ type: 'change', stats, path: '/project/build/plugin.ts', initial: false });
+		callback({ type: 'rename', stats, from: '/project/src/index.ts', to: '/project/src/renamed.ts', initial: false });
+		callback({ type: 'renameDir', stats, from: '/project/src/old', to: '/project/src/new', initial: false });
+		callback({ type: 'change', stats, path: '/project/src/untracked.ts', initial: false });
 		expect(onChange.mock.calls).toEqual([
 			[ 'change', stats, '/project/build/plugin.ts', undefined ],
 			[ 'rename', stats, '/project/src/index.ts', '/project/src/renamed.ts' ],
+			[ 'renameDir', stats, '/project/src/old', '/project/src/new' ],
 			[ 'change', stats, '/project/src/untracked.ts', undefined ]
 		]);
 	});
@@ -217,5 +235,60 @@ describe('ProjectWatcher', () => {
 		expect(boundary.instances[0]!.close).toHaveBeenCalledTimes(1);
 		expect(flushPerformanceLog).not.toHaveBeenCalled();
 		expect(Logger.info).not.toHaveBeenCalled();
+	});
+
+	it('closes the prior watcher when plugin removal leaves no targets', async () => {
+		watcher = new ProjectWatcher(options({ include: [] }));
+		await watcher.reconcile(dependencies('build/plugin.ts'));
+		await watcher.reconcile(dependencies());
+		await nextTurn();
+		expect(boundary.create).toHaveBeenCalledTimes(1);
+		expect(boundary.instances[0]!.state).toBe('closed');
+		expect(Logger.info).not.toHaveBeenCalled();
+	});
+
+	it('suppresses queued banners for replaced watchers', async () => {
+		watcher = new ProjectWatcher(options());
+		await watcher.reconcile(dependencies());
+		await watcher.reconcile(dependencies('build/plugin.ts'));
+		await nextTurn();
+		expect(Logger.info).toHaveBeenCalledExactlyOnceWith('Watching for changes in: /project/src, /project/build/plugin.ts');
+	});
+
+	it('propagates startup failure and can replace the failed watcher', async () => {
+		const ready = Promise.withResolvers<void>();
+		boundary.ready = ready.promise;
+		watcher = new ProjectWatcher(options());
+		const reconciliation = watcher.reconcile(dependencies());
+		const assertion = expect(reconciliation).rejects.toThrow('Missing target');
+		await vi.dynamicImportSettled();
+		ready.reject(new Error('Missing target'));
+		await assertion;
+		expect(boundary.instances[0]!.state).toBe('closed');
+		boundary.ready = Promise.resolve();
+		await watcher.reconcile(dependencies());
+		expect(boundary.instances[1]!.state).toBe('watching');
+	});
+
+	it('reports operational errors through the configured handler', async () => {
+		const errorSpy = vi.spyOn(Logger, 'error').mockImplementation(() => {});
+		watcher = new ProjectWatcher(options());
+		await watcher.reconcile(dependencies());
+		const handler = boundary.instances[0]!.options!.handlers!.error;
+		if (typeof handler !== 'function') { throw new Error('Expected an error handler') }
+		handler(new Error('Native watcher failed'));
+		expect(errorSpy).toHaveBeenCalledWith('Watcher error: Native watcher failed');
+	});
+
+	it('does not hide a genuine startup failure if the owner closes before rejection is observed', async () => {
+		const ready = Promise.withResolvers<void>();
+		boundary.ready = ready.promise;
+		watcher = new ProjectWatcher(options());
+		const reconciliation = watcher.reconcile(dependencies());
+		const assertion = expect(reconciliation).rejects.toThrow('Missing target');
+		await vi.dynamicImportSettled();
+		ready.reject(new Error('Missing target'));
+		watcher.close();
+		await assertion;
 	});
 });
