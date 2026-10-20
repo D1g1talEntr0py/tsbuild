@@ -12,8 +12,8 @@ import {
 describe('constants', () => {
 	describe('toEsTarget', () => {
 		const targetMatrix: [ScriptTarget, string][] = [
-			[ScriptTarget.ES3, 'ES6'],
-			[ScriptTarget.ES5, 'ES6'],
+			[ScriptTarget.ES3, 'ES2015'],
+			[ScriptTarget.ES5, 'ES2015'],
 			[ScriptTarget.ES2015, 'ES2015'],
 			[ScriptTarget.ES2016, 'ES2016'],
 			[ScriptTarget.ES2017, 'ES2017'],

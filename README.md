@@ -76,7 +76,7 @@ yarn add -D @d1g1tal/tsbuild
 
 ### Requirements
 
-- **Node.js**: >=24.0.0
+- **Node.js**: >=24.11.1
 - **pnpm**: >=12.0.0 (for development)
 - **Operating system**: Linux/POSIX environment. Windows is not supported; use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) and run tsbuild inside the Linux environment.
 
@@ -241,7 +241,7 @@ tsbuild --minify  # or -m
 # Force a full rebuild, bypassing incremental compilation.
 tsbuild --force  # or -f
 
-# Clear the incremental build cache (.tsbuild/dts_cache.v4.br) before building.
+# Clear the incremental build cache (.tsbuild/dts_cache.v5.br) before building.
 tsbuild --clearCache  # or -c
 
 # Build with watch mode
@@ -308,7 +308,7 @@ With incremental enabled, each build maintains two caches inside a `.tsbuild/` d
 | Cache | File | What it stores |
 |-------|------|----------------|
 | TypeScript | `.tsbuild/.tsbuildinfo` | Which source files changed and their type information |
-| DTS cache | `.tsbuild/dts_cache.v4.br` | Pre-processed declaration files (Brotli-compressed) |
+| DTS cache | `.tsbuild/dts_cache.v5.br` | Pre-processed declaration files (Brotli-compressed) |
 
 On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
 
@@ -514,6 +514,10 @@ Rebuilds are content-aware: metadata-only churn (e.g. a save that doesn't change
 
 Watch mode snapshots `tsconfig.json` and `package.json` configuration when it starts. Restart tsbuild after changing either file so compiler options, entry-point inference, and build settings are reloaded.
 
+Watch mode uses Watchr 6 with initial events disabled and waits for watcher startup before reporting that it is watching. Watch targets must exist; startup failures are reported rather than silently watching the current directory. An empty source include list with no local plugin dependencies does not start a watcher.
+
+TypeScript 5 remains supported for building projects. TypeScript 5 consumers typechecking tsbuild's public API must set `skipLibCheck: true` because Watchr 6 declarations reference `esnext.temporal`; TypeScript 6 supports those declarations. tsbuild already enables `skipLibCheck` internally.
+
 ## Advanced Features
 
 ### Isolated Modules
@@ -612,7 +616,7 @@ These are used internally but can be leveraged when extending tsbuild.
 
 **TypeScriptProject** (`src/type-script-project.ts`) - Central orchestrator that manages the build lifecycle
 **FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage with optional caching support
-**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v4.br`
+**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v5.br`
 **ProcessManager** (`src/process-manager.ts`) - Global cleanup coordinator for graceful shutdowns
 
 ### Plugin System
