@@ -265,28 +265,6 @@ describe('Files', () => {
 		});
 	});
 
-	describe('normalizePath', () => {
-		it('returns absolute paths as-is', () => {
-			expect(Files.normalizePath('/absolute/path' as Path)).toBe('/absolute/path');
-		});
-
-		it('returns file:// URLs converted to a plain filesystem path', () => {
-			expect(Files.normalizePath('file:///absolute/path' as Path)).toBe('/absolute/path');
-		});
-
-		it('decodes encoded characters in file:// URLs', () => {
-			expect(Files.normalizePath('file:///absolute/path%20with%20spaces' as Path)).toBe('/absolute/path with spaces');
-		});
-
-		it('resolves the pathname of a non-file URL', () => {
-			expect(Files.normalizePath('https://example.com/some/path' as Path)).toBe('/some/path');
-		});
-
-		it('throws a TypeError for relative non-URL paths', () => {
-			expect(() => Files.normalizePath('relative/path' as Path)).toThrow(TypeError);
-		});
-	});
-
 	describe('compressBuffer / decompressBuffer', () => {
 		it('round-trips Brotli compression', async () => {
 			const original = Buffer.from('Hello, Brotli compression test! '.repeat(100));

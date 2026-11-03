@@ -1,10 +1,8 @@
-import { dirname, join } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
 import { defaultCleanOptions, defaultDirOptions, Encoding, FileExtension } from './constants';
 import { brotliDecompress, brotliCompress, constants as brotliConstants } from 'node:zlib';
 import { Paths } from './paths';
 import { isErrnoException } from './errors';
-import { fileURLToPath } from 'node:url';
 import { access, chmod, constants as fsConstants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { LanguageVariant, ScriptTarget, SyntaxKind, createScanner } from 'typescript';
 import type { WriteFileOptions } from 'node:fs';
@@ -82,7 +80,7 @@ export class Files {
 
 		if (entries.length === 0) { return }
 
-		const removalMapper = (entry: string) => rm(join(directory, entry), defaultCleanOptions);
+		const removalMapper = (entry: string) => rm(Paths.join(directory, entry), defaultCleanOptions);
 
 		// Keep removal concurrency bounded to avoid thread pool thrash on very large trees.
 		for (let i = 0, length = entries.length; i < length; i += removalBatchSize) {
@@ -98,7 +96,7 @@ export class Files {
 	 * @param options Optional write file options.
 	 */
 	static async write(filePath: Path | string, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }): Promise<void> {
-		await mkdir(dirname(filePath), defaultDirOptions);
+		await mkdir(Paths.directoryName(filePath), defaultDirOptions);
 
 		return writeFile(filePath, data, options);
 	}
@@ -120,7 +118,7 @@ export class Files {
 
 		for (const { path, data, size } of entries) {
 			writtenFiles.push({ path: Paths.relative(projectDirectory, path), size: Files.#resolveFileSize(data, size) });
-			directories.add(dirname(path));
+			directories.add(Paths.directoryName(path));
 		}
 
 		const uniqueDirectories = Array.from(directories);
@@ -295,7 +293,7 @@ export class Files {
 	 */
 	static read<T extends string = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
 		// Brand the result as T (e.g. JsonString<X>) — encoding is always set, so this always reads as a string
-		return readFile(this.normalizePath(filePath), { encoding }) as Promise<T>;
+		return readFile(Paths.normalize(filePath), { encoding }) as Promise<T>;
 	}
 
 	/**
@@ -304,23 +302,6 @@ export class Files {
 	 * @returns An array of file and directory names within the specified directory.
 	 */
 	static readDirectory: (directoryPath: Path) => Promise<string[]> = readdir;
-
-	/**
-	 * Normalize a file path to an absolute path.
-	 * @param path The file path to normalize.
-	 * @returns The normalized absolute path.
-	 * @throws {TypeError} if path is relative and not a valid URL
-	 */
-	static normalizePath(path: Path): AbsolutePath {
-		if (path.startsWith('file://')) { return fileURLToPath(path) as AbsolutePath }
-
-		if (path.startsWith('/')) { return path as AbsolutePath }
-
-		// Paths that don't start with / or file:// must be valid URLs or else they're invalid relative paths
-		if (!path.includes('://')) { throw new TypeError(`Files.normalizePath requires an absolute path, got: ${path}`) }
-
-		return new URL(path, import.meta.url).pathname as AbsolutePath;
-	}
 
 	/**
 	 * Decompress a Brotli-compressed buffer.
@@ -354,7 +335,7 @@ export class Files {
 	 */
 	static async readCompressed<T = unknown>(path: Path): Promise<T> {
 		// Deserializing arbitrary persisted state is an inherent boundary cast, like JSON.parse
-		return deserialize(await this.decompressBuffer(await readFile(this.normalizePath(path)))) as T;
+		return deserialize(await this.decompressBuffer(await readFile(Paths.normalize(path)))) as T;
 	}
 
 	/**
@@ -364,8 +345,8 @@ export class Files {
 	 * @param data The object to serialize and save.
 	 */
 	static async writeCompressed<T>(path: Path, data: T): Promise<void> {
-		const normalizedPath = this.normalizePath(path);
-		await mkdir(dirname(normalizedPath), defaultDirOptions);
+		const normalizedPath = Paths.normalize(path);
+		await mkdir(Paths.directoryName(normalizedPath), defaultDirOptions);
 
 		return writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
 	}
