@@ -3,7 +3,7 @@ import { createPatternMatcher } from '../src/pattern-matcher';
 
 describe('createPatternMatcher', () => {
 	it('matches exact string patterns', () => {
-		const matcher = createPatternMatcher(['pkg']);
+		const matcher = createPatternMatcher(['pkg'], false);
 
 		expect(matcher('pkg')).toBe(true);
 		expect(matcher('pkg/subpath')).toBe(false);
@@ -11,15 +11,22 @@ describe('createPatternMatcher', () => {
 	});
 
 	it('supports allowSubpaths for exact string patterns', () => {
-		const matcher = createPatternMatcher(['pkg'], { allowSubpaths: true });
+		const matcher = createPatternMatcher(['pkg']);
 
 		expect(matcher('pkg')).toBe(true);
 		expect(matcher('pkg/subpath')).toBe(true);
 		expect(matcher('pkg2/subpath')).toBe(false);
 	});
 
+	it('disables subpath matching when allowSubpaths is false', () => {
+		const matcher = createPatternMatcher(['pkg'], false);
+
+		expect(matcher('pkg')).toBe(true);
+		expect(matcher('pkg/subpath')).toBe(false);
+	});
+
 	it('matches scoped packages and their subpaths', () => {
-		const matcher = createPatternMatcher(['@scope/pkg'], { allowSubpaths: true });
+		const matcher = createPatternMatcher(['@scope/pkg']);
 
 		expect(matcher('@scope/pkg')).toBe(true);
 		expect(matcher('@scope/pkg/subpath')).toBe(true);
@@ -35,7 +42,7 @@ describe('createPatternMatcher', () => {
 	});
 
 	it('supports mixed string and regexp patterns', () => {
-		const matcher = createPatternMatcher(['pkg', /^@scope\/.+$/], { allowSubpaths: true });
+		const matcher = createPatternMatcher(['pkg', /^@scope\/.+$/]);
 
 		expect(matcher('pkg')).toBe(true);
 		expect(matcher('pkg/subpath')).toBe(true);

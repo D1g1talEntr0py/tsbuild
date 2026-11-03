@@ -21,5 +21,5 @@ export class Json {
 	 * @param space An optional string or number to use for indentation in the output JSON string.
 	 * @returns The serialized JSON string.
 	 */
-	static serialize: <T>(data: T, replacer?: Replacer, space?: string | number) => JsonString<T> = JSON.stringify as <T>(data: T, replacer?: Replacer, space?: string | number) => JsonString<T>;
+	static serialize = JSON.stringify as <T>(data: T, replacer?: Replacer, space?: string | number) => JsonString<T>;
 }

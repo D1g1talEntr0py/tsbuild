@@ -185,8 +185,8 @@ class DeclarationBundler {
 		}
 
 		this.#options = dtsBundleOptions;
-		this.#matchExternal = createPatternMatcher(dtsBundleOptions.external, { allowSubpaths: true });
-		this.#matchNoExternal = createPatternMatcher(dtsBundleOptions.noExternal, { allowSubpaths: true });
+		this.#matchExternal = createPatternMatcher(dtsBundleOptions.external);
+		this.#matchNoExternal = createPatternMatcher(dtsBundleOptions.noExternal);
 	}
 
 	/**
