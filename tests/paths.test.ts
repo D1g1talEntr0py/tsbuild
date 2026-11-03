@@ -8,11 +8,56 @@ vi.mock('node:fs/promises', async () => {
 import { vol } from 'memfs';
 import { Paths } from 'src/paths';
 import { resolve, relative, parse } from 'node:path';
+import type { Path } from 'src/@types';
 
 beforeEach(() => { vol.reset() });
 afterEach(() => { vol.reset() });
 
 describe('Paths', () => {
+	it('cannot be instantiated', () => {
+		expect(() => Reflect.construct(Paths, [])).toThrow('cannot be instantiated');
+	});
+
+	describe('Posix', () => {
+		it('cannot be instantiated', () => {
+			expect(() => new Paths.Posix()).toThrow('cannot be instantiated');
+		});
+
+		describe('relative', () => {
+			it('computes a relative path using POSIX separators', () => {
+				expect(Paths.Posix.relative('/data/orandea/test/aaa', '/data/orandea/impl/bbb')).toBe('../../impl/bbb');
+			});
+
+			it('returns an empty path for the same location', () => {
+				expect(Paths.Posix.relative('/foo/bar', '/foo/bar')).toBe('');
+			});
+		});
+
+		describe('normalize', () => {
+			it('removes redundant separators and resolves dot segments', () => {
+				expect(Paths.Posix.normalize('/foo//bar/../baz/.')).toBe('/foo/baz');
+			});
+
+			it('normalizes relative paths', () => {
+				expect(Paths.Posix.normalize('foo/../bar')).toBe('bar');
+			});
+		});
+
+		describe('directoryName', () => {
+			it('returns the parent directory of a nested path', () => {
+				expect(Paths.Posix.directoryName('/foo/bar/file.ts')).toBe('/foo/bar');
+			});
+
+			it('handles a trailing separator', () => {
+				expect(Paths.Posix.directoryName('/foo/bar/')).toBe('/foo');
+			});
+
+			it('returns the current directory for a filename without a parent', () => {
+				expect(Paths.Posix.directoryName('file.ts')).toBe('.');
+			});
+		});
+	});
+
 	describe('absolute', () => {
 		it('resolves a single path to absolute', () => {
 			const result = Paths.absolute('/foo/bar');
@@ -57,6 +102,28 @@ describe('Paths', () => {
 		});
 	});
 
+	describe('normalize', () => {
+		it('returns absolute paths as-is', () => {
+			expect(Paths.normalize('/absolute/path' as Path)).toBe('/absolute/path');
+		});
+
+		it('returns file:// URLs converted to a plain filesystem path', () => {
+			expect(Paths.normalize('file:///absolute/path' as Path)).toBe('/absolute/path');
+		});
+
+		it('decodes encoded characters in file:// URLs', () => {
+			expect(Paths.normalize('file:///absolute/path%20with%20spaces' as Path)).toBe('/absolute/path with spaces');
+		});
+
+		it('resolves the pathname of a non-file URL', () => {
+			expect(Paths.normalize('https://example.com/some/path' as Path)).toBe('/some/path');
+		});
+
+		it('throws a TypeError for relative non-URL paths', () => {
+			expect(() => Paths.normalize('relative/path' as Path)).toThrow(new TypeError('Paths.normalize requires an absolute path, got: relative/path'));
+		});
+	});
+
 	describe('canonical', () => {
 		it('resolves existing symlink ancestors for a non-existent target', async () => {
 			vol.mkdirSync('/protected', { recursive: true });
@@ -92,6 +159,43 @@ describe('Paths', () => {
 
 		it.each(pathMatrix)('"%s" → %s', (input, expected) => {
 			expect(Paths.isPath(input)).toBe(expected);
+		});
+	});
+
+	describe('getType', () => {
+		it.each<[string, 'file' | 'directory' | undefined]>([
+			[ '/test/file.txt', 'file' ],
+			[ '/test', 'directory' ],
+			[ '/missing', undefined ],
+			[ '/file-link', undefined ],
+			[ '/directory-link', undefined ],
+			[ '/broken-link', undefined ],
+		])('classifies %s as %s with one filesystem lookup', async (path, expected) => {
+			vol.fromJSON({ '/test/file.txt': 'content' });
+			vol.symlinkSync('/test/file.txt', '/file-link');
+			vol.symlinkSync('/test', '/directory-link');
+			vol.symlinkSync('/missing', '/broken-link');
+			const fsp = await import('node:fs/promises');
+			const lstatSpy = vi.spyOn(fsp, 'lstat');
+
+			try {
+				expect(await Paths.getType(path)).toBe(expected);
+				expect(lstatSpy).toHaveBeenCalledExactlyOnceWith(path);
+			} finally {
+				lstatSpy.mockRestore();
+			}
+		});
+
+		it('re-throws non-ENOENT errors', async () => {
+			const fsp = await import('node:fs/promises');
+			const error = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+			const lstatSpy = vi.spyOn(fsp, 'lstat').mockRejectedValueOnce(error);
+
+			try {
+				await expect(Paths.getType('/any-path')).rejects.toBe(error);
+			} finally {
+				lstatSpy.mockRestore();
+			}
 		});
 	});
 
