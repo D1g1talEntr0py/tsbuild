@@ -11,7 +11,10 @@
   },
   "methodology": {
     "description": "Repeated measurements on isolated synthetic projects under /tmp.",
-    "reported_statistics": ["median", "p95"],
+    "reported_statistics": [
+      "median",
+      "p95"
+    ],
     "performance_targets": "None; compare paired runs on the same environment and investigate repeatable regressions outside sample variability."
   },
   "measurements": [
@@ -80,9 +83,1348 @@
   },
   "instrumentation": {
     "build": "@logPerformance('Build')",
-    "type_checking_emit": "@logPerformance('Type-checking/Emit')",
+    "type_checking_emit": "@logPerformance('Compile')",
     "transpile": "@logPerformance('Transpile')",
     "bundle_declarations": "@logPerformance('Bundle Declarations')",
     "sub_steps": "not instrumented"
-  }
+  },
+  "benchmark_comparisons": [
+    {
+      "timestamp": "2026-10-28T20:48:24.731Z",
+      "node": "v26.12.1",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 215,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1196,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1020,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1404,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 463,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 152,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 548,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 490,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1027,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 289,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-10-31T10:29:10.628Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 214,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1195,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1028,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1411,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 455,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 157,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 560,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 488,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 996,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 281,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-10-31T10:48:53.009Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 214,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1216,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1042,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1433,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 447,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 158,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 558,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 499,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1028,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 279,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null,
+      "declaration_comparison": {
+        "typescript": "7.1.0-beta",
+        "scenario": "standard",
+        "reference": {
+          "files": [
+            {
+              "path": "index.d.ts",
+              "bytes": 3000,
+              "lines": 100,
+              "digest": "9b09dfbe67e573c89c7327ab674f6dc394ede2d8241a868b4962b742a44c686c"
+            },
+            {
+              "path": "module-000.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "144b14ec1066882d036e4d472a914946849e86020084a9384ac0c70d12c27b29"
+            },
+            {
+              "path": "module-001.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "ccbdfaab321fc3789a2391000a8cd55ef491efce7516bd75df0f9557a2bd2848"
+            },
+            {
+              "path": "module-002.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "9c3ced701b6be21af56b48658f381ea4c3aaa4e8827115e0531569359b685977"
+            },
+            {
+              "path": "module-003.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "df4cfbfd9d771fc5705408b8ca0b04b179d15214b1d50ddc4fe77b7723821c63"
+            },
+            {
+              "path": "module-004.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "c1d9ab2d1d30371601d37b586b8e84f65219f60a1bd4865bb13f5b57b9fb78df"
+            },
+            {
+              "path": "module-005.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "3878ff217adca075abb9693891b3947ca4cfee22a636dc9d381394ed213d8aab"
+            },
+            {
+              "path": "module-006.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "88b89f72c0638df0f049311a2a32885120367481f07d28993e8425a90abaeab9"
+            },
+            {
+              "path": "module-007.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "89a1c92a7ef46bab94306189f0464b7563a74ebe533b4245c9fbbe7cae289db6"
+            },
+            {
+              "path": "module-008.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "5f07210d9f3d82cf3b65bc27ba5f257975c640e3040c6138c119cfdf91355e50"
+            },
+            {
+              "path": "module-009.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "763ec79d1b91fc41fcc42e07e3902af5dfe2283666638082387ff64f131196fd"
+            },
+            {
+              "path": "module-010.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "32b4a088cdb1c56d36620aaadeee780bfac13c8ab333a24aa45b17a64e7f1897"
+            },
+            {
+              "path": "module-011.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "3ab46827c08d611551728f10e48ff603a24b61522d5ac86cddc339c306ed1af6"
+            },
+            {
+              "path": "module-012.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "5c03aa092a849f02d1286cdeccd8e3f32baaf58a9ba73704197d3ee4a15e9d00"
+            },
+            {
+              "path": "module-013.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "7d7f70953b4944e18c60f7448022f7b366cfcf9a518d54586ccdbc8689712f4c"
+            },
+            {
+              "path": "module-014.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "c9801917e3c69ac53359b3ef50805c970c6be7e577da7cba8d98e1c130f81418"
+            },
+            {
+              "path": "module-015.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "808caa2881263183657a064cbda35df935af50773fd2031c5ad9350f4cb4194b"
+            },
+            {
+              "path": "module-016.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "ec214d4ce9d37034caa2a3afda474996823cebcc5e1707e7a90907df8d0c8534"
+            },
+            {
+              "path": "module-017.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "36eb4e26abb500faad44d0185db3c5b9ef92cd58e1ddea074607c361b4958549"
+            },
+            {
+              "path": "module-018.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "66606699aad3b73843c7c0db9763b93f2a44da05788e5a40956d2fb473c76132"
+            },
+            {
+              "path": "module-019.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "58047e552909220074f3b607dcc6bf599dc406a4c7b2f7d5459522da3f60c06b"
+            },
+            {
+              "path": "module-020.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "c1ed291f679acc4ab4e715ed1ca5a7b8e52dbfd52df08f06f09b8bc3e2e280d3"
+            },
+            {
+              "path": "module-021.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "3134b565cd7f3bb2034ff4f2e18116f03ea61a8fa3d620d6c6eb1bd0caef4d57"
+            },
+            {
+              "path": "module-022.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "23d281bf1156764198cf91e69ef3952946e728693aa309ccc98a2307c122b2a3"
+            },
+            {
+              "path": "module-023.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "e224509e65af331fad908e7fb3ebe8aeda6db566b1d15641be46d42384f20776"
+            },
+            {
+              "path": "module-024.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "9f53c47f0085bd889557be042489c58742a270132401556318239b39a87a4cc3"
+            },
+            {
+              "path": "module-025.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "d7900eddf07a9bdb53a91f1223fd42f152307a06d04f3fed2632055c6600c6e4"
+            },
+            {
+              "path": "module-026.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "e2cb321b30503fdc6597c0b39c1a7f609a948a552268421394b1542fdb106f46"
+            },
+            {
+              "path": "module-027.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "633af6c984990fa5b7b231176f3f256b9eb4818f93391f9499f8033abef1f05e"
+            },
+            {
+              "path": "module-028.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "357461f13fc1597d75e6bc1d835c876d3a4c9623ccef0e01e6f4269176f76442"
+            },
+            {
+              "path": "module-029.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "2b5166cc121bb3f3aee34d564280775ccb4d498ffc43ab371fbf1567a73e8fdb"
+            },
+            {
+              "path": "module-030.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "a1a4506a84d96124d0d1322cba44bf3af7b66e6b6bc53a5d62c0661fc40be832"
+            },
+            {
+              "path": "module-031.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "d4a6337221edc4551ccd88ac47ae4ace67bf745123e180077c3a54194707e1bf"
+            },
+            {
+              "path": "module-032.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "13690209aed1c97e2a6b2c116b77d427e85b22cce595f2d096c26f08d40e1782"
+            },
+            {
+              "path": "module-033.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "3b3d9dfe4e65baad222f399537f33c46dc0a4824180d570c2f5131e84d3f38fd"
+            },
+            {
+              "path": "module-034.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "5d4ef5a5ad681c20549ed0277b4c4cf18005413241ba6305e50d472e5777ea79"
+            },
+            {
+              "path": "module-035.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "03059795adaf92d1cf1a3e2cf0d93fbd99ad0e477afd24590cf5cdea36c123f7"
+            },
+            {
+              "path": "module-036.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "59c20734ffee355905ecb6fb0d1d373f020751ceb4f048ad7d0186df6509d336"
+            },
+            {
+              "path": "module-037.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "7c2b9cff6db9b9cd1349e2fe73a94c670f59587d9cda2ffaf650d11c7c2a0e37"
+            },
+            {
+              "path": "module-038.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "89999fcf8690a69f7fb2c3672023d4cdac5bf8a3f33b2d856c3562c8b06b66a5"
+            },
+            {
+              "path": "module-039.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "0b73a4b20e9d823933e650e020b7904d4dc1d3f2d0656da44f0b5e50cfa216f9"
+            },
+            {
+              "path": "module-040.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "2ca984b4ba357f01d7b55c1ed291b40dd4c904d63109c09fa360b298a40b1154"
+            },
+            {
+              "path": "module-041.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "5cfe1bfc79ea41f34c68548e4ce48861c625fc80e83fa21759c3e13f5c5e8e1c"
+            },
+            {
+              "path": "module-042.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "2bf3ea2caebf232e796aebc7e1d5765467d20e45fbedb4fc50a101fca2c5b43a"
+            },
+            {
+              "path": "module-043.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "10c102ced3e13b7f3a23b2659f20b43232424274760113c7f18ea9e684a60a6d"
+            },
+            {
+              "path": "module-044.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "1929275002a162656b269c974ae347f2e182249623eefedb7800d50ae580cf93"
+            },
+            {
+              "path": "module-045.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "ff56d298da7203295168f1c070440019c456aa214574450e36591d92d0904a7b"
+            },
+            {
+              "path": "module-046.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "51bfa0326eaadfa6552a84dfbe9cc3c0ecb7a1a70e663ec3470535606ea3a1b8"
+            },
+            {
+              "path": "module-047.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "7f9dbac0af2e1dfdc9b4d0ccfe121bf4fc7d718f54caea90953978ef5f9d7abd"
+            },
+            {
+              "path": "module-048.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "d55998d0cbc871ce28c9ad2fef5d856b99bf4a92c73528b72547e4ba0d2d4ccb"
+            },
+            {
+              "path": "module-049.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "8423316822a83baf35a687eebea2168cb8242e4ef6544792e0a3eb05eab81364"
+            },
+            {
+              "path": "module-050.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "70fdc52dd9acb6532fac03cba4e1b66c2c8bb50a89dbbecb04be86b85cd6729f"
+            },
+            {
+              "path": "module-051.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "4f9e7e26304c49843dd7af9499c704063f50e4bab6519906ac9706de931eb46b"
+            },
+            {
+              "path": "module-052.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "c99899c61035c1a54910f15088acc6cd35d0896a144ac086cb1e8815781601cb"
+            },
+            {
+              "path": "module-053.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "56ee65015298d7166b262a4ea698e5fdd3df902553e1ea9c89cf3dc044ee432c"
+            },
+            {
+              "path": "module-054.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "75df27c0622ff9b779067d3a186f2fcda95ae8267a117ad9126b2355e6c4bb76"
+            },
+            {
+              "path": "module-055.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "b79b13bedefcfc318e09eae4d5ee8ca611feafddc09ad83079b1718627e6ee45"
+            },
+            {
+              "path": "module-056.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "e169a3f62c12606ca6c3679a9758c2d2fd63d16c0defa942949616df6ce4eaf7"
+            },
+            {
+              "path": "module-057.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "978c0dc61b9a526a22ffb1b6a4212ad40a9aafa341b3b88114cd649b4f31ab83"
+            },
+            {
+              "path": "module-058.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "6ca4af96675c4708606d4d5941d789a0e256ead1ae59c36d7481f0cdddbf92a6"
+            },
+            {
+              "path": "module-059.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "74a078f57779b715ab7304ff08199d8f68a2f82c28cef5d3b3e7da74bcbb5df1"
+            },
+            {
+              "path": "module-060.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "48adba96cfac5cfcb127ee1f9fe85f6558fa6171df8d2000faa6e0d11b31f2e4"
+            },
+            {
+              "path": "module-061.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "21e846cd764805b4f64bb23a2d6d4f827d73a21a1fbe5d003a8b60c801cbeb0c"
+            },
+            {
+              "path": "module-062.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "ada6a0e589d40cc3da3632265bcaed3893162d76bdeaaff1ed5316f83d9fc26f"
+            },
+            {
+              "path": "module-063.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "7852765fc2ece8ee11877bf7037c2fc9e4193165ed34017a01dc18dc41b9cc23"
+            },
+            {
+              "path": "module-064.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "6256c08730374550d13230e53c5b27f51dd2448c2de2199b740076264c151871"
+            },
+            {
+              "path": "module-065.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "522a43c7af3678f6edcd6bdd4a4192d06e6dc690e4f4c0fdbfc9d30aea803298"
+            },
+            {
+              "path": "module-066.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "9cac2054a65ccab75770f05a2cd999192038573ce020622c1fbe12649bafcc27"
+            },
+            {
+              "path": "module-067.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "0060fd69bcf8ae744c87b7bfd8c94ec5906d980690d62957368c5c9673c5f253"
+            },
+            {
+              "path": "module-068.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "dae163d710c9d7e78af22397b0ac5c6e65e27de7b065c7d3909711d5ea75cb8f"
+            },
+            {
+              "path": "module-069.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "0ead6a86ce1b60b3696b2824b0f218a34315d7497fdc321c1a309f933c63449c"
+            },
+            {
+              "path": "module-070.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "92e1f94f0898078809d3498040e49b98082757d0ee6aa6efe9844acdf2253c4f"
+            },
+            {
+              "path": "module-071.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "335f675f25ffcd7402a82580536b097bfafff6a8b7c543e6cb6c0dd482fb919f"
+            },
+            {
+              "path": "module-072.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "400a099f9acd77f39cfb81aa6057c6525e86fb568217078eaa3a156dbf390fe1"
+            },
+            {
+              "path": "module-073.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "f8a8aa00d6772392925f37352b1cfd95dbe6b2930c1c1ed2a400a8af43429ee8"
+            },
+            {
+              "path": "module-074.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "2ea2e0a712149d8464e801ede187d149d240d3fd1636f8638d987b9c91499b8a"
+            },
+            {
+              "path": "module-075.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "8d1c5ae4e0ead04ce91c9d90fd578e248297b561090fc54b7d650cb39fb624e3"
+            },
+            {
+              "path": "module-076.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "526fa3ecef7e82f5c4937202afff36eb48d6b933644a8e88d876ee4f7954dd2f"
+            },
+            {
+              "path": "module-077.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "f65fbb9e333fac8e51b583f1fd014ed76343c6578e9cc2a736df2f2a553b3ba4"
+            },
+            {
+              "path": "module-078.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "6efedf7b66c98b4e40bc68dfaf71de1cd33a459815c8c691df75d97eae3581f0"
+            },
+            {
+              "path": "module-079.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "4e2c43c73fec21b76566d9a358005b4e4922a925d4bb91547af534a670641b43"
+            },
+            {
+              "path": "module-080.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "8d6bc42d3b912fa79023ffd7e27b0555e83e1f6fe62b9ffa449d9b975efabeee"
+            },
+            {
+              "path": "module-081.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "374f2283eb812c4fbcc49964c22e353187691ae12f2159332da41a40d3831523"
+            },
+            {
+              "path": "module-082.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "bc4f0f781bb7860ee718d47017cf1c245f6368b60dc50df2de99ec42a8b29cfa"
+            },
+            {
+              "path": "module-083.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "44228e8df6c751fae2b81f7be410e42277633a14ba5842b8d6fe198d58426082"
+            },
+            {
+              "path": "module-084.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "4097556cae1aaf56774e4f27fe16adef2ce094eb61fae413d1292399535b132f"
+            },
+            {
+              "path": "module-085.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "dea728817bd01dd0288c61d2ae005ec2ccdbb1bdb164bc7f7bab6514c9d5c560"
+            },
+            {
+              "path": "module-086.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "7646e1674ac3be378a00cd65afaf92cdbaaa8b77f365b4106460349341e94816"
+            },
+            {
+              "path": "module-087.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "ae6d16bc14f0f25026932cdc06c477650e4a2090f5530c62de9bfd6ac65ee8ac"
+            },
+            {
+              "path": "module-088.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "b96438ade9d7efac6bd20b83cc573d2a33fe3b667f4d78577b3d8bb1f18ff879"
+            },
+            {
+              "path": "module-089.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "ade10b879e023d4592756b44087fcc67345360b5dcce9d6cc226615378daa08f"
+            },
+            {
+              "path": "module-090.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "a16f2398bf50b47be06fe71941835e068e184858caa53135cb050f566b25cdac"
+            },
+            {
+              "path": "module-091.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "00cce7be019ccdd5946feb9e0a34c79ef6e1ee5567db197ad9353653cb9c0926"
+            },
+            {
+              "path": "module-092.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "5561710890ee0395cce31b98298f08ab6613f69a8d255050880462f6c5a8ac09"
+            },
+            {
+              "path": "module-093.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "0f60ba0fefcffdd7071ad4a29707d67b34486f763f0d5a334c91cf1e4ceb3f4f"
+            },
+            {
+              "path": "module-094.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "e065c46f8c053c685fa9516c1102a3a2dec1420926e3a81423ee00e069d6bacd"
+            },
+            {
+              "path": "module-095.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "31586b880341d4a9577a8e2a996ea2503321168ed628556e13955f9d36388f82"
+            },
+            {
+              "path": "module-096.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "bf841b5fd211f4fc8cdb918aa5454756fe0cf15d4c1bd9f07568dfc687c0829a"
+            },
+            {
+              "path": "module-097.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "a9866ca6ccde7dc433cfd77601d7ad9700ca5861f04dd8bf01eb034cb7dea82a"
+            },
+            {
+              "path": "module-098.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "a50b3c8156616be8432c45032bfdc8052e44906912e2f7fe35a972c312d7e985"
+            },
+            {
+              "path": "module-099.d.ts",
+              "bytes": 710,
+              "lines": 19,
+              "digest": "7d4aa235a65692e9f04ff3b4d20f9d95f26df08e4c23255f2762d339375f2cc7"
+            }
+          ],
+          "bytes": 74000,
+          "lines": 2000,
+          "digest": "2e75d855a8c23d9778f2429a8338ab928fe0dd827e4f4ef926526519542c04fc"
+        },
+        "tools": [
+          {
+            "tool": "tsbuild",
+            "files": [
+              {
+                "path": "index.d.ts",
+                "bytes": 73326,
+                "lines": 2002,
+                "digest": "72407072c1ffc32cb6c27f5530eec0f167303249b33b5adf4753b5f672564d5e"
+              }
+            ],
+            "bytes": 73326,
+            "lines": 2002,
+            "digest": "613126d6de051aa3425e83de23e6ca2e182c2b4436ef9b67605d08d423a58470",
+            "valid": true,
+            "checkedEntries": 1,
+            "expectedExports": 500,
+            "missingExports": [],
+            "extraExports": [],
+            "errors": []
+          },
+          {
+            "tool": "tsup --dts",
+            "files": [
+              {
+                "path": "index.d.ts",
+                "bytes": 73811,
+                "lines": 2001,
+                "digest": "a07469353bdce45d41694e6e42885b9014a2c986ff4bab825e1cc8510dab3ce4"
+              }
+            ],
+            "bytes": 73811,
+            "lines": 2001,
+            "digest": "8fe92bd45eb109813f1cf744b51b84d8f2ebf8c913af6fd38bf2cf61fc1bd272",
+            "valid": true,
+            "checkedEntries": 1,
+            "expectedExports": 500,
+            "missingExports": [],
+            "extraExports": [],
+            "errors": []
+          },
+          {
+            "tool": "tsdown --dts",
+            "files": [
+              {
+                "path": "index.d.mts",
+                "bytes": 71810,
+                "lines": 1901,
+                "digest": "0502eb6d6b9d3c49ca7d7013a3b98bf6d20bdc467eea0ab9dd5c145e2464eb9a"
+              }
+            ],
+            "bytes": 71810,
+            "lines": 1901,
+            "digest": "fc2930c2059dc71c957ee52355ad47695990b0ffaf2cc82fe17c3513cb54ba28",
+            "valid": true,
+            "checkedEntries": 1,
+            "expectedExports": 500,
+            "missingExports": [],
+            "extraExports": [],
+            "errors": []
+          },
+          {
+            "tool": "unbuild --dts",
+            "files": [
+              {
+                "path": "index.d.mts",
+                "bytes": 73327,
+                "lines": 2002,
+                "digest": "79c4b0f198d58a38a0200e6ec2e0003de5d4e2ecd1787ba1b5e4869efb320be8"
+              },
+              {
+                "path": "index.d.ts",
+                "bytes": 73327,
+                "lines": 2002,
+                "digest": "79c4b0f198d58a38a0200e6ec2e0003de5d4e2ecd1787ba1b5e4869efb320be8"
+              }
+            ],
+            "bytes": 146654,
+            "lines": 4004,
+            "digest": "67887f21f2fcee3624086fd497c5593897892bd1a4060502a67471b10b8a3ca2",
+            "valid": true,
+            "checkedEntries": 2,
+            "expectedExports": 1000,
+            "missingExports": [],
+            "extraExports": [],
+            "errors": []
+          },
+          {
+            "tool": "obuild --dts",
+            "files": [
+              {
+                "path": "index.d.mts",
+                "bytes": 69599,
+                "lines": 1900,
+                "digest": "f9a5993c1c188348f1eb2d025bcc9bcb4926e9e0a366de0b114310296ebb02bd"
+              }
+            ],
+            "bytes": 69599,
+            "lines": 1900,
+            "digest": "b886655979b01fb335ee79ca756042e454b08efd2a7ea1459cd9f778fb377dbe",
+            "valid": true,
+            "checkedEntries": 1,
+            "expectedExports": 500,
+            "missingExports": [],
+            "extraExports": [],
+            "errors": []
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-11-01T11:50:47.810Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 212,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1199,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1037,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1417,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 447,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 154,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 553,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 493,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1007,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 273,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-11-01T12:05:28.383Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 214,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1187,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1050,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1449,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 487,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 165,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 589,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 547,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1024,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 284,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-11-01T13:16:49.009Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 215,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1193,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1063,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1417,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 469,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 157,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 571,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 486,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1023,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 284,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    }
+  ]
 }

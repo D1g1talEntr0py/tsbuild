@@ -2,21 +2,21 @@
 /**
  * Performance benchmark for tsbuild — bundler comparison.
  *
- * Goal: validate that tsbuild is the fastest *full-feature* TypeScript bundler
- * (bundle + type-check + dts) on a representative project.
+ * Goal: compare full-feature TypeScript build tools (bundle + type-check + dts)
+ * across representative project sizes and entry-point layouts.
  *
  * Methodology:
- *   - One synthetic project (100 files), built fresh by each tool — no incremental.
+ *   - Isolated synthetic projects cover small, standard, large, and multi-entry workloads.
  *   - mitata drives sampling (adaptive — fewer samples for slower benches).
- *   - Each iteration resets caches/outputs in the (untimed) setup phase of an
+ *   - Each iteration resets caches/outputs in the (un-timed) setup phase of an
  *     iterator-style bench, so only the build subprocess wall-time is measured.
  *   - Competing tools are fetched on-demand via `pnpm dlx --package=X@version`
  *     (no project deps added; cache is pre-warmed before benchmarking).
  *
  * Build modes (groups):
  *   1. FULL    — bundle + type-check + dts (the headline)
- *   2. NO-DTS  — bundle + type-check, no declarations (tsbuild always does full,
- *                annotated as such — gives a "what does dts cost?" reference)
+ *   2. NO-DTS  — bundle + type-check, no declarations on the standard workload
+ *                (gives a "what does dts cost?" reference)
  *
  * After mitata runs we also print:
  *   - tsbuild self-reported phase breakdown (the inner cost of the full build)
@@ -24,26 +24,47 @@
  *
  * Usage:
  *   pnpm bench
+ *   pnpm bench -- --scenario=multi-entry
+ *   pnpm bench -- --scenario=small --smoke --no-save
  */
 import { bench, group, summary, barplot, run as mitataRun } from 'mitata';
 import { execSync, spawnSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync, mkdirSync, existsSync, readdirSync, statSync, mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 // ─── Configuration ─────────────────────────────────────────────────────────────
 
-const SYNTHETIC_FILE_COUNT = 100;
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const tsbuildBin = join(root, 'dist/tsbuild.js');
 const ansiPattern = /\x1b\[[0-9;]*m/g;
 
+/** Synthetic workload shared by the performance and declaration-quality runners. */
+export interface BenchmarkScenario {
+	id: string;
+	label: string;
+	moduleCount: number;
+	entryCount: number;
+}
+
+/** Available synthetic project sizes. */
+export const SCENARIOS: BenchmarkScenario[] = [
+	{ id: 'small', label: 'small · 10 modules', moduleCount: 10, entryCount: 1 },
+	{ id: 'standard', label: 'standard · 100 modules', moduleCount: 100, entryCount: 1 },
+	{ id: 'large', label: 'large · 500 modules', moduleCount: 500, entryCount: 1 },
+	{ id: 'multi-entry', label: 'multi-entry · 100 modules / 10 entries', moduleCount: 100, entryCount: 10 },
+];
+
 /** Pinned versions for comparison tools (fetched on-demand via pnpm dlx). */
-const TOOL_VERSIONS = {
+export const TOOL_VERSIONS = {
 	typescript: '5.7.2',
 	tsup: '8.5.1',
 	tsdown: '0.22.0',
+	unbuild: '3.6.1',
+	unbuildTypescript: '5.9.2',
+	obuild: '0.4.45',
+	obuildTypescript: '7.0.2',
 } as const;
 
 // ─── ANSI helpers ──────────────────────────────────────────────────────────────
@@ -104,6 +125,23 @@ function rmrf(path: string): void { rmSync(path, { recursive: true, force: true 
 
 function fmtKb(bytes: number): string { return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function containsDeclarationFile(dir: string): boolean {
+	const stack = [ dir ];
+	while (stack.length > 0) {
+		const current = stack.pop()!;
+		for (const entry of readdirSync(current)) {
+			const path = join(current, entry);
+			if (statSync(path).isDirectory()) stack.push(path);
+			else if (/\.d\.(?:ts|mts|cts)$/.test(entry)) return true;
+		}
+	}
+	return false;
+}
+
 // ─── Synthetic project ─────────────────────────────────────────────────────────
 
 /**
@@ -111,9 +149,10 @@ function fmtKb(bytes: number): string { return bytes < 1024 * 1024 ? `${(bytes /
  * + an index that re-exports them. Tsconfig uses `module: ESNext` + `moduleResolution: Bundler`
  * with extensionless imports for universal compatibility across all tested tools.
  */
-function generateSyntheticProject(dir: string, moduleCount: number): void {
+export function generateSyntheticProject(dir: string, scenario: BenchmarkScenario): void {
+	rmrf(join(dir, 'src'));
 	mkdirSync(join(dir, 'src'), { recursive: true });
-	for (let i = 0; i < moduleCount; i++) {
+	for (let i = 0; i < scenario.moduleCount; i++) {
 		const id = String(i).padStart(3, '0');
 		const importPrev = i > 0 ? `import { value${String(i - 1).padStart(3, '0')} } from './module-${String(i - 1).padStart(3, '0')}';\n` : '';
 		const useImport = i > 0 ? `+ value${String(i - 1).padStart(3, '0')}` : '';
@@ -151,11 +190,20 @@ export function transform${id}<T>(values: ReadonlyArray<T>, mapper: (v: T) => T)
 		writeFileSync(join(dir, 'src', `module-${id}.ts`), source);
 	}
 
-	let indexSource = '';
-	for (let i = 0; i < moduleCount; i++) {
-		indexSource += `export * from './module-${String(i).padStart(3, '0')}';\n`;
+	const entryPoints: Record<string, string> = {};
+	const entryNames: string[] = [];
+	for (let entryIndex = 0; entryIndex < scenario.entryCount; entryIndex++) {
+		const name = scenario.entryCount === 1 ? 'index' : `entry-${String(entryIndex).padStart(2, '0')}`;
+		const start = Math.floor(entryIndex * scenario.moduleCount / scenario.entryCount);
+		const end = Math.floor((entryIndex + 1) * scenario.moduleCount / scenario.entryCount);
+		let entrySource = '';
+		for (let i = start; i < end; i++) {
+			entrySource += `export * from './module-${String(i).padStart(3, '0')}';\n`;
+		}
+		writeFileSync(join(dir, 'src', `${name}.ts`), entrySource);
+		entryPoints[name] = `./src/${name}.ts`;
+		entryNames.push(name);
 	}
-	writeFileSync(join(dir, 'src/index.ts'), indexSource);
 
 	writeFileSync(join(dir, 'package.json'), JSON.stringify({
 		name: 'synthetic-bench',
@@ -181,52 +229,70 @@ export function transform${id}<T>(values: ReadonlyArray<T>, mapper: (v: T) => T)
 		},
 		include: [ 'src/**/*' ],
 		tsbuild: {
-			entryPoints: { index: './src/index.ts' },
+			entryPoints,
 		},
 	}, null, 2));
+
+	writeFileSync(join(dir, 'build.config.mjs'), `export default {
+	entries: ${JSON.stringify(entryNames.map(name => `./src/${name}`))},
+	outDir: 'dist-unbuild-full',
+	declaration: true,
+};
+`);
 }
 
 // ─── Tool runners ──────────────────────────────────────────────────────────────
 
-interface Tool {
+/** Build runner configuration, shared without executing the performance benchmark on import. */
+export interface Tool {
 	id: string;
 	outDir: string;
 	dtsEnabled?: boolean;
 	typeCheck?: boolean;
+	typescriptVersion?: string;
+	configure?: (dir: string, scenario: BenchmarkScenario) => void;
 	/** Build the command line. Returns [cmd, args]. */
-	command: (dir: string) => [ string, string[] ];
+	command: (dir: string, scenario: BenchmarkScenario) => [ string, string[] ];
 }
 
-function typeCheckCommand(dir: string): [ string, string[] ] {
+function entryFiles(dir: string, scenario: BenchmarkScenario): string[] {
+	return Array.from({ length: scenario.entryCount }, (_, index) => {
+		const name = scenario.entryCount === 1 ? 'index' : `entry-${String(index).padStart(2, '0')}`;
+		return join(dir, 'src', `${name}.ts`);
+	});
+}
+
+function typeCheckCommand(tool: Tool, dir: string): [ string, string[] ] {
 	return [
 		'pnpm',
 		dlxArgs(
-			[ `typescript@${TOOL_VERSIONS.typescript}` ],
+			[ `typescript@${tool.typescriptVersion ?? TOOL_VERSIONS.typescript}` ],
 			'tsc',
 			[ '--noEmit', '-p', join(dir, 'tsconfig.json') ],
 		),
 	];
 }
 
-function toolCommands(tool: Tool, dir: string): Array<[ string, string[] ]> {
+function toolCommands(tool: Tool, dir: string, scenario: BenchmarkScenario): Array<[ string, string[] ]> {
 	const commands: Array<[ string, string[] ]> = [];
-	if (tool.typeCheck) { commands.push(typeCheckCommand(dir)) }
-	commands.push(tool.command(dir));
+	if (tool.typeCheck) { commands.push(typeCheckCommand(tool, dir)) }
+	commands.push(tool.command(dir, scenario));
 	return commands;
 }
 
-function execTool(tool: Tool, cwd: string): void {
-	const commands = toolCommands(tool, cwd);
+/** Executes a configured tool, surfacing subprocess failures. */
+export function execTool(tool: Tool, cwd: string, scenario: BenchmarkScenario): void {
+	const commands = toolCommands(tool, cwd, scenario);
 	for (let i = 0; i < commands.length; i++) {
 		const [ cmd, args ] = commands[i];
 		exec(cmd, args, cwd);
 	}
 }
 
-function execToolWithOutput(tool: Tool, cwd: string): { stdout: string; stderr: string } {
+function execToolWithOutput(tool: Tool, cwd: string, scenario: BenchmarkScenario): { stdout: string; stderr: string } {
 	let stdout = '';
 	let stderr = '';
-	const commands = toolCommands(tool, cwd);
+	const commands = toolCommands(tool, cwd, scenario);
 	for (let i = 0; i < commands.length; i++) {
 		const [ cmd, args ] = commands[i];
 		const result = execWithOutput(cmd, args, cwd);
@@ -264,14 +330,15 @@ function tsupTool(opts: { dts: boolean }): Tool {
 	return {
 		id: opts.dts ? 'tsup --dts' : 'tsup',
 		outDir,
+		dtsEnabled: opts.dts,
 		typeCheck: true,
-		command: dir => [
+		command: (dir, scenario) => [
 			'pnpm',
 			dlxArgs(
 				[ `tsup@${TOOL_VERSIONS.tsup}`, `typescript@${TOOL_VERSIONS.typescript}` ],
 				'tsup',
 				[
-					join(dir, 'src/index.ts'),
+					...entryFiles(dir, scenario),
 					'--format', 'esm',
 					...dtsFlag,
 					'--out-dir', join(dir, outDir),
@@ -290,14 +357,15 @@ function tsdownTool(opts: { dts: boolean }): Tool {
 	return {
 		id: opts.dts ? 'tsdown --dts' : 'tsdown',
 		outDir,
+		dtsEnabled: opts.dts,
 		typeCheck: true,
-		command: dir => [
+		command: (dir, scenario) => [
 			'pnpm',
 			dlxArgs(
 				[ `tsdown@${TOOL_VERSIONS.tsdown}`, `typescript@${TOOL_VERSIONS.typescript}` ],
 				'tsdown',
 				[
-					join(dir, 'src/index.ts'),
+					...entryFiles(dir, scenario),
 					'--format', 'esm',
 					...dtsFlag,
 					'--out-dir', join(dir, outDir),
@@ -310,6 +378,104 @@ function tsdownTool(opts: { dts: boolean }): Tool {
 	};
 }
 
+function unbuildTool(opts: { dts: boolean }): Tool {
+	const outDir = opts.dts ? 'dist-unbuild-full' : 'dist-unbuild-nodts';
+	return {
+		id: opts.dts ? 'unbuild --dts' : 'unbuild',
+		outDir,
+		dtsEnabled: opts.dts,
+		typeCheck: true,
+		typescriptVersion: TOOL_VERSIONS.unbuildTypescript,
+		configure: (dir, scenario) => {
+			const entryNames = Array.from({ length: scenario.entryCount }, (_, index) =>
+				scenario.entryCount === 1 ? 'index' : `entry-${String(index).padStart(2, '0')}`,
+			);
+			writeFileSync(join(dir, 'build.config.mjs'), `export default {
+	entries: ${JSON.stringify(entryNames.map(name => `./src/${name}`))},
+	outDir: '${outDir}',
+	declaration: ${opts.dts},
+};
+`);
+		},
+		command: () => [
+			'pnpm',
+			dlxArgs(
+				[ `unbuild@${TOOL_VERSIONS.unbuild}`, `typescript@${TOOL_VERSIONS.unbuildTypescript}` ],
+				'unbuild',
+				[],
+			),
+		],
+	};
+}
+
+function obuildTool(opts: { dts: boolean }): Tool {
+	const outDir = opts.dts ? 'dist-obuild-full' : 'dist-obuild-nodts';
+	return {
+		id: opts.dts ? 'obuild --dts' : 'obuild',
+		outDir,
+		dtsEnabled: opts.dts,
+		typeCheck: true,
+		typescriptVersion: TOOL_VERSIONS.obuildTypescript,
+		configure: (dir, scenario) => {
+			const entryNames = Array.from({ length: scenario.entryCount }, (_, index) =>
+				scenario.entryCount === 1 ? 'index' : `entry-${String(index).padStart(2, '0')}`,
+			);
+			const inputs = entryNames.map(name => `./src/${name}.ts`);
+			writeFileSync(join(dir, 'build.config.mjs'), `export default {
+	entries: [{
+		type: 'bundle',
+		input: ${JSON.stringify(inputs)},
+		outDir: '${outDir}',
+		dts: ${opts.dts},
+		license: false,
+	}],
+};
+`);
+		},
+		command: () => [
+			'pnpm',
+			dlxArgs(
+				[ `obuild@${TOOL_VERSIONS.obuild}`, `typescript@${TOOL_VERSIONS.obuildTypescript}` ],
+				'obuild',
+				[],
+			),
+		],
+	};
+}
+
+/** Returns pinned comparison tools with or without declaration emission. */
+export function toolsForMode(dts: boolean): Tool[] {
+	return [
+		tsbuildTool({ dts }),
+		tsupTool({ dts }),
+		tsdownTool({ dts }),
+		unbuildTool({ dts }),
+		obuildTool({ dts }),
+	];
+}
+
+function verifyToolOutput(dir: string, tool: Tool, scenario: BenchmarkScenario): void {
+	const outputDir = join(dir, tool.outDir);
+	if (!existsSync(outputDir) || dirSizeBytes(outputDir) === 0) {
+		throw new Error(`${tool.id} produced no output for the '${scenario.id}' scenario.`);
+	}
+	if (tool.dtsEnabled !== containsDeclarationFile(outputDir)) {
+		throw new Error(`${tool.id} produced unexpected declaration output for the '${scenario.id}' scenario.`);
+	}
+}
+
+function runSmoke(dir: string, scenarios: BenchmarkScenario[]): void {
+	for (const scenario of scenarios) {
+		for (const tool of [...toolsForMode(true), ...toolsForMode(false)]) {
+			generateSyntheticProject(dir, scenario);
+			resetForTool(dir, tool, scenario);
+			execTool(tool, dir, scenario);
+			verifyToolOutput(dir, tool, scenario);
+			console.log(`  ${scenario.id.padEnd(12)} ${tool.id} ✓`);
+		}
+	}
+}
+
 // ─── Reset helpers ─────────────────────────────────────────────────────────────
 
 function setSyntheticDeclarationOption(dir: string, enabled: boolean): void {
@@ -320,26 +486,31 @@ function setSyntheticDeclarationOption(dir: string, enabled: boolean): void {
 	writeFileSync(path, JSON.stringify(tsconfig, null, 2));
 }
 
-function resetForTool(dir: string, tool: Tool): void {
-	if (tool.id.startsWith('tsbuild')) { setSyntheticDeclarationOption(dir, tool.dtsEnabled !== false); }
+/** Resets only the isolated fixture's output and cache and applies tool configuration. */
+export function resetForTool(dir: string, tool: Tool, scenario: BenchmarkScenario): void {
+	setSyntheticDeclarationOption(dir, tool.dtsEnabled !== false);
+	tool.configure?.(dir, scenario);
 	rmrf(join(dir, tool.outDir));
 	if (tool.id.startsWith('tsbuild')) rmrf(join(dir, '.tsbuild'));
 }
 
 // ─── Pre-warm pnpm dlx cache ───────────────────────────────────────────────────
 
-function prewarm(): void {
+function prewarm(dir: string, scenario: BenchmarkScenario): void {
 	console.log(`${c.dim}Pre-warming pnpm dlx cache (one-time download)…${c.reset}`);
-	const targets: Array<{ label: string; packages: string[]; cmd: string }> = [
+	const targets: Array<{ label: string; packages: string[]; cmd: string; args?: string[]; cwd?: string }> = [
 		{ label: 'typescript', packages: [ `typescript@${TOOL_VERSIONS.typescript}` ], cmd: 'tsc' },
 		{ label: 'tsup', packages: [ `tsup@${TOOL_VERSIONS.tsup}`, `typescript@${TOOL_VERSIONS.typescript}` ], cmd: 'tsup' },
 		{ label: 'tsdown', packages: [ `tsdown@${TOOL_VERSIONS.tsdown}`, `typescript@${TOOL_VERSIONS.typescript}` ], cmd: 'tsdown' },
+		{ label: 'unbuild', packages: [ `unbuild@${TOOL_VERSIONS.unbuild}`, `typescript@${TOOL_VERSIONS.unbuildTypescript}` ], cmd: 'unbuild' },
+		{ label: 'obuild', packages: [ `obuild@${TOOL_VERSIONS.obuild}`, `typescript@${TOOL_VERSIONS.obuildTypescript}` ], cmd: 'obuild', args: [], cwd: dir },
 	];
+	obuildTool({ dts: true }).configure?.(dir, scenario);
 	for (let i = 0; i < targets.length; i++) {
 		const t = targets[i];
 		process.stdout.write(`  ${t.label.padEnd(10)} `);
 		try {
-			execFileSync('pnpm', dlxArgs(t.packages, t.cmd, [ '--version' ]), { stdio: 'pipe', encoding: 'utf8' });
+			execFileSync('pnpm', dlxArgs(t.packages, t.cmd, t.args ?? [ '--version' ]), { cwd: t.cwd, stdio: 'pipe', encoding: 'utf8' });
 			console.log(`${c.green}✓${c.reset}`);
 		} catch (err) {
 			console.log(`${c.red}✗${c.reset}\n${(err as Error).message}`);
@@ -350,10 +521,11 @@ function prewarm(): void {
 
 // ─── Build dist if missing ─────────────────────────────────────────────────────
 
-function ensureTsbuildBuilt(): void {
-	if (existsSync(tsbuildBin)) return;
+/** Builds the local CLI if missing, or when a runner requires fresh source output. */
+export function ensureTsbuildBuilt(force = false): void {
+	if (!force && existsSync(tsbuildBin)) return;
 	console.log(`${c.dim}Building tsbuild…${c.reset}`);
-	execSync('pnpm build', { cwd: root, stdio: 'inherit' });
+	execSync(force ? 'pnpm build --force' : 'pnpm build', { cwd: root, stdio: 'inherit' });
 }
 
 // ─── tsbuild phase parsing ─────────────────────────────────────────────────────
@@ -373,19 +545,22 @@ function parseTsbuildPhases(combinedOutput: string): Phases | undefined {
 
 interface Artifact {
 	id: string;
+	scenario: string;
 	wallMs: number;
 	outputBytes: number;
 	phases?: Phases;
 }
 
-function measureArtifact(dir: string, tool: Tool): Artifact {
-	resetForTool(dir, tool);
+function measureArtifact(dir: string, tool: Tool, scenario: BenchmarkScenario): Artifact {
+	generateSyntheticProject(dir, scenario);
+	resetForTool(dir, tool, scenario);
 	const start = performance.now();
-	const r = execToolWithOutput(tool, dir);
+	const r = execToolWithOutput(tool, dir, scenario);
 	const wallMs = performance.now() - start;
 	const outputBytes = dirSizeBytes(join(dir, tool.outDir));
+	verifyToolOutput(dir, tool, scenario);
 	const phases = tool.id.startsWith('tsbuild') ? parseTsbuildPhases(r.stdout + r.stderr) : undefined;
-	return { id: tool.id, wallMs, outputBytes, phases };
+	return { id: tool.id, scenario: scenario.id, wallMs, outputBytes, phases };
 }
 
 // ─── Custom rendering ──────────────────────────────────────────────────────────
@@ -394,7 +569,7 @@ function renderArtifactTable(title: string, artifacts: Artifact[]): void {
 	const sorted = artifacts.slice().sort((a, b) => a.outputBytes - b.outputBytes);
 	const longestId = sorted.reduce((m, a) => Math.max(m, a.id.length), 0);
 	console.log(`\n${c.bold}${c.cyan}┌─ ${title}${c.reset}`);
-	console.log(`${c.dim}│  one cold build per tool · output size${c.reset}`);
+	console.log(`${c.dim}│  one cold build per tool · output size · ${sorted[0]?.scenario ?? 'no samples'} scenario${c.reset}`);
 	console.log(`${c.dim}│${c.reset}`);
 	for (let i = 0; i < sorted.length; i++) {
 		const a = sorted[i];
@@ -428,106 +603,142 @@ function renderPhaseBreakdown(phases: Phases): void {
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
-ensureTsbuildBuilt();
+async function main(): Promise<void> {
+	const requestedScenario = process.argv.slice(2).find(arg => arg.startsWith('--scenario='))?.slice('--scenario='.length);
+	const smoke = process.argv.includes('--smoke');
+	const saveResults = !process.argv.includes('--no-save');
+	const selectedScenarios = requestedScenario === undefined
+		? SCENARIOS
+		: SCENARIOS.filter(scenario => scenario.id === requestedScenario);
+	if (selectedScenarios.length === 0) {
+		throw new Error(`Unknown scenario '${requestedScenario}'. Choose one of: ${SCENARIOS.map(scenario => scenario.id).join(', ')}`);
+	}
 
-const dir = mkdtempSync(join(tmpdir(), 'tsbuild-bench-'));
-console.log(`${c.bold}tsbuild — bundler benchmark${c.reset}  ${c.dim}(synthetic project, ${SYNTHETIC_FILE_COUNT} files)${c.reset}`);
-console.log(`${c.dim}project: ${dir}${c.reset}\n`);
+	ensureTsbuildBuilt();
 
-generateSyntheticProject(dir, SYNTHETIC_FILE_COUNT);
-prewarm();
+	const dir = mkdtempSync(join(tmpdir(), 'tsbuild-bench-'));
+	const fullArtifacts: Artifact[] = [];
+	const noDtsArtifacts: Artifact[] = [];
+	const artifactScenario = selectedScenarios.find(scenario => scenario.id === 'standard') ?? selectedScenarios[0];
 
-// Define tools per mode.
-const fullTools: Tool[] = [ tsbuildTool({ dts: true }), tsupTool({ dts: true }), tsdownTool({ dts: true }) ];
-const noDtsTools: Tool[] = [ tsbuildTool({ dts: false }), tsupTool({ dts: false }), tsdownTool({ dts: false }) ];
-
-// Mitata runs — measure pure wall-time across many samples.
-console.log(`\n${c.bold}Running mitata bench (adaptive sampling — slower benches get fewer samples)…${c.reset}\n`);
-
-barplot(() => {
-	summary(() => {
-		group('Full · type-check + bundle + dts', () => {
-			for (let i = 0; i < fullTools.length; i++) {
-				const tool = fullTools[i];
-				bench(tool.id, function* () {
-					resetForTool(dir, tool);
-					yield () => { execTool(tool, dir); };
-				});
-			}
-		});
-	});
-});
-
-barplot(() => {
-	summary(() => {
-		group('No dts · type-check + bundle', () => {
-			for (let i = 0; i < noDtsTools.length; i++) {
-				const tool = noDtsTools[i];
-				bench(tool.id, function* () {
-					resetForTool(dir, tool);
-					yield () => { execTool(tool, dir); };
-				});
-			}
-		});
-	});
-});
-
-await mitataRun({ colors: useColor });
-
-// Per-tool single-shot cold build for artifact size + phase breakdown.
-console.log(`\n${c.dim}Capturing cold-build artifact metadata (output size) — separate from timing.${c.reset}`);
-const fullArtifacts: Artifact[] = [];
-for (let i = 0; i < fullTools.length; i++) {
-	process.stdout.write(`  ${fullTools[i].id.padEnd(16)} `);
 	try {
-		const a = measureArtifact(dir, fullTools[i]);
-		fullArtifacts.push(a);
-		console.log(`${c.green}✓${c.reset} ${fmtKb(a.outputBytes)}`);
-	} catch (err) {
-		console.log(`${c.red}✗ ${(err as Error).message}${c.reset}`);
+		console.log(`${c.bold}tsbuild — bundler benchmark${c.reset}  ${c.dim}(${selectedScenarios.map(scenario => scenario.label).join('; ')})${c.reset}`);
+		console.log(`${c.dim}project: ${dir}${c.reset}\n`);
+
+		generateSyntheticProject(dir, artifactScenario);
+		prewarm(dir, artifactScenario);
+
+		if (smoke) {
+			console.log(`${c.yellow}Smoke run: one build per tool and scenario; timing results are not collected.${c.reset}`);
+			runSmoke(dir, selectedScenarios);
+			console.log(`\n${c.dim}Skipped saving results (--smoke).${c.reset}`);
+		} else {
+			console.log(`\n${c.bold}Running mitata bench (adaptive sampling — slower benches get fewer samples)…${c.reset}\n`);
+
+			barplot(() => {
+				summary(() => {
+					for (const scenario of selectedScenarios) {
+						const fullTools = toolsForMode(true);
+						group(`Full · ${scenario.label} · type-check + bundle + dts`, () => {
+							for (const tool of fullTools) {
+								bench(tool.id, function* () {
+									generateSyntheticProject(dir, scenario);
+									resetForTool(dir, tool, scenario);
+									yield () => { execTool(tool, dir, scenario); };
+								});
+							}
+						});
+					}
+
+					const noDtsTools = toolsForMode(false);
+					group(`No dts · ${artifactScenario.label} · type-check + bundle`, () => {
+						for (const tool of noDtsTools) {
+							bench(tool.id, function* () {
+								generateSyntheticProject(dir, artifactScenario);
+								resetForTool(dir, tool, artifactScenario);
+								yield () => { execTool(tool, dir, artifactScenario); };
+							});
+						}
+					});
+				});
+			});
+
+			await mitataRun({ colors: useColor });
+
+			console.log(`\n${c.dim}Capturing cold-build artifact metadata (output size) — separate from timing.${c.reset}`);
+			const fullTools = toolsForMode(true);
+			for (const tool of fullTools) {
+				process.stdout.write(`  ${tool.id.padEnd(24)} `);
+				const artifact = measureArtifact(dir, tool, artifactScenario);
+				fullArtifacts.push(artifact);
+				console.log(`${c.green}✓${c.reset} ${fmtKb(artifact.outputBytes)}`);
+			}
+
+			const noDtsTools = toolsForMode(false);
+			for (const tool of noDtsTools) {
+				process.stdout.write(`  ${tool.id.padEnd(24)} `);
+				const artifact = measureArtifact(dir, tool, artifactScenario);
+				noDtsArtifacts.push(artifact);
+				console.log(`${c.green}✓${c.reset} ${fmtKb(artifact.outputBytes)}`);
+			}
+
+			renderArtifactTable('Full build artifacts · type-check + bundle + dts', fullArtifacts);
+			renderArtifactTable('No-dts build artifacts', noDtsArtifacts);
+
+			const tsbuildArtifact = fullArtifacts.find(artifact => artifact.id === 'tsbuild');
+			if (tsbuildArtifact?.phases) renderPhaseBreakdown(tsbuildArtifact.phases);
+
+			if (saveResults) {
+				const measurementsPath = join(root, 'docs/performance-measurements.json');
+				const record = {
+					timestamp: new Date().toISOString(),
+					node: process.version,
+					platform: process.platform,
+					scenarios: selectedScenarios.map(scenario => ({
+						id: scenario.id,
+						modules: scenario.moduleCount,
+						entries: scenario.entryCount,
+					})),
+					full: fullArtifacts.map(artifact => ({
+						scenario: artifact.scenario,
+						tool: artifact.id,
+						wall_ms: Math.round(artifact.wallMs),
+						peak_rss_mb: null,
+						output_kb: artifact.outputBytes / 1024,
+					})),
+					no_dts: noDtsArtifacts.map(artifact => ({
+						scenario: artifact.scenario,
+						tool: artifact.id,
+						wall_ms: Math.round(artifact.wallMs),
+						peak_rss_mb: null,
+						output_kb: artifact.outputBytes / 1024,
+					})),
+					tsbuild_phases: tsbuildArtifact?.phases ?? null,
+				};
+				const existing = existsSync(measurementsPath)
+					? JSON.parse(readFileSync(measurementsPath, 'utf8')) as unknown
+					: [];
+				if (!Array.isArray(existing) && !isRecord(existing)) {
+					throw new Error(`Unexpected benchmark results format in ${measurementsPath}.`);
+				}
+				const updated = Array.isArray(existing)
+					? [ ...existing, record ]
+					: {
+						...existing,
+						benchmark_comparisons: [
+							...(Array.isArray(existing['benchmark_comparisons']) ? existing['benchmark_comparisons'] : []),
+							record,
+						],
+					};
+				writeFileSync(measurementsPath, JSON.stringify(updated, null, 2));
+				console.log(`\n${c.dim}Appended record to docs/performance-measurements.json${c.reset}`);
+			} else {
+				console.log(`\n${c.dim}Skipped saving results (--no-save).${c.reset}`);
+			}
+		}
+	} finally {
+		rmrf(dir);
 	}
 }
 
-const noDtsArtifacts: Artifact[] = [];
-for (let i = 0; i < noDtsTools.length; i++) {
-	const tool = noDtsTools[i];
-	process.stdout.write(`  ${tool.id.padEnd(16)} `);
-	try {
-		const a = measureArtifact(dir, tool);
-		noDtsArtifacts.push(a);
-		console.log(`${c.green}✓${c.reset} ${fmtKb(a.outputBytes)}`);
-	} catch (err) {
-		console.log(`${c.red}✗ ${(err as Error).message}${c.reset}`);
-	}
-}
-
-renderArtifactTable('Full build artifacts · type-check + bundle + dts', fullArtifacts);
-renderArtifactTable('No-dts build artifacts', noDtsArtifacts);
-
-// Phase breakdown for tsbuild (from the full artifact measurement).
-const tsbuildArtifact = fullArtifacts.find(a => a.id === 'tsbuild');
-if (tsbuildArtifact?.phases) renderPhaseBreakdown(tsbuildArtifact.phases);
-
-// Persist a summary to docs.
-const measurementsPath = join(root, 'docs/performance-measurements.json');
-const record = {
-	timestamp: new Date().toISOString(),
-	node: process.version,
-	platform: process.platform,
-	synthetic_file_count: SYNTHETIC_FILE_COUNT,
-	full: fullArtifacts.map(a => ({ tool: a.id, wall_ms: Math.round(a.wallMs), peak_rss_mb: null, output_kb: a.outputBytes / 1024 })),
-	no_dts: noDtsArtifacts.map(a => ({ tool: a.id, wall_ms: Math.round(a.wallMs), peak_rss_mb: null, output_kb: a.outputBytes / 1024 })),
-	tsbuild_phases: tsbuildArtifact?.phases ?? null,
-};
-try {
-	const existing = existsSync(measurementsPath) ? JSON.parse(readFileSync(measurementsPath, 'utf8')) as unknown[] : [];
-	if (Array.isArray(existing)) {
-		existing.push(record);
-		writeFileSync(measurementsPath, JSON.stringify(existing, null, 2));
-		console.log(`\n${c.dim}Appended record to docs/performance-measurements.json${c.reset}`);
-	}
-} catch {
-	writeFileSync(measurementsPath, JSON.stringify([ record ], null, 2));
-}
-
-rmrf(dir);
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) { await main() }

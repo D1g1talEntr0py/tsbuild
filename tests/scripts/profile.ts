@@ -35,24 +35,23 @@ function report(name: string, milliseconds: number): void {
 
 async function measureRuntimePrimitives(): Promise<void> {
 	const typescriptStart = performance.now();
-	const typescript = await import('typescript');
+	const { API, EmitOnly } = await import('typescript/sync');
 	report('typescript import', performance.now() - typescriptStart);
 
+	using api = measure('start native API', () => new API({ cwd: root }));
 	const configPath = join(root, 'tsconfig.json');
-	const config = typescript.readConfigFile(configPath, typescript.sys.readFile);
-	if (config.error !== undefined) { throw new Error(typescript.flattenDiagnosticMessageText(config.error.messageText, '\n')) }
-	const parsed = typescript.parseJsonConfigFileContent(config.config, typescript.sys, root);
+	const config = api.readConfigFile(configPath) as { config?: object; error?: { text: string } };
+	if (config.error !== undefined) { throw new Error(config.error.text) }
+	const parsed = api.parseJsonConfigFileContent(config.config ?? {}, { configFileName: configPath });
 
-	const program = measure('create program', () => typescript.createProgram({ rootNames: parsed.fileNames, options: parsed.options }));
+	using snapshot = measure('create snapshot', () => api.createSnapshot({ createPrograms: [ { rootFiles: parsed.fileNames, compilerOptions: parsed.options } ] }));
+	const program = snapshot.operation.createdPrograms[0];
 	measure('semantic diagnostics', () => program.getSemanticDiagnostics());
-	measure('declaration emit', () => program.emit(undefined, () => {}, undefined, true));
-
-	if (typescript.transpileDeclaration !== undefined) {
-		const source = readFileSync(join(root, 'src/logger.ts'), 'utf8');
-		measure('transpileDeclaration', () => typescript.transpileDeclaration(source, { compilerOptions: parsed.options }));
-	} else {
-		console.log('transpileDeclaration: unavailable');
-	}
+	measure('declaration emit', () => program.emitToString(EmitOnly.OnlyDts));
+	measure('parse source file', () => {
+		using retained = api.createSourceFile(join(root, 'src/logger.ts'), readFileSync(join(root, 'src/logger.ts'), 'utf8'));
+		return retained.sourceFile;
+	});
 }
 
 function measureCachePrimitives(): void {
