@@ -102,7 +102,7 @@ async function resolveReference({ descriptor, resolved, localTypeScriptPath }: P
 	try {
 		module = handle && localTypeScriptPath ? await handle.import(localTypeScriptPath, parentURL) : await import(resolved) as Record<string, unknown>;
 	} catch (error) {
-		throw new ConfigurationError(`Failed to load plugin "${specifier}": ${error instanceof Error ? error.message : String(error)}`);
+		throw new ConfigurationError(`Failed to load plugin "${specifier}": ${Error.isError(error) ? error.message : String(error)}`);
 	}
 
 	if (localTypeScriptPath !== undefined) {

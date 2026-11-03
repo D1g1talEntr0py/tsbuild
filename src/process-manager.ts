@@ -51,7 +51,7 @@ class ProcessManager implements Closable {
 		if (this.#hasHandledExit) { return }
 
 		this.#hasHandledExit = true;
-		void this.#runCleanup().catch((error: unknown) => Logger.error('Error while closing resource...', error instanceof Error ? error.stack : error));
+		void this.#runCleanup().catch((error: unknown) => Logger.error('Error while closing resource...', Error.isError(error) ? error.stack : error));
 	};
 
 	/** Handles SIGINT (ctrl+c) */
@@ -60,7 +60,7 @@ class ProcessManager implements Closable {
 
 		// Exit gracefully so package managers do not report a failed lifecycle when a user stops watch mode.
 		void Promise.race([ this.#runCleanup(), delay(sigintCleanupTimeoutMs, undefined, { ref: false }) ]).then(() => process.exit(0), (error: unknown) => {
-			Logger.error('Error while closing resource...', error instanceof Error ? error.stack : error);
+			Logger.error('Error while closing resource...', Error.isError(error) ? error.stack : error);
 			process.exit(0);
 		});
 	};
@@ -75,10 +75,10 @@ class ProcessManager implements Closable {
 			try {
 				const result = closeable.close();
 				if (result !== undefined) {
-					pendingCleanup.push(result.catch((error: unknown) => Logger.error(`Error while closing ${resourceLabel}...`, error instanceof Error ? error.stack : error)));
+					pendingCleanup.push(result.catch((error: unknown) => Logger.error(`Error while closing ${resourceLabel}...`, Error.isError(error) ? error.stack : error)));
 				}
 			} catch (error) {
-				Logger.error(`Error while closing ${resourceLabel}...`, error instanceof Error ? error.stack : error);
+				Logger.error(`Error while closing ${resourceLabel}...`, Error.isError(error) ? error.stack : error);
 			}
 		}
 

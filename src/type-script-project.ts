@@ -380,7 +380,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 				if (failure?.status === 'rejected') { throw failure.reason }
 			}
 		} catch (error) {
-			const failure = error instanceof Error ? error : new Error(String(error));
+			const failure = Error.isError(error) ? error : new Error(String(error));
 			Logger.error(`Graceful shutdown failed: ${failure.message}`);
 			throw failure;
 		}
