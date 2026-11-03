@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { Paths } from '../paths';
 import { ConfigurationError } from '../errors';
+import { everyOutputInBatches } from './output-checks';
 import type { AbsolutePath } from '../@types';
 
 const isSameOrDescendant = (parent: AbsolutePath, candidate: AbsolutePath) => {
@@ -10,11 +11,11 @@ const isSameOrDescendant = (parent: AbsolutePath, candidate: AbsolutePath) => {
 
 /** Validates output paths with project-lifetime caching of canonical protected inputs. */
 export class OutputPathValidator {
+	#protectedPaths?: Promise<readonly AbsolutePath[]>;
 	readonly #directory: AbsolutePath;
 	readonly #configFilePath: AbsolutePath;
 	readonly #rootNames: readonly string[];
 	readonly #outDir: AbsolutePath;
-	#protectedPaths?: Promise<readonly AbsolutePath[]>;
 
 	/**
 	 * Creates a validator without performing filesystem operations.
@@ -58,11 +59,12 @@ export class OutputPathValidator {
 	 * @throws {ConfigurationError} when a declaration path escapes the output directory
 	 */
 	async validateDeclarationPaths(outputDirectory: AbsolutePath, entryNames: readonly string[]): Promise<void> {
-		for (const name of entryNames) {
+		await everyOutputInBatches(entryNames, async (name) => {
 			const declarationPath = await Paths.canonical(Paths.join(outputDirectory, `${name}.d.ts`));
 			if (declarationPath === outputDirectory || !isSameOrDescendant(outputDirectory, declarationPath)) {
 				throw new ConfigurationError(`Unsafe declaration output path "${name}" resolves outside "${this.#outDir}". Rename the entry point or choose a dedicated output directory.`);
 			}
-		}
+			return true;
+		});
 	}
 }

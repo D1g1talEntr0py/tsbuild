@@ -15,8 +15,14 @@ describe('ProcessManager', () => {
 	let errorSpy: MockInstance;
 	let sigintListenersBefore: Function[];
 	let processManagerSigintListeners: Array<() => void>;
+	let listenersBefore: Record<'exit' | 'SIGINT' | 'uncaughtException', ReturnType<typeof process.listeners>>;
 
 	beforeEach(async () => {
+		listenersBefore = {
+			exit: process.listeners('exit'),
+			SIGINT: process.listeners('SIGINT'),
+			uncaughtException: process.listeners('uncaughtException')
+		};
 		sigintListenersBefore = process.listeners('SIGINT');
 		vi.resetModules();
 		exitSpy = vi.spyOn(process, 'exit').mockImplementation(alwaysUndefined as never);
@@ -113,6 +119,39 @@ describe('ProcessManager', () => {
 			processManager.close();
 			const afterClose = process.listeners('SIGINT');
 			expect(afterClose).toEqual(beforeClose.filter((l) => !processManagerSigintListeners.includes(l as () => void)));
+		});
+	});
+
+	describe.each([ 'close', 'Symbol.dispose', 'using' ] as const)('%s teardown', (method) => {
+		const teardown = () => {
+			if (method === 'close') {
+				processManager.close();
+			} else if (method === 'Symbol.dispose') {
+				processManager[Symbol.dispose]();
+			} else {
+				using _manager = processManager;
+			}
+		};
+
+		it('removes only the manager listeners and is idempotent across teardown methods', () => {
+			teardown();
+			processManager.close();
+			processManager[Symbol.dispose]();
+
+			for (const event of [ 'exit', 'SIGINT', 'uncaughtException' ] as const) {
+				expect(process.listeners(event)).toEqual(listenersBefore[event]);
+			}
+		});
+
+		it('releases registrations without closing resources or exiting the process', () => {
+			const closable: Closable = { close: vi.fn() };
+			processManager.addCloseable(closable);
+
+			teardown();
+			process.emit('exit', 0);
+
+			expect(closable.close).not.toHaveBeenCalled();
+			expect(exitSpy).not.toHaveBeenCalled();
 		});
 	});
 
@@ -216,6 +255,25 @@ describe('ProcessManager', () => {
 
 			for (const listener of processManagerSigintListeners) { listener() }
 			expect(closable.close).toHaveBeenCalledOnce();
+			expect(exitSpy).not.toHaveBeenCalled();
+
+			resolveCleanup();
+			await waitForCleanup();
+			expect(exitSpy).toHaveBeenCalledWith(0);
+		});
+
+		it('starts all resource cleanup before awaiting any completion', async () => {
+			let resolveCleanup!: () => void;
+			const cleanup = new Promise<void>((resolve) => { resolveCleanup = resolve });
+			const first: Closable = { close: vi.fn(() => cleanup) };
+			const second: Closable = { close: vi.fn() };
+			processManager.addCloseable(first);
+			processManager.addCloseable(second);
+
+			for (const listener of processManagerSigintListeners) { listener() }
+
+			expect(first.close).toHaveBeenCalledOnce();
+			expect(second.close).toHaveBeenCalledOnce();
 			expect(exitSpy).not.toHaveBeenCalled();
 
 			resolveCleanup();

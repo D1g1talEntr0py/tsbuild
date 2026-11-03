@@ -46,14 +46,17 @@ if (values.target) {
 		process.exit(1);
 	}
 
-	// Query npm for all stable TypeScript versions
-	// TS 7+ ships an entirely new API; exclude until the legacy-compatible API is available (expected 7.1+)
+	// tsbuild requires the TypeScript 7.1+ native API. Minors without a stable release yet fall back to their latest beta/rc.
 	const allVersions: string[] = JSON.parse(run('npm view typescript versions --json'));
-	const stable = allVersions.filter((v) => /^\d+\.\d+\.\d+$/.test(v) && Number(v.split('.')[0]) < 7);
+	const supported = allVersions.filter((v) => {
+		if (!/^\d+\.\d+\.\d+(?:-(?:beta|rc)(?:\.\d+)?)?$/.test(v)) { return false }
+		const [ major, minor ] = v.split('.').map(Number);
+		return major > 7 || (major === 7 && minor >= 1);
+	});
 
-	// Deduplicate by major.minor, keeping the latest patch for each
+	// Deduplicate by major.minor, preferring the latest stable patch over prereleases
 	const latestByMinor = new Map<string, string>();
-	for (const version of stable) {
+	for (const version of supported) {
 		const minor = version.split('.').slice(0, 2).join('.');
 		latestByMinor.set(minor, version);
 	}

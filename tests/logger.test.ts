@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { colorize, prettyBytes, Logger } from 'src/logger';
 import { isWrittenFiles } from 'src/files';
+import { PerformancePhase } from 'src/constants';
 import type { WrittenFile, PerformanceSubStep, RelativePath } from 'src/@types';
 
 // eslint-disable-next-line no-control-regex
@@ -129,6 +131,10 @@ describe('Logger', () => {
 		consoleSpy.mockRestore();
 	});
 
+	it('cannot be instantiated', () => {
+		expect(() => Reflect.construct(Logger, [])).toThrow('Logger is a static class and cannot be instantiated.');
+	});
+
 	describe('clear', () => {
 		it('outputs clear escape code', () => {
 			Logger.clear();
@@ -167,6 +173,243 @@ describe('Logger', () => {
 			const output = consoleSpy.mock.calls[0][0] as string;
 			// Should contain 10 dash characters
 			expect(output).toContain('─'.repeat(10));
+		});
+	});
+
+	describe('buildReport', () => {
+		const phases: PerformanceSubStep[] = [
+			{ name: PerformancePhase.INITIALIZATION, duration: '5ms', ms: 5 },
+			{ name: PerformancePhase.COMPILE, duration: '189ms', ms: 189 },
+			{ name: PerformancePhase.BUNDLE, duration: '29ms', ms: 29 },
+			{ name: PerformancePhase.DECLARATIONS, duration: '14ms', ms: 14, result: [{ path: 'dist/types.d.ts' as RelativePath, size: 14000 }] },
+			{ name: PerformancePhase.TRANSPILE, duration: '29ms', ms: 29, result: [{ path: 'dist/index.js' as RelativePath, size: 198000 }] }
+		];
+
+		it.each([
+			[ 'dashboard', 'Build succeeded' ],
+			[ 'pipeline', '①' ],
+			[ 'artifacts', 'OUTPUTS' ],
+			[ 'summary', '3 steps' ],
+			[ 'detailed', 'BUILD' ]
+		] as const)('renders the %s layout', (style, expected) => {
+			Logger.buildReport({ style, duration: '229ms', durationMs: 229, overhead: '6ms', overheadMs: 6, phases, success: true });
+
+			const output = consoleSpy.mock.calls.map(([ line ]) => line).join('\n');
+			expect(output).toContain(expected);
+			expect(output).toContain('dist/types.d.ts');
+			expect(output).toContain('dist/index.js');
+			expect(output).toContain('Overhead');
+			for (const phase of phases.slice(0, 3)) { expect(output).toContain(phase.name) }
+		});
+
+		it.each([ 'dashboard', 'pipeline', 'artifacts', 'summary', 'detailed' ] as const)('renders the %s layout when output phases produced no files', (style) => {
+			Logger.buildReport({ style, duration: '20ms', durationMs: 20, phases: phases.map(({ result: _result, ...phase }) => phase), success: false });
+
+			const output = consoleSpy.mock.calls.map(([ line ]) => line).join('\n');
+			expect(output).toContain('Build failed');
+			expect(output).not.toContain('dist/');
+		});
+
+		it('limits summary file listings and does not repeat the summary unless expanded', () => {
+			const outputFiles = Array.from({ length: 20 }, (_, index) => ({
+				path: `dist/output-${index + 1}.js` as RelativePath,
+				size: 1024
+			}));
+			const manyOutputPhases = phases.map(phase => phase.name === PerformancePhase.TRANSPILE ? { ...phase, result: outputFiles } : phase);
+
+			Logger.buildReport({ style: 'summary', duration: '229ms', durationMs: 229, overhead: '6ms', overheadMs: 6, phases: manyOutputPhases, success: true });
+
+			const output = consoleSpy.mock.calls.map(([ line ]) => line).join('\n');
+			expect(output).toContain('dist/output-1.js');
+			expect(output).toContain('dist/output-14.js');
+			expect(output).not.toContain('dist/output-15.js');
+			expect(output).toContain('… and 6 more; use "--outputStyle detailed" to list all outputs');
+			expect(output.match(/Build succeeded/g)).toHaveLength(1);
+			expect(consoleSpy.mock.calls.at(-1)?.[0]).toBe('');
+		});
+
+		describe('interactive outputs prompt', () => {
+			class FakeStdin extends EventEmitter {
+				isTTY = true;
+				isRaw = false;
+				setRawMode = vi.fn((mode: boolean) => { this.isRaw = mode; return this });
+				resume = vi.fn(() => this);
+				pause = vi.fn(() => this);
+				ref = vi.fn(() => this);
+				unref = vi.fn(() => this);
+			}
+
+			const manyOutputPhases = phases.map(phase => phase.name === PerformancePhase.TRANSPILE ? { ...phase, result: Array.from({ length: 20 }, (_, index) => ({ path: `dist/output-${index + 1}.js` as RelativePath, size: 1024 })) } : phase);
+			const report = (interactive = true) => Logger.buildReport({ style: 'summary', duration: '229ms', durationMs: 229, overhead: '6ms', overheadMs: 6, phases: manyOutputPhases, success: true, interactive });
+			const output = () => consoleSpy.mock.calls.map(([ line ]) => line).join('\n');
+			let stdin: FakeStdin;
+			let writeSpy: ReturnType<typeof vi.spyOn>;
+			let stdoutIsTTY: boolean | undefined;
+
+			beforeEach(() => {
+				stdin = new FakeStdin();
+				vi.spyOn(process, 'stdin', 'get').mockReturnValue(stdin as unknown as typeof process.stdin);
+				writeSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+				stdoutIsTTY = process.stdout.isTTY;
+				process.stdout.isTTY = true;
+			});
+
+			afterEach(() => {
+				process.stdout.isTTY = stdoutIsTTY as true;
+				vi.restoreAllMocks();
+			});
+
+			it('waits for a key without blocking and expands the hidden outputs on M', () => {
+				report();
+
+				expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('Press M for 6 more outputs'));
+				expect(stdin.setRawMode).toHaveBeenCalledWith(true);
+				expect(stdin.resume).toHaveBeenCalled();
+				expect(stdin.unref).toHaveBeenCalled();
+				expect(output()).not.toContain('dist/output-15.js');
+
+				stdin.emit('data', Buffer.from('M'));
+
+				expect(output()).toContain('dist/output-8.js');
+				expect(output().match(/Build succeeded/g)).toHaveLength(2);
+				expect(consoleSpy.mock.calls.at(-1)?.[0]).toMatch(/Build succeeded.*\n$/);
+				expect(stdin.isRaw).toBe(false);
+				expect(stdin.pause).toHaveBeenCalled();
+				expect(stdin.ref).toHaveBeenCalled();
+				expect(stdin.listenerCount('data')).toBe(0);
+			});
+
+			it('never prompts unless the report is interactive', () => {
+				report(false);
+
+				expect(stdin.setRawMode).not.toHaveBeenCalled();
+				expect(writeSpy).not.toHaveBeenCalled();
+				expect(output()).toContain('… and 6 more; use "--outputStyle detailed" to list all outputs');
+				expect(consoleSpy.mock.calls.at(-1)?.[0]).toBe('');
+			});
+
+			it('dismisses the prompt on any other key', () => {
+				report();
+				stdin.emit('data', 'x');
+
+				expect(output()).not.toContain('dist/output-15.js');
+				expect(output().match(/Build succeeded/g)).toHaveLength(1);
+				expect(consoleSpy.mock.calls.at(-1)?.[0]).toBe('');
+				expect(stdin.listenerCount('data')).toBe(0);
+			});
+
+			it('forwards ctrl+c as SIGINT', () => {
+				const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
+				report();
+				stdin.emit('data', '\u0003');
+
+				expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGINT');
+			});
+
+			it('dismisses a pending prompt before other output is logged', () => {
+				report();
+				Logger.warn('rebuilding');
+
+				expect(stdin.listenerCount('data')).toBe(0);
+				expect(stdin.isRaw).toBe(false);
+				expect(consoleSpy.mock.calls.at(-1)?.[0]).toContain('rebuilding');
+			});
+
+			describe('with status lines logged while pending', () => {
+				let rows: number;
+				let columns: number;
+
+				beforeEach(() => {
+					({ rows, columns } = process.stdout);
+					Object.assign(process.stdout, { rows: 40, columns: 100 });
+				});
+
+				afterEach(() => {
+					Object.assign(process.stdout, { rows, columns });
+				});
+
+				it('keeps the prompt pinned below single-line info messages', () => {
+					report();
+					writeSpy.mockClear();
+					Logger.info('Watching for changes in: src');
+
+					expect(stdin.listenerCount('data')).toBe(1);
+					expect(consoleSpy.mock.calls.slice(-2).map(([ line ]) => line)).toEqual([ '', expect.stringContaining('Watching for changes in: src') ]);
+					expect(writeSpy).toHaveBeenLastCalledWith(expect.stringContaining('Press M for 6 more outputs'));
+				});
+
+				it('expands in place and replays the status lines below the summary', () => {
+					report();
+					Logger.info('Watching for changes in: src');
+					consoleSpy.mockClear();
+					stdin.emit('data', 'm');
+
+					expect(writeSpy).toHaveBeenCalledWith('\x1b[2A\x1b[J');
+					const lines = consoleSpy.mock.calls.map(([ line ]) => String(line));
+					expect(lines.join('\n')).toContain('dist/output-20.js');
+					expect(lines.at(-2)).toContain('Build succeeded');
+					expect(lines.at(-1)).toContain('Watching for changes in: src');
+				});
+
+				it('replays every status line logged while pending', () => {
+					report();
+					Logger.info('first');
+					Logger.info('second');
+					consoleSpy.mockClear();
+					stdin.emit('data', 'm');
+
+					expect(writeSpy).toHaveBeenCalledWith('\x1b[3A\x1b[J');
+					expect(consoleSpy.mock.calls.slice(-2).map(([ line ]) => String(line))).toEqual([ expect.stringContaining('first'), expect.stringContaining('second') ]);
+				});
+
+				it('expands below the status lines when they cannot be redrawn', () => {
+					Object.assign(process.stdout, { columns: 10 });
+					report();
+					Logger.info('Watching for changes in: src');
+					consoleSpy.mockClear();
+					stdin.emit('data', 'm');
+
+					expect(writeSpy).not.toHaveBeenCalledWith(expect.stringMatching(/\x1b\[\d+A/));
+					const lines = consoleSpy.mock.calls.map(([ line ]) => String(line));
+					expect(lines.join('\n')).toContain('dist/output-20.js');
+					expect(lines.at(-1)).toContain('Build succeeded');
+				});
+
+				it('leaves the status lines in place when dismissed', () => {
+					report();
+					Logger.info('Watching for changes in: src');
+					consoleSpy.mockClear();
+					stdin.emit('data', 'x');
+
+					expect(consoleSpy).not.toHaveBeenCalled();
+					expect(stdin.listenerCount('data')).toBe(0);
+				});
+			});
+
+			it('dismisses the prompt on a stdin error even if the terminal cannot be restored', () => {
+				report();
+				stdin.setRawMode.mockImplementation(() => { throw new Error('EIO') });
+				stdin.emit('error', new Error('EIO'));
+
+				expect(stdin.listenerCount('data')).toBe(0);
+				expect(output()).not.toContain('dist/output-15.js');
+			});
+
+			it('falls back to the omitted-count note when stdout is not a terminal', () => {
+				process.stdout.isTTY = false as true;
+				report();
+
+				expect(stdin.setRawMode).not.toHaveBeenCalled();
+				expect(output()).toContain('… and 6 more; use "--outputStyle detailed" to list all outputs');
+			});
+
+			it('falls back to the omitted-count note when raw mode is unavailable', () => {
+				stdin.setRawMode.mockImplementation(() => { throw new Error('EIO') });
+				report();
+
+				expect(output()).toContain('… and 6 more; use "--outputStyle detailed" to list all outputs');
+				expect(stdin.listenerCount('data')).toBe(0);
+			});
 		});
 	});
 

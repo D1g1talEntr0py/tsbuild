@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolvePlugins } from 'src/plugins/resolve-plugin';
 import type { Plugin } from 'esbuild';
-import type { CompilerOptions } from 'typescript';
+import { toRootedFilePath } from 'typescript/path';
+import { TestHelper } from '../scripts/test-helper';
+import type { CompilerOptions } from 'typescript/sync';
 import type { AbsolutePath } from 'src/@types';
 
 const projectDir = '/test-project';
-const scopeOptions = { namespace: 'test-resolve-plugin', tsconfigPath: '/test-project/tsconfig.json' as AbsolutePath, compilerOptions: {} as CompilerOptions };
+const scopeOptions = { namespace: 'test-resolve-plugin', tsconfigPath: '/test-project/tsconfig.json' as AbsolutePath, compilerOptions: {} as CompilerOptions, api: TestHelper.api };
 
 const validPlugin: Plugin = { name: 'test-plugin', setup: vi.fn() };
 
@@ -188,10 +190,10 @@ describe('resolvePlugins', () => {
 			beforeEach(async () => {
 				dir = await mkdtemp(join(tmpdir(), 'tsbuild-resolve-plugin-'));
 				await mkdir(join(dir, 'lib'), { recursive: true });
-				compilerOptions = { baseUrl: dir, paths: { '@lib/*': [ './lib/*' ] } };
+				compilerOptions = { configFilePath: toRootedFilePath(join(dir, 'tsconfig.json'), undefined), paths: { '@lib/*': [ './lib/*' ] } };
 
 				await writeFile(join(dir, 'tsconfig.json'), JSON.stringify({
-					compilerOptions: { baseUrl: '.', paths: { '@lib/*': [ './lib/*' ] } }
+					compilerOptions: { paths: { '@lib/*': [ './lib/*' ] } }
 				}));
 				await writeFile(join(dir, 'lib', 'message.ts'), "export const MESSAGE = 'hello-from-alias';\n");
 				await writeFile(join(dir, 'util.ts'), "export const suffix = '-util';\n");
@@ -217,7 +219,7 @@ describe('resolvePlugins', () => {
 			});
 
 			it('loads a local plugin using an enum and a tsconfig path-alias import', async () => {
-				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
+				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions, api: TestHelper.api });
 
 				expect(result.plugins).toHaveLength(1);
 				expect(result.plugins[0]?.name).toBe('hello-from-alias-util-default');
@@ -226,7 +228,7 @@ describe('resolvePlugins', () => {
 			});
 
 			it('loads an absolute local TypeScript plugin through the scope', async () => {
-				const result = await resolvePlugins([ join(dir, 'plugin.ts') ], dir, { namespace: 'resolve-plugin-absolute-ts-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
+				const result = await resolvePlugins([ join(dir, 'plugin.ts') ], dir, { namespace: 'resolve-plugin-absolute-ts-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions, api: TestHelper.api });
 
 				expect(result.plugins[0]?.name).toBe('hello-from-alias-util-default');
 
@@ -234,7 +236,7 @@ describe('resolvePlugins', () => {
 			});
 
 			it('tracks the plugin and its local module graph as dependencies, excluding node_modules', async () => {
-				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-deps', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
+				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-deps', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions, api: TestHelper.api });
 				const dependencyPaths = [ ...result.dependencies ];
 
 				expect(dependencyPaths.some((path) => path.endsWith('plugin.ts'))).toBe(true);
@@ -246,7 +248,7 @@ describe('resolvePlugins', () => {
 			});
 
 			it('does not route a local JS plugin through the scope even when a TS plugin is also configured', async () => {
-				const result = await resolvePlugins([ './plugin.ts', './js-plugin.js' ], dir, { namespace: 'resolve-plugin-mixed-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
+				const result = await resolvePlugins([ './plugin.ts', './js-plugin.js' ], dir, { namespace: 'resolve-plugin-mixed-scope', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions, api: TestHelper.api });
 
 				expect(result.plugins).toHaveLength(2);
 				expect(result.plugins[1]?.name).toBe('js-plugin');
@@ -258,12 +260,12 @@ describe('resolvePlugins', () => {
 			it('unregisters the scope on a failure path (invalid plugin export) without leaking it', async () => {
 				await writeFile(join(dir, 'bad-plugin.ts'), 'enum Mode { Default }\nexport default \'not-a-plugin\';\n');
 
-				await expect(resolvePlugins([ './bad-plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-failure', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions }))
+				await expect(resolvePlugins([ './bad-plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-failure', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions, api: TestHelper.api }))
 					.rejects.toThrow('not a function or valid esbuild Plugin object');
 
 				// A second, independent resolution using the same tsconfig succeeds — proving the
 				// failed resolution's scope was fully unregistered rather than left dangling.
-				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-failure-recovery', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions });
+				const result = await resolvePlugins([ './plugin.ts' ], dir, { namespace: 'resolve-plugin-ts-failure-recovery', tsconfigPath: join(dir, 'tsconfig.json') as AbsolutePath, compilerOptions, api: TestHelper.api });
 				expect(result.plugins).toHaveLength(1);
 				result[Symbol.dispose]();
 			});

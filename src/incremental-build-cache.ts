@@ -1,10 +1,9 @@
 import { Files } from './files';
 import { Paths } from './paths';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { deserialize } from 'node:v8';
-import { brotliDecompressSync } from 'node:zlib';
+import { everyOutputInBatches } from './project/output-checks';
+import { rmSync, statSync } from 'node:fs';
 import { cacheDirectory, defaultCleanOptions, dtsCacheFile, isString, dtsCacheVersion as version } from './constants';
-import type { AbsolutePath, BuildCache, BuildCacheManager, CachedDeclaration } from './@types';
+import type { AbsolutePath, BuildCache, BuildCacheManager, BuildInputManifest, CachedDeclaration } from './@types';
 
 interface PersistedBuildCache extends BuildCache {
 	outputArtifacts?: string[];
@@ -18,7 +17,8 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	#savedFingerprint: string | undefined;
 	/** Output artifacts from the last successful build, persisted with the declaration cache. */
 	#expectedOutputArtifacts: string[] | undefined;
-	readonly #buildInfoPath: AbsolutePath;
+	/** Compiler inputs of the last successful build, persisted with the declaration cache. */
+	#manifest: BuildInputManifest | undefined;
 	readonly #cacheDirectoryPath: AbsolutePath;
 	readonly #cacheFilePath: AbsolutePath;
 	/** Pre-loading promise started in constructor for async cache restoration */
@@ -27,16 +27,11 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	/**
 	 * Creates a new build cache instance and begins pre-loading the cache asynchronously.
 	 * @param projectRoot - Root directory of the project
-	 * @param tsBuildInfoFile - Path to the TypeScript build info file
 	 */
-	constructor(projectRoot: AbsolutePath, tsBuildInfoFile: string) {
-		this.#buildInfoPath = Paths.join(projectRoot, tsBuildInfoFile);
+	constructor(projectRoot: AbsolutePath) {
 		this.#cacheDirectoryPath = Paths.join(projectRoot, cacheDirectory);
 		this.#cacheFilePath = Paths.join(this.#cacheDirectoryPath, dtsCacheFile);
-		// Enforce consistency BEFORE the TypeScript program reads .tsbuildinfo.
-		// An orphaned build-info (present without a matching dts cache) would let the incremental program skip emit while no cached declarations exist, producing broken bundles.
-		this.#enforceIncrementalConsistency();
-		// Start pre-loading the cache immediately - this runs in parallel with TypeScript program creation
+		// Start pre-loading the cache immediately - this runs in parallel with configuration resolution
 		this.#cacheLoaded = this.#loadCache();
 	}
 
@@ -56,22 +51,27 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	}
 
 	/**
-	 * Checks if a file path is the TypeScript build info file.
-	 * @param filePath - The file path to check
-	 * @returns True if the path matches the build info file
+	 * Checks whether the compiler inputs are unchanged since the last successful build.
+	 * The manifest is only persisted after an error-free type-check, so an up-to-date manifest proves the compiler would report no errors and emit the cached declarations.
+	 * Stats are read synchronously: hundreds of small `stat` calls finish faster inline than through the libuv thread pool.
+	 * @param key - Deterministic key of the current root names, compiler options and TypeScript version
+	 * @returns The manifest when the key matches and every recorded input has the same modification time and size, otherwise undefined
 	 */
-	isBuildInfoFile(filePath: AbsolutePath): boolean {
-		return filePath === this.#buildInfoPath;
-	}
+	async upToDateManifest(key: string): Promise<BuildInputManifest | undefined> {
+		if (this.#invalidated) { return undefined }
 
-	/**
-	 * Synchronously checks whether persisted incremental state exists on disk.
-	 * When the .tsbuildinfo file is missing, the next typecheck will perform a full emit,
-	 * making it safe to clean the output directory eagerly in parallel with type checking.
-	 * @returns True when the .tsbuildinfo file is present and the cache hasn't been invalidated.
-	 */
-	hasPersistedState(): boolean {
-		return !this.#invalidated && existsSync(this.#buildInfoPath);
+		await this.#cacheLoaded;
+		const manifest = this.#manifest;
+
+		if (manifest?.key !== key) { return undefined }
+
+		for (const [ path, mtimeMs, size ] of manifest.files) {
+			const stats = statSync(path, { throwIfNoEntry: false });
+
+			if (stats?.mtimeMs !== mtimeMs || stats.size !== size) { return undefined }
+		}
+
+		return manifest;
 	}
 
 	/**
@@ -105,30 +105,29 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * Uses V8 serialization for faster read performance on subsequent builds.
 	 * @param source - The declaration files to cache
 	 * @param fingerprint - Deterministic hash of build configuration for cache invalidation on config change
+	 * @param manifest - Compiler inputs of the build that produced `source`; defaults to the current manifest when the compiler did not run
 	 */
-	async save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void> {
+	async save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string, manifest: BuildInputManifest | undefined = this.#manifest): Promise<void> {
 		// set before await so fingerprintMatches() sees it immediately
 		this.#savedFingerprint = fingerprint;
+		this.#manifest = manifest;
 
-		await Files.writeCompressed(this.#cacheFilePath, { version, files: source, fingerprint, outputArtifacts: this.#expectedOutputArtifacts });
+		await Files.writeCompressed(this.#cacheFilePath, { version, files: source, fingerprint, manifest, outputArtifacts: this.#expectedOutputArtifacts });
 	}
 
 	/**
 	 * Checks that the cache has a recorded artifact set and every artifact still exists.
-	 * @returns True when the cached output set is complete on disk
+	 * @returns True when the cached output set is complete on disk, false otherwise
 	 */
 	async expectedOutputsExist(): Promise<boolean> {
 		if (this.#invalidated) { return false }
 
-		const outputArtifacts = (await this.#cacheLoaded)?.outputArtifacts;
+		await this.#cacheLoaded;
+		const outputArtifacts = this.#expectedOutputArtifacts;
 
 		if (outputArtifacts === undefined) { return false }
 
-		for (const path of outputArtifacts) {
-			if (!await Files.exists(path)) { return false }
-		}
-
-		return true;
+		return everyOutputInBatches(outputArtifacts, (path) => Files.exists(path));
 	}
 
 	/**
@@ -138,9 +137,9 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 * @returns True if the cached configuration matches the current configuration
 	 */
 	async fingerprintMatches(currentFingerprint: string): Promise<boolean> {
-		if (this.#invalidated || !this.hasPersistedState()) { return false }
+		if (this.#invalidated) { return false }
 
-		return (this.#savedFingerprint !== undefined ? this.#savedFingerprint : (await this.#cacheLoaded)?.fingerprint) === currentFingerprint;
+		return (this.#savedFingerprint ?? (await this.#cacheLoaded)?.fingerprint) === currentFingerprint;
 	}
 
 	/**
@@ -149,36 +148,6 @@ export class IncrementalBuildCache implements BuildCacheManager {
 	 */
 	get [Symbol.toStringTag](): string {
 		return 'IncrementalBuildCache';
-	}
-
-	/**
-	 * Enforces consistency between TypeScript's incremental state (`.tsbuildinfo`) and the versioned declaration cache. Both must be valid together:
-	 * when the build-info file exists but the matching dts cache is absent — manually deleted, partially cleared, or left behind after a cache-version
-	 * bump (the versioned filename no longer matches) — the incremental program would skip emit while no cached declarations exist, yielding broken bundles
-	 * with unresolved internal imports. Removing the orphaned build-info forces the next program to perform a full emit, restoring a consistent state.
-	 */
-	#enforceIncrementalConsistency() {
-		// Cold build: no incremental state to couple.
-		if (!existsSync(this.#buildInfoPath)) { return }
-
-		// A present cache must also be readable and structurally complete. Otherwise the incremental program could skip emit before restore discovers the corruption.
-		if (existsSync(this.#cacheFilePath) && this.#isPersistedCacheValid()) { return }
-
-		// Orphaned build-info without a matching declaration cache — drop it to force a full emit.
-		try { rmSync(this.#buildInfoPath) } catch { /* best-effort: a failed unlink only risks a redundant rebuild */ }
-	}
-
-	/**
-	 * Validates the compressed cache synchronously before TypeScript reads build-info.
-	 * @returns True when the cache payload has the expected version and shape
-	 */
-	#isPersistedCacheValid() {
-		try {
-			const { version, files, fingerprint, outputArtifacts } = deserialize(brotliDecompressSync(readFileSync(this.#cacheFilePath))) as Partial<PersistedBuildCache>;
-			return version === version && files instanceof Map && (fingerprint === undefined || typeof fingerprint === 'string' || typeof fingerprint === 'boolean') && (outputArtifacts === undefined || Array.isArray(outputArtifacts) && outputArtifacts.every(isString));
-		} catch {
-			return false;
-		}
 	}
 
 	/**
@@ -196,6 +165,7 @@ export class IncrementalBuildCache implements BuildCacheManager {
 			}
 
 			this.#expectedOutputArtifacts = cache.outputArtifacts;
+			this.#manifest ??= cache.manifest;
 
 			return cache;
 		} catch {

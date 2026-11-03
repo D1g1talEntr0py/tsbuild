@@ -1,4 +1,3 @@
-import { sys } from 'typescript';
 import { Files } from '../files';
 import { Paths } from '../paths';
 import { Json } from '../json';
@@ -9,15 +8,15 @@ import { createIifePluginHandle } from '../plugins/iife';
 import { createWriteOutputPlugin } from '../plugins/output';
 import { externalModulesPlugin } from '../plugins/external-modules';
 import { BuildError, BundleError, ConfigurationError, castError } from '../errors';
-import { BuildMessageType, format, processEnvExpansionPattern, toJsxRenderingMode } from '../constants';
+import { BuildMessageType, format, newLine, processEnvExpansionPattern, toJsxRenderingMode } from '../constants';
 
-import type { CompilerOptions } from 'typescript';
+import type { API, CompilerOptions } from 'typescript/sync';
 import type { PackageJson } from '../entry-points';
-import type { BuildContext, BuildFailure, BuildOptions, Message, OutputFile } from 'esbuild';
+import type { BuildContext, BuildFailure, BuildOptions, BuildResult, Message, OutputFile } from 'esbuild';
 import type { AbsolutePath, EntryPoints, JsonString, Plugin, ProjectBuildConfiguration, WrittenFile } from '../@types';
 
 type RunnerBuildOptions = Pick<ProjectBuildConfiguration, 'watch' | 'iife' | 'plugins' | 'noExternal' | 'env' | 'bundle' | 'packages' | 'platform' | 'sourceMap' | 'target' | 'banner' | 'footer' | 'outDir' | 'splitting' | 'minify'>;
-type RunnerOptions = { directory: AbsolutePath; compilerOptions: CompilerOptions; configFilePath: AbsolutePath; buildOptions: RunnerBuildOptions };
+type RunnerOptions = { api: API; directory: AbsolutePath; compilerOptions: CompilerOptions; configFilePath: AbsolutePath; buildOptions: RunnerBuildOptions };
 
 /**
  * Narrows a caught esbuild error to its structured failure shape (`{ errors, warnings }`).
@@ -30,13 +29,14 @@ function isBuildFailure(error: unknown): error is BuildFailure {
 
 /** Owns esbuild execution, plugin scopes, and reusable watch resources. */
 export class EsbuildRunner implements AsyncDisposable {
+	#files: WrittenFile[] = [];
 	#dependencyPaths?: Promise<string[]>;
 	#context?: BuildContext;
 	#contextDefine?: string;
-	#files: WrittenFile[] = [];
 	#disposePromise?: Promise<void>;
 	readonly #directory: AbsolutePath;
 	readonly #compilerOptions: CompilerOptions;
+	readonly #api: API;
 	readonly #configFilePath: AbsolutePath;
 	readonly #buildOptions: RunnerBuildOptions;
 	readonly #pluginDependencies: Set<AbsolutePath> = new Set();
@@ -45,7 +45,8 @@ export class EsbuildRunner implements AsyncDisposable {
 	 * Starts optional package metadata reads using the resolved project configuration.
 	 * @param options - Directory, compiler configuration, and esbuild build settings
 	 */
-	constructor({ directory, compilerOptions, configFilePath, buildOptions }: RunnerOptions) {
+	constructor({ api, directory, compilerOptions, configFilePath, buildOptions }: RunnerOptions) {
+		this.#api = api;
 		this.#directory = directory;
 		this.#compilerOptions = compilerOptions;
 		this.#configFilePath = configFilePath;
@@ -78,7 +79,8 @@ export class EsbuildRunner implements AsyncDisposable {
 		using pluginResolution = this.#buildOptions.plugins?.length ? await resolvePlugins(this.#buildOptions.plugins, this.#directory, {
 			namespace: `tsbuild-plugins:${randomUUID()}`,
 			tsconfigPath: this.#configFilePath,
-			compilerOptions: this.#compilerOptions
+			compilerOptions: this.#compilerOptions,
+			api: this.#api
 		}) : undefined;
 
 		if (pluginResolution !== undefined) { plugins.push(...pluginResolution.plugins) }
@@ -88,6 +90,7 @@ export class EsbuildRunner implements AsyncDisposable {
 		const canReuseContext = this.#buildOptions.watch.enabled && this.#buildOptions.iife === undefined && !this.#buildOptions.plugins?.length;
 		const defineKey = Json.serialize(define);
 
+		// Invalidate the context if the define map has changed
 		if (canReuseContext && this.#context !== undefined && this.#contextDefine !== defineKey) { await this.invalidateContext() }
 
 		plugins.push(createWriteOutputPlugin(this.#directory, (files) => {
@@ -98,10 +101,10 @@ export class EsbuildRunner implements AsyncDisposable {
 			}
 		}, iifeFiles));
 
-		try {
-			if (canReuseContext) { this.#files = [] }
+		if (canReuseContext) { this.#files = [] }
 
-			const options: BuildOptions = {
+		try {
+			const options = {
 				format,
 				plugins,
 				define,
@@ -112,7 +115,8 @@ export class EsbuildRunner implements AsyncDisposable {
 				absWorkingDir: this.#directory,
 				tsconfigRaw: {
 					compilerOptions: {
-						alwaysStrict: this.#compilerOptions.alwaysStrict,
+						// TypeScript 7 defaults to strict mode unless explicitly disabled.
+						alwaysStrict: this.#compilerOptions.strict ?? true,
 						jsx: toJsxRenderingMode(this.#compilerOptions.jsx),
 						jsxFactory: this.#compilerOptions.jsxFactory,
 						jsxFragmentFactory: this.#compilerOptions.jsxFragmentFactory,
@@ -137,9 +141,9 @@ export class EsbuildRunner implements AsyncDisposable {
 				chunkNames: '[hash]',
 				minify: this.#buildOptions.minify,
 				supported: { decorators: false }
-			};
+			} satisfies BuildOptions;
 
-			let result: Awaited<ReturnType<typeof esbuild>>;
+			let result: Awaited<BuildResult>;
 			if (canReuseContext) {
 				this.#contextDefine = defineKey;
 				result = await (this.#context ??= await createEsbuildContext(options)).rebuild();
@@ -158,7 +162,7 @@ export class EsbuildRunner implements AsyncDisposable {
 			if (error instanceof BuildError) { throw error }
 
 			const errors = isBuildFailure(error) ? error.errors : undefined;
-			const message = errors !== undefined && errors.length > 0 ? (await formatMessages(errors, { kind: 'error', color: true })).join(sys.newLine) : castError(error).message;
+			const message = errors !== undefined && errors.length > 0 ? (await formatMessages(errors, { kind: 'error', color: true })).join(newLine) : castError(error).message;
 
 			Logger.error(message);
 
@@ -179,7 +183,7 @@ export class EsbuildRunner implements AsyncDisposable {
 
 	/**
 	 * Releases reusable resources once; the caller must first await its active build.
-	 * This method is called automatically when the runner is used in a `using` statement.
+	 * This method is called automatically when the runner is used in an `await using` statement.
 	 * @returns Promise that resolves when the runner has released its resources
 	 */
 	[Symbol.asyncDispose](): Promise<void> {
@@ -221,7 +225,7 @@ export class EsbuildRunner implements AsyncDisposable {
 		}
 
 		if (this.#buildOptions.noExternal.length > 0) {
-			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths ?? [], noExternal: this.#buildOptions.noExternal, paths: this.#compilerOptions.paths }));
+			plugins.push(externalModulesPlugin({ dependencies: await this.#dependencyPaths, noExternal: this.#buildOptions.noExternal, paths: this.#compilerOptions.paths }));
 		}
 
 		return { plugins, iifeFiles };

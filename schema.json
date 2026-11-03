@@ -70,6 +70,20 @@
           "type": "boolean",
           "default": true
         },
+        "outputStyle": {
+          "description": "Build report layout. Defaults to 'summary'.",
+          "type": "string",
+          "enum": ["dashboard", "pipeline", "artifacts", "summary", "detailed"],
+          "markdownEnumDescriptions": [
+            "Show a compact status dashboard with phase timings.",
+            "Show the build phases as a numbered pipeline.",
+            "List generated artifacts before build timings.",
+            "Show a minimal summary and generated files.",
+            "Show detailed phases and nested generated files."
+          ],
+          "default": "summary",
+          "examples": ["summary"]
+        },
         "packages": {
           "description": "Default behavior for node_modules dependencies. 'bundle' includes them in output, 'external' keeps them as imports. When omitted, tsbuild auto-selects based on platform and noExternal.",
           "type": "string",

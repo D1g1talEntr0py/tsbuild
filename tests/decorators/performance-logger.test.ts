@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { performance } from 'perf_hooks';
 import type { MockInstance } from 'vitest';
-import { alwaysUndefined } from 'src/constants';
+import { alwaysUndefined, PerformancePhase } from 'src/constants';
 
 describe('logPerformance', () => {
 	let logPerformance: typeof import('src/decorators/performance-logger').logPerformance;
 	let stepSpy: MockInstance;
-	let errorSpy: MockInstance;
 	let successSpy: MockInstance;
+	let buildReportSpy: MockInstance;
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -19,9 +19,9 @@ describe('logPerformance', () => {
 		// Spy on the real Logger to observe production-formatted call arguments while suppressing console noise.
 		const { Logger } = await import('src/logger');
 		stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
-		errorSpy = vi.spyOn(Logger, 'error').mockImplementation(() => {});
 		vi.spyOn(Logger, 'separator').mockImplementation(() => {});
 		successSpy = vi.spyOn(Logger, 'success').mockImplementation(() => {});
+		buildReportSpy = vi.spyOn(Logger, 'buildReport').mockImplementation(() => {});
 		vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
 	});
 
@@ -36,7 +36,7 @@ describe('logPerformance', () => {
 	describe('sync methods', () => {
 		it('preserves return value', () => {
 			class Test {
-				@logPerformance('sync op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(): string { return 'result' }
 			}
 
@@ -47,7 +47,7 @@ describe('logPerformance', () => {
 			class Test {
 				value = 100;
 
-				@logPerformance('ctx op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(): number { return this.value }
 			}
 
@@ -56,7 +56,7 @@ describe('logPerformance', () => {
 
 		it('preserves parameters', () => {
 			class Test {
-				@logPerformance('param op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(a: number, b: string): string { return `${a}-${b}` }
 			}
 
@@ -65,7 +65,7 @@ describe('logPerformance', () => {
 
 		it('propagates errors', () => {
 			class Test {
-				@logPerformance('error op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(): never { throw new Error('test error') }
 			}
 
@@ -76,7 +76,7 @@ describe('logPerformance', () => {
 	describe('async methods', () => {
 		it('preserves resolved value', async () => {
 			class Test {
-				@logPerformance('async op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				async method(): Promise<number> { return 42 }
 			}
 
@@ -85,7 +85,7 @@ describe('logPerformance', () => {
 
 		it('propagates rejections', async () => {
 			class Test {
-				@logPerformance('async err')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				async method(): Promise<never> { throw new Error('async error') }
 			}
 
@@ -98,7 +98,7 @@ describe('logPerformance', () => {
 			class Test {
 				#value = 7;
 
-				@logPerformance('private op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				#method(): number { return this.#value }
 
 				call(): number { return this.#method(); }
@@ -111,7 +111,7 @@ describe('logPerformance', () => {
 			class Test {
 				#value = 7;
 
-				@logPerformance('private async op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				async #method(): Promise<number> { return this.#value }
 
 				async call(): Promise<number> { return this.#method(); }
@@ -124,7 +124,7 @@ describe('logPerformance', () => {
 	describe('performance marks and measures', () => {
 		it('creates performance marks', () => {
 			class Test {
-				@logPerformance('mark test')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(): void {}
 			}
 
@@ -138,7 +138,7 @@ describe('logPerformance', () => {
 		it('clears performance measures and marks after flushing', async () => {
 			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
 			class Test {
-				@logPerformance('measure test')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(): void {}
 			}
 
@@ -158,14 +158,14 @@ describe('logPerformance', () => {
 			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
 
 			class Test {
-				@logPerformance('flush test')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method(): void {}
 			}
 
 			new Test().method();
 			flushPerformanceLog();
 
-			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining('flush test'));
+			expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining(PerformancePhase.INITIALIZATION));
 		});
 
 		it('is a no-op when nothing is queued', async () => {
@@ -183,7 +183,7 @@ describe('logPerformance', () => {
 			const { flushPerformanceLog } = await import('src/decorators/performance-logger');
 
 			class Test {
-				@logPerformance('string result')
+				@logPerformance(PerformancePhase.COMPILE)
 				method(): string { return 'result' }
 			}
 
@@ -198,7 +198,7 @@ describe('logPerformance', () => {
 			const files = [{ path: 'dist/index.js', size: 42 }];
 
 			class Test {
-				@logPerformance('file result')
+				@logPerformance(PerformancePhase.COMPILE)
 				method(): typeof files { return files }
 			}
 
@@ -212,10 +212,10 @@ describe('logPerformance', () => {
 	describe('multiple methods', () => {
 		it('supports multiple decorated methods on one class', () => {
 			class Test {
-				@logPerformance('op1')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				method1(): number { return 1 }
 
-				@logPerformance('op2')
+				@logPerformance(PerformancePhase.COMPILE)
 				method2(): number { return 2 }
 			}
 
@@ -230,7 +230,7 @@ describe('logPerformance', () => {
 			const key = Symbol('testMethod');
 
 			class Test {
-				@logPerformance('symbol op')
+				@logPerformance(PerformancePhase.INITIALIZATION)
 				[key](): string { return 'symbol result' }
 			}
 
@@ -241,7 +241,7 @@ describe('logPerformance', () => {
 	describe('build-failed branch', () => {
 		it('logs error when process.exitCode is set for Build message', async () => {
 			class BuildRunner {
-				@logPerformance('Build')
+				@logPerformance(PerformancePhase.BUILD)
 				run(): void {}
 			}
 
@@ -251,9 +251,42 @@ describe('logPerformance', () => {
 			// Wait for PerformanceObserver to fire
 			await new Promise(resolve => setTimeout(resolve, 50));
 
-			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Build failed'));
+			expect(buildReportSpy).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
 			process.exitCode = undefined;
 		});
+	});
+
+	it('preserves output-style changes through the async build measurement callback', async () => {
+		const { setBuildOutputStyle } = await import('src/decorators/performance-logger');
+		class BuildRunner {
+			@logPerformance(PerformancePhase.BUILD)
+			async run(): Promise<void> {
+				setBuildOutputStyle('detailed');
+			}
+		}
+
+		await new BuildRunner().run();
+		await new Promise(resolve => setTimeout(resolve, 50));
+
+		expect(buildReportSpy).toHaveBeenCalledWith(expect.objectContaining({ style: 'detailed' }));
+	});
+
+	it('reports builds as non-interactive unless requested', async () => {
+		const { setBuildOutputStyle } = await import('src/decorators/performance-logger');
+		class BuildRunner {
+			@logPerformance(PerformancePhase.BUILD)
+			async run(interactive?: boolean): Promise<void> {
+				if (interactive !== undefined) { setBuildOutputStyle('summary', interactive) }
+			}
+		}
+
+		await new BuildRunner().run();
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(buildReportSpy).toHaveBeenLastCalledWith(expect.objectContaining({ interactive: false }));
+
+		await new BuildRunner().run(true);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(buildReportSpy).toHaveBeenLastCalledWith(expect.objectContaining({ interactive: true }));
 	});
 
 	describe('close', () => {

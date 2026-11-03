@@ -93,12 +93,63 @@ describe('OutputPathValidator', () => {
 		await expect(instance.validateDeclarationPaths(await instance.validateOutputDirectory(), [ 'alias/index' ])).resolves.toBeUndefined();
 	});
 
-	it('validates declaration entries sequentially and reports the first escape', async () => {
+	it('reports the first escape in input order while draining the submitted batch', async () => {
 		const instance = validator();
 		const outputDirectory = await instance.validateOutputDirectory();
 		const realpath = vi.spyOn(fs.promises, 'realpath');
 		await expect(instance.validateDeclarationPaths(outputDirectory, [ '../first', '../second' ])).rejects.toThrow('Unsafe declaration output path "../first"');
-		expect(realpath.mock.calls.some(([ path ]) => String(path).includes('second'))).toBe(false);
+		expect(realpath.mock.calls.some(([ path ]) => String(path).includes('second'))).toBe(true);
+	});
+
+	it('bounds declaration canonicalization and checks all names including missing suffixes', async () => {
+		const outputDirectory = Paths.absolute('/project/dist');
+		const names = Array.from({ length: 150 }, (_, i) => `nested/entry-${i}`);
+		const canonical = Paths.canonical;
+		let active = 0, peak = 0;
+		const spy = vi.spyOn(Paths, 'canonical').mockImplementation(async (path) => {
+			peak = Math.max(peak, ++active);
+			try { return await canonical(path) } finally { active-- }
+		});
+		await validator().validateDeclarationPaths(outputDirectory, names);
+		expect(peak).toBe(64);
+		expect(active).toBe(0);
+		expect(spy.mock.calls.map(([path]) => path)).toEqual(names.map((name) => `${outputDirectory}/${name}.d.ts`));
+	});
+
+	it('does no declaration I/O for an empty name set', async () => {
+		const spy = vi.spyOn(Paths, 'canonical');
+		await validator().validateDeclarationPaths(Paths.absolute('/project/dist'), []);
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it('rechecks declaration canonicalization when a symlink is added after success', async () => {
+		const instance = validator();
+		const outputDirectory = await instance.validateOutputDirectory();
+		await instance.validateDeclarationPaths(outputDirectory, ['later/declaration']);
+		vol.symlinkSync('/outside', '/project/dist/later');
+		await expect(instance.validateDeclarationPaths(outputDirectory, ['later/declaration'])).rejects.toThrow(ConfigurationError);
+	});
+
+	it('drains a failing batch, preserving error precedence and not starting later batches', async () => {
+		const names = Array.from({ length: 130 }, (_, i) => `entry-${i}`);
+		const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+		let active = 0;
+		const spy = vi.spyOn(Paths, 'canonical').mockImplementation(async (path) => {
+			active++;
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			active--;
+			if (path === '/project/dist/entry-1.d.ts') { throw error }
+			return Paths.absolute('/outside/escape.d.ts');
+		});
+		await expect(validator().validateDeclarationPaths(Paths.absolute('/project/dist'), names)).rejects.toThrow('Unsafe declaration output path "entry-0"');
+		expect(active).toBe(0);
+		expect(spy).toHaveBeenCalledTimes(64);
+	});
+
+	it('propagates declaration canonicalization access errors', async () => {
+		const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+		vi.spyOn(Paths, 'canonical').mockRejectedValue(error);
+		await expect(validator().validateDeclarationPaths(Paths.absolute('/project/dist'), ['index'])).rejects.toBe(error);
 	});
 
 	it('shares protected-path promises across concurrent and repeated calls but not instances', async () => {

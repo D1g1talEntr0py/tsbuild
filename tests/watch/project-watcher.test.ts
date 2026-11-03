@@ -69,6 +69,21 @@ afterEach(async () => {
 });
 
 describe('ProjectWatcher', () => {
+	it('supports synchronous disposal and remains closed after repeated close calls', async () => {
+		watcher = new ProjectWatcher(options());
+		await watcher.reconcile(dependencies());
+
+		{
+			using resource = watcher;
+			expect(resource).toBe(watcher);
+		}
+
+		watcher.close();
+		await watcher.reconcile(dependencies('build/plugin.ts'));
+		expect(boundary.instances[0]!.close).toHaveBeenCalledOnce();
+		expect(boundary.create).toHaveBeenCalledOnce();
+	});
+
 	it('defaults to src and includes uncovered plugin dependencies in order', async () => {
 		watcher = new ProjectWatcher(options());
 		await watcher.reconcile(dependencies('src/value.ts', 'build/plugin.ts', 'build/helper.ts', '../shared/plugin.ts'));

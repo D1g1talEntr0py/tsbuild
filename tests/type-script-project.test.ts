@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach, vi, type MockInstance } from 'vitest';
 import { access, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { versionMajorMinor } from 'typescript';
 import { context, type BuildContext } from 'esbuild';
 import { TypeScriptProject } from '../src/type-script-project';
 import { Files } from '../src/files';
@@ -9,12 +8,11 @@ import { Logger } from '../src/logger';
 import { Paths } from '../src/paths';
 import { processManager } from '../src/process-manager';
 import { TestHelper } from './scripts/test-helper';
-import { alwaysUndefined } from 'src/constants';
+import { alwaysUndefined, PerformancePhase } from 'src/constants';
 import { bundleDeclarations } from '../src/dts/declaration-bundler';
 import { EsbuildRunner } from '../src/project/esbuild-runner';
 import { flushPerformanceLog } from '../src/decorators/performance-logger';
-
-const typeScript6OrNewer = Number(versionMajorMinor.split('.')[0]) >= 6;
+import { API } from 'typescript/sync';
 
 vi.mock('esbuild', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('esbuild')>();
@@ -48,12 +46,37 @@ describe('TypeScriptProject', () => {
 	});
 
 	describe('build', () => {
+		it('skips repeated output phases on the same instance but rebuilds when an artifact disappears', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 1;' },
+				tsconfig: { compilerOptions: { declaration: true }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+			const transpile = vi.spyOn(EsbuildRunner.prototype, 'run');
+			const project = new TypeScriptProject(dir);
+			try {
+				await project.build();
+				const original = await readFile(join(dir, 'dist/index.d.ts'), 'utf8');
+				transpile.mockClear();
+				const declarationsBefore = vi.mocked(bundleDeclarations).mock.calls.length;
+				await project.build();
+				expect(transpile).not.toHaveBeenCalled();
+				expect(vi.mocked(bundleDeclarations).mock.calls).toHaveLength(declarationsBefore);
+				await rm(join(dir, 'dist/index.d.ts'));
+				await project.build();
+				expect(transpile).toHaveBeenCalledOnce();
+				expect(await readFile(join(dir, 'dist/index.d.ts'), 'utf8')).toBe(original);
+				expect(process.exitCode).toBeUndefined();
+			} finally {
+				await project.close();
+				transpile.mockRestore();
+			}
+		});
+
 		it('logs initialization first and reconciles displayed build overhead', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject();
 			cleanup = c;
-			const stepSpy = vi.spyOn(Logger, 'step').mockImplementation(() => {});
-			const logSpy = vi.spyOn(Logger, 'log').mockImplementation(() => {});
-			const subStepsSpy = vi.spyOn(Logger, 'subSteps').mockImplementation(() => {});
+			const reportSpy = vi.spyOn(Logger, 'buildReport').mockImplementation(() => {});
 
 			try {
 				const project = new TypeScriptProject(dir);
@@ -61,25 +84,14 @@ describe('TypeScriptProject', () => {
 				flushPerformanceLog();
 				await project.close();
 
-				const messages = stepSpy.mock.calls.map(([ message ]) => message.replace(/\x1b\[[0-9;]*m/g, ''));
-				const initializationIndex = messages.findIndex(message => message.includes('Initialization'));
-				const typeCheckIndex = messages.findIndex(message => message.includes('Type-checking/Emit'));
-				const duration = (label: string) => Number(/\((\d+)ms\)/.exec(messages.find(message => message.includes(label)) ?? '')?.[1]);
-				const groupedSteps = subStepsSpy.mock.calls.flatMap(([ steps ]) => steps);
-				const completed = Number(/Completed in (\d+)ms/.exec(messages.find(message => message.includes('Completed in')) ?? '')?.[1]);
-				const overheadMessage = logSpy.mock.calls.map(([ message ]) => message).find(message => message.includes('Overhead')) ?? '';
-				const overhead = Number(/\((\d+)ms\)/.exec(overheadMessage)?.[1]);
+				const report = reportSpy.mock.calls[0][0];
+				const phaseDuration = (name: string) => report.phases.find(phase => phase.name === name)?.ms ?? 0;
 
-				expect(initializationIndex).toBeGreaterThanOrEqual(0);
-				expect(typeCheckIndex).toBeGreaterThan(initializationIndex);
-				expect(messages.filter(message => message.includes('Bundle'))).toHaveLength(1);
-				expect(messages.some(message => message.includes('Process Declarations') || message.includes('Transpile'))).toBe(false);
-				expect(groupedSteps.map(({ name }) => name)).toEqual([ 'Process Declarations', 'Transpile' ]);
-				expect(completed).toBe(duration('Initialization') + duration('Type-checking/Emit') + duration('Bundle') + overhead);
+				expect(report).toMatchObject({ style: 'summary', success: true });
+				expect(report.phases.map(({ name }) => name)).toEqual([ PerformancePhase.INITIALIZATION, PerformancePhase.COMPILE, PerformancePhase.BUNDLE, PerformancePhase.DECLARATIONS, PerformancePhase.TRANSPILE ]);
+				expect(report.durationMs).toBe(phaseDuration(PerformancePhase.INITIALIZATION) + phaseDuration(PerformancePhase.COMPILE) + phaseDuration(PerformancePhase.BUNDLE) + (report.overheadMs ?? 0));
 			} finally {
-				stepSpy.mockRestore();
-				logSpy.mockRestore();
-				subStepsSpy.mockRestore();
+				reportSpy.mockRestore();
 			}
 		});
 
@@ -125,8 +137,63 @@ describe('TypeScriptProject', () => {
 			await project.build();
 			project.close();
 
-			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			expect(output).toContain('hello');
+			const output = await TestHelper.importOutput<{ hello: string }>(join(dir, 'dist/index.js'));
+			expect(output.hello).toBe('world');
+		});
+
+		it('clears project-owned declaration syntax trees on close', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 1;' }
+			});
+			cleanup = c;
+			const project = new TypeScriptProject(dir);
+
+			try {
+				await project.build();
+				const syntaxCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)?.[0].sourceFileCache;
+				expect(syntaxCache).toBeDefined();
+				const clearSpy = vi.spyOn(syntaxCache!, 'clear');
+				try {
+					await project.close();
+					expect(clearSpy).toHaveBeenCalledOnce();
+				} finally { clearSpy.mockRestore() }
+			} finally {
+				await project.close();
+			}
+		});
+
+		it('does not share syntax trees or cache disposal between live project instances', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export interface Shape { before: string }' },
+				// Exercise identical declaration paths without concurrent disk-cache writers.
+				tsconfig: { compilerOptions: { incremental: false }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+			const first = new TypeScriptProject(dir);
+			let second: TypeScriptProject | undefined;
+			try {
+				await first.build();
+				const firstCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+				const path = Paths.absolute(dir, 'dist/index.d.ts');
+				const firstTree = firstCache.get(path)!.sourceFile;
+				await writeFile(join(dir, 'src/index.ts'), 'export interface Shape { after: number }');
+				second = new TypeScriptProject(dir);
+				await second.build();
+				const secondCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+				expect(secondCache).not.toBe(firstCache);
+				expect(secondCache.get(path)!.sourceFile).not.toBe(firstTree);
+				expect(secondCache.get(path)!.text).toContain('after: number');
+				expect(firstCache.get(path)!.sourceFile).toBe(firstTree);
+				expect(firstCache.get(path)!.text).toContain('before: string');
+				await first.close();
+				expect(firstCache.size).toBe(0);
+				expect(secondCache.size).toBe(1);
+				await second.close();
+				expect(secondCache.size).toBe(0);
+				expect(process.exitCode).toBeUndefined();
+			} finally {
+				await Promise.all([ first.close(), second?.close() ]);
+			}
 		});
 
 		it('runs a scoped TypeScript plugin with non-erasable syntax and project path aliases', async () => {
@@ -152,8 +219,6 @@ describe('TypeScriptProject', () => {
 				},
 				tsconfig: {
 					compilerOptions: {
-						baseUrl: '.',
-						...(typeScript6OrNewer ? { ignoreDeprecations: '6.0' } : {}),
 						paths: { '@plugin/*': [ './build-support/*' ] }
 					},
 					tsbuild: { plugins: [ './build/plugin.ts' ] }
@@ -213,7 +278,7 @@ describe('TypeScriptProject', () => {
 			second.close();
 
 			expect(process.exitCode).toBeUndefined();
-			await expect(readFile(join(dir, 'dist/index.js'), 'utf8')).resolves.toContain('value');
+			await expect(TestHelper.importOutput<{ value: number }>(join(dir, 'dist/index.js'))).resolves.toMatchObject({ value: 42 });
 		});
 
 		it('writes shebang entry points with executable mode from the start', async () => {
@@ -273,7 +338,7 @@ describe('TypeScriptProject', () => {
 			expect(process.exitCode).toBe(3);
 		});
 
-		it('skips JS emit when noEmit is true', async () => {
+		it('respects configured noEmit', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const x = 1;' },
 				tsconfig: { compilerOptions: { noEmit: true } }
@@ -312,8 +377,8 @@ describe('TypeScriptProject', () => {
 			await project.build();
 			project.close();
 
-			const js = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			expect(js).toContain('x');
+			const js = await TestHelper.importOutput<{ x: number }>(join(dir, 'dist/index.js'));
+			expect(js.x).toBe(1);
 			await expect(access(join(dir, 'dist/index.d.ts'))).rejects.toThrow();
 		});
 
@@ -332,8 +397,8 @@ describe('TypeScriptProject', () => {
 			await project.build();
 			project.close();
 
-			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			expect(output).toContain('"https://api.example.com"');
+			const output = await TestHelper.importOutput<{ url: string }>(join(dir, 'dist/index.js'));
+			expect(output.url).toBe('https://api.example.com');
 		});
 
 		it('emits JS for multiple entry points', async () => {
@@ -434,8 +499,7 @@ describe('TypeScriptProject', () => {
 			project.close();
 
 			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			// magic-string is inlined rather than left as a bare import
-			expect(output).not.toContain("from \"magic-string\"");
+			expect(output).not.toMatch(/(?:from\s*|import\s*)["']magic-string["']/);
 		});
 
 		it('does not read dependency metadata when noExternal is empty', async () => {
@@ -473,6 +537,30 @@ describe('TypeScriptProject', () => {
 			await expect(access(join(dir, 'dist/beta.js'))).resolves.toBeUndefined();
 		});
 
+		it('emits JavaScript for nested modules of an unbundled directory entry point', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: {
+					'src/list.ts': "import { naturalComparator } from './internal/comparator';\nexport const sort = (values: number[]): number[] => [ ...values ].sort(naturalComparator);",
+					'src/internal/comparator.ts': 'export const naturalComparator = (a: number, b: number): number => a - b;'
+				},
+				tsconfig: { tsbuild: { entryPoints: { src: './src' }, bundle: false, clean: false }, compilerOptions: { declaration: true } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			project.close();
+
+			expect(process.exitCode).toBeUndefined();
+			await expect(access(join(dir, 'dist/internal/comparator.js'))).resolves.toBeUndefined();
+			await expect(access(join(dir, 'dist/internal/comparator.d.ts'))).resolves.toBeUndefined();
+			await expect(access(join(dir, 'dist/comparator.js'))).rejects.toThrow();
+			expect(await readFile(join(dir, 'dist/list.js'), 'utf8')).toContain('./internal/comparator.js');
+
+			const { sort } = await TestHelper.importOutput<{ sort: (values: number[]) => number[] }>(join(dir, 'dist/list.js'));
+			expect(sort([ 3, 1, 2 ])).toEqual([ 1, 2, 3 ]);
+		});
+
 		it('sets exit code 3 when legacy decorator options are enabled', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const x = 1;' },
@@ -503,8 +591,8 @@ describe('TypeScriptProject', () => {
 				await project.build();
 				project.close();
 
-				const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
-				expect(output).toContain('"expanded-secret"');
+				const output = await TestHelper.importOutput<{ token: string }>(join(dir, 'dist/index.js'));
+				expect(output.token).toBe('expanded-secret');
 			} finally {
 				delete process.env['TSBUILD_TEST_TOKEN'];
 			}
@@ -588,8 +676,8 @@ describe('TypeScriptProject', () => {
 			await project.build();
 			project.close();
 
-			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			expect(output).toContain('x');
+			const output = await TestHelper.importOutput<{ x: number }>(join(dir, 'dist/index.js'));
+			expect(output.x).toBe(1);
 		});
 
 		it('invalidates the incremental cache when clearCache is set', async () => {
@@ -608,9 +696,104 @@ describe('TypeScriptProject', () => {
 			await second.build();
 			second.close();
 
-			const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
-			expect(output).toContain('x');
+			const output = await TestHelper.importOutput<{ x: number }>(join(dir, 'dist/index.js'));
+			expect(output.x).toBe(1);
 			expect(process.exitCode).toBeUndefined();
+		});
+	});
+
+	describe('type-check-only builds', () => {
+		it.each(['tsconfig', 'constructor'] as const)('returns the project without validating or cleaning output paths (noEmit from %s)', async (source) => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 1;', 'keep.txt': 'keep' },
+				tsconfig: { compilerOptions: { noEmit: source === 'tsconfig' }, tsbuild: { clean: true, entryPoints: { index: './missing.ts' } } }
+			});
+			cleanup = c;
+			const closeSpy = vi.spyOn(TypeScriptProject.prototype, 'close');
+
+			try {
+				{
+					const project = new TypeScriptProject(dir, source === 'constructor' ? { compilerOptions: { noEmit: true } } : {});
+					await using checked = await project.build();
+					expect(checked).toBe(project);
+					expect(process.exitCode).toBeUndefined();
+					expect(await readFile(join(dir, 'keep.txt'), 'utf8')).toBe('keep');
+					await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
+					await expect(access(join(dir, 'dist/index.d.ts'))).rejects.toThrow();
+				}
+				expect(closeSpy).toHaveBeenCalledOnce();
+			} finally {
+				closeSpy.mockRestore();
+			}
+		});
+
+		it('preserves outputs when checking and allows a new project to emit', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 1;', 'dist/keep.txt': 'keep' },
+				tsconfig: { tsbuild: { clean: true } }
+			});
+			cleanup = c;
+			{
+				await using project = new TypeScriptProject(dir, { compilerOptions: { noEmit: true } });
+				expect(await project.build()).toBe(project);
+				await project.build();
+			}
+			expect(await readFile(join(dir, 'dist/keep.txt'), 'utf8')).toBe('keep');
+			await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
+			await expect(access(join(dir, 'dist/index.d.ts'))).rejects.toThrow();
+
+			await using project = new TypeScriptProject(dir);
+			await project.build();
+			await expect(access(join(dir, 'dist/keep.txt'))).rejects.toThrow();
+			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+			await expect(access(join(dir, 'dist/index.d.ts'))).resolves.toBeUndefined();
+			expect(process.exitCode).toBeUndefined();
+		});
+
+		it('does not mark existing outputs current after checking changed inputs', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 1;' }
+			});
+			cleanup = c;
+			{
+				await using project = new TypeScriptProject(dir);
+				await project.build();
+			}
+			const declaration = await readFile(join(dir, 'dist/index.d.ts'), 'utf8');
+			await writeFile(join(dir, 'src/index.ts'), 'export const value: string = "updated";');
+			{
+				await using project = new TypeScriptProject(dir, { compilerOptions: { noEmit: true } });
+				await project.build();
+			}
+			expect(await readFile(join(dir, 'dist/index.d.ts'), 'utf8')).toBe(declaration);
+			{
+				await using project = new TypeScriptProject(dir);
+				await project.build();
+			}
+			expect(await readFile(join(dir, 'dist/index.d.ts'), 'utf8')).toContain('value: string');
+			expect(await readFile(join(dir, 'dist/index.js'), 'utf8')).toContain('updated');
+			expect(process.exitCode).toBeUndefined();
+		});
+
+		it('returns the project after diagnostics fail so async disposal still runs', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = "bad";' },
+				tsconfig: { compilerOptions: { noEmit: true } }
+			});
+			cleanup = c;
+			const closeSpy = vi.spyOn(TypeScriptProject.prototype, 'close');
+
+			try {
+				{
+					const project = new TypeScriptProject(dir);
+					await using checked = await project.build();
+					expect(checked).toBe(project);
+					expect(process.exitCode).toBe(1);
+				}
+				expect(closeSpy).toHaveBeenCalledOnce();
+			} finally {
+				closeSpy.mockRestore();
+			}
 		});
 	});
 
@@ -841,13 +1024,17 @@ describe('TypeScriptProject', () => {
 			await project1.build();
 			await project1.close();
 			const output1 = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			const firstModule = await TestHelper.importOutput<{ hello: string }>(join(dir, 'dist/index.js'));
 
 			const project2 = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: false, minify: true });
 			await project2.build();
 			await project2.close();
 			const output2 = await readFile(join(dir, 'dist/index.js'), 'utf8');
+			const secondModule = await TestHelper.importOutput<{ hello: string }>(join(dir, 'dist/index.js'));
 
-			expect(output2.length).toBeLessThan(output1.length);
+			expect(firstModule.hello).toBe('world');
+			expect(secondModule.hello).toBe('world');
+			expect(output2).not.toBe(output1);
 			await expect(readFile(join(dir, 'dist/index.d.ts'), 'utf8')).resolves.toContain('type Greeting = string;');
 		});
 
@@ -1058,7 +1245,7 @@ describe('TypeScriptProject', () => {
 			let disposeSpy: MockInstance<BuildContext['dispose']> | undefined;
 			let disposeContext: (() => Promise<void>) | undefined;
 			let disposed = false;
-			let build: Promise<void> | undefined;
+			let build: Promise<TypeScriptProject | null> | undefined;
 			const watcherStartSpy = vi.spyOn(Watchr.prototype, 'start');
 			const project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
 
@@ -1146,20 +1333,23 @@ describe('TypeScriptProject', () => {
 			}
 		});
 
-		it('waits for pending cache I/O and is idempotent', async () => {
+		it.each([false, true])('waits for pending cache I/O and is idempotent (configured noEmit: %s)', async (noEmit) => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const x = 1;' },
-				tsconfig: { compilerOptions: { declaration: true }, tsbuild: { clean: false } }
+				tsconfig: { compilerOptions: { declaration: true, noEmit }, tsbuild: { clean: false } }
 			});
 			cleanup = c;
 
 			let release!: () => void;
 			const pendingWrite = new Promise<void>((resolve) => { release = resolve });
 			const writeCompressedSpy = vi.spyOn(Files, 'writeCompressed').mockImplementation(async () => pendingWrite);
+			const report = vi.spyOn(Logger, 'buildReport').mockImplementation(() => {});
 
 			try {
 				const project = new TypeScriptProject(dir);
 				await project.build();
+				flushPerformanceLog();
+				expect(report).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
 
 				const shutdown = project.close(1000);
 				expect(project.close()).toBe(shutdown);
@@ -1173,7 +1363,66 @@ describe('TypeScriptProject', () => {
 				release();
 				await shutdown;
 			} finally {
+				release();
 				writeCompressedSpy.mockRestore();
+				report.mockRestore();
+			}
+		});
+
+		it.each([false, true])('accounts for synchronous disposal failures, keeping earlier async errors (async failure: %s)', async (asyncFailure) => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject();
+			cleanup = c;
+			const failure = new Error('compiler disposal failed');
+			const asyncError = new Error('cache persistence failed');
+			const write = asyncFailure ? vi.spyOn(Files, 'writeCompressed').mockRejectedValue(asyncError) : undefined;
+			const dispose = API.prototype[Symbol.dispose];
+			const spy = vi.spyOn(API.prototype, Symbol.dispose).mockImplementation(function (this: API) {
+				dispose.call(this);
+				throw failure;
+			});
+			try {
+				const project = new TypeScriptProject(dir);
+				await project.build();
+				const syntaxCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+				expect(syntaxCache.size).toBeGreaterThan(0);
+				const closing = project.close();
+				await expect(closing).rejects.toBe(asyncFailure ? asyncError : failure);
+				expect(syntaxCache.size).toBe(0);
+				expect(project.close()).toBe(closing);
+				expect(spy).toHaveBeenCalledOnce();
+			} finally { spy.mockRestore(); write?.mockRestore() }
+		});
+
+		it('keeps compiler resources alive after a shutdown timeout until pending I/O drains', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject();
+			cleanup = c;
+			const pending = Promise.withResolvers<void>();
+			const write = vi.spyOn(Files, 'writeCompressed').mockImplementation(async () => pending.promise);
+			const disposed = Promise.withResolvers<void>();
+			const dispose = API.prototype[Symbol.dispose];
+			const spy = vi.spyOn(API.prototype, Symbol.dispose).mockImplementation(function (this: API) {
+				dispose.call(this);
+				disposed.resolve();
+			});
+			const project = new TypeScriptProject(dir);
+			try {
+				await project.build();
+				const syntaxCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+				expect(syntaxCache.size).toBeGreaterThan(0);
+				const closing = project.close(1);
+				await expect(closing).rejects.toThrow('timed out after 1ms');
+				expect(spy).not.toHaveBeenCalled();
+				expect(syntaxCache.size).toBeGreaterThan(0);
+				expect(project.close()).toBe(closing);
+				pending.resolve();
+				await disposed.promise;
+				expect(spy).toHaveBeenCalledOnce();
+				expect(syntaxCache.size).toBe(0);
+			} finally {
+				pending.resolve();
+				await disposed.promise;
+				write.mockRestore();
+				spy.mockRestore();
 			}
 		});
 

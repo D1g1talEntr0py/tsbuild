@@ -1,34 +1,41 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ModuleKind, ModuleResolutionKind } from 'typescript/sync';
 import type { AbsolutePath } from 'src/@types';
 import { discoverLocalDependencies } from 'src/plugins/plugin-dependencies';
-
-const mockState = vi.hoisted(() => ({ resolvedDependency: '' }));
-
-vi.mock('typescript', async (importOriginal) => {
-	const typeScript = await importOriginal<typeof import('typescript')>();
-	return {
-		...typeScript,
-		resolveModuleName: vi.fn(() => ({ resolvedModule: { resolvedFileName: mockState.resolvedDependency } }))
-	};
-});
+import { TestHelper } from '../scripts/test-helper';
 
 describe('discoverLocalDependencies', () => {
-	it('excludes dependencies resolved through a node_modules path', async () => {
-		const directory = await mkdtemp(join(tmpdir(), 'tsbuild-plugin-dependencies-'));
-		const entryFile = join(directory, 'plugin.ts');
-		const nodeModulesDependency = join(directory, 'node_modules', 'package', 'index.ts');
+	const compilerOptions = { module: ModuleKind.ESNext, moduleResolution: ModuleResolutionKind.Bundler };
+	let directory: string;
 
-		try {
-			await writeFile(entryFile, "import 'package';\n");
-			mockState.resolvedDependency = nodeModulesDependency;
-			expect(discoverLocalDependencies(entryFile as AbsolutePath, {})).toEqual(new Set([ entryFile ]));
-		} finally {
-			mockState.resolvedDependency = '';
-			await rm(nodeModulesDependency, { force: true });
-			await rm(directory, { recursive: true, force: true });
-		}
+	beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'tsbuild-plugin-dependencies-')) });
+	afterEach(async () => { await rm(directory, { recursive: true, force: true }) });
+
+	const write = async (file: string, content: string) => {
+		const path = join(directory, file);
+		await mkdir(join(path, '..'), { recursive: true });
+		await writeFile(path, content);
+		return path as AbsolutePath;
+	};
+
+	it('follows local imports and re-exports, excluding node_modules and unresolved specifiers', async () => {
+		await write('node_modules/package/package.json', JSON.stringify({ name: 'package', types: './index.d.ts' }));
+		await write('node_modules/package/index.d.ts', 'export declare const value: number;\n');
+		const entryFile = await write('plugin.ts', "import 'package';\nimport { a } from './a';\nexport * from './b';\nimport 'missing';\nexport const plugin = a;\n");
+		const a = await write('a.ts', "import { b } from './b';\nexport const a = b;\n");
+		const b = await write('b.ts', "export { a } from './a';\nexport const b = 1;\n");
+
+		expect(discoverLocalDependencies(TestHelper.api, entryFile, compilerOptions)).toEqual(new Set([ entryFile, a, b ]));
+	});
+
+	it('tracks non-script dependencies without parsing them and skips unreadable entries', async () => {
+		const entryFile = await write('plugin.ts', "import data from './data.json';\nexport default data;\n");
+		const data = await write('data.json', '{ "value": 1 }');
+
+		expect(discoverLocalDependencies(TestHelper.api, entryFile, { ...compilerOptions, resolveJsonModule: true })).toEqual(new Set([ entryFile, data ]));
+		expect(discoverLocalDependencies(TestHelper.api, join(directory, 'missing.ts') as AbsolutePath, compilerOptions)).toEqual(new Set());
 	});
 });

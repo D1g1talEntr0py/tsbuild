@@ -4,10 +4,12 @@ import { brotliDecompress, brotliCompress, constants as brotliConstants } from '
 import { Paths } from './paths';
 import { isErrnoException } from './errors';
 import { access, chmod, constants as fsConstants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { LanguageVariant, ScriptTarget, SyntaxKind, createScanner } from 'typescript';
+import { LanguageVariant, SyntaxKind } from 'typescript/ast';
+import { createScanner } from 'typescript/ast/scanner';
 import type { WriteFileOptions } from 'node:fs';
 import type { AbsolutePath, Path, WrittenFile } from './@types';
 
+type ReplacementSpecifier = { start: number; end: number; content: string };
 type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView>;
 type WriteEntry = { path: AbsolutePath | string; data: WritableData; options?: WriteFileOptions; size?: number };
 
@@ -144,8 +146,6 @@ export class Files {
 	 * @param code The JavaScript output content to rewrite
 	 */
 	static rewriteRelativeSpecifiers(code: string): string {
-		type Replacement = { start: number; end: number; content: string };
-
 		const appendJsExtension = (specifier: string) => {
 			const hashIndex = specifier.indexOf('#');
 			const queryIndex = specifier.indexOf('?');
@@ -157,9 +157,9 @@ export class Files {
 			return `${specifier.slice(0, suffixStart)}${FileExtension.JS}${specifier.slice(suffixStart)}`;
 		};
 
-		const scanner = createScanner(ScriptTarget.Latest, true, LanguageVariant.Standard, code);
+		const scanner = createScanner(true, LanguageVariant.Standard, code);
 
-		const replacements: Replacement[] = [];
+		const replacements: ReplacementSpecifier[] = [];
 		const addSpecifierRewrite = (start: number, end: number, tokenText: string) => {
 			const quote = tokenText[0];
 			const specifier = tokenText.slice(1, -1);
@@ -173,7 +173,7 @@ export class Files {
 		let maybeDynamicImport = false;
 		let expectDynamicImportSpecifier = false;
 
-		for (let token = scanner.scan(); token !== SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+		for (let token = scanner.scan(); token !== SyntaxKind.EndOfFile; token = scanner.scan()) {
 			switch (token) {
 				case SyntaxKind.ImportKeyword: {
 					seenImportOrExport = true;
@@ -215,7 +215,7 @@ export class Files {
 				case SyntaxKind.StringLiteral:
 				case SyntaxKind.NoSubstitutionTemplateLiteral: {
 					if (expectDynamicImportSpecifier || expectSpecifierAfterFrom || expectSideEffectImportSpecifier) {
-						addSpecifierRewrite(scanner.getTokenPos(), scanner.getTextPos(), scanner.getTokenText());
+						addSpecifierRewrite(scanner.getTokenStart(), scanner.getTokenEnd(), scanner.getTokenText());
 						expectDynamicImportSpecifier = false;
 						expectSpecifierAfterFrom = false;
 						expectSideEffectImportSpecifier = false;
@@ -245,10 +245,8 @@ export class Files {
 				default: break;
 			}
 
-			if (seenImportOrExport && importOrExportDepth === 0 && token === SyntaxKind.CloseBraceToken) {
-				// End `import { ... }` / `export { ... }` clause where semicolon may be omitted.
-				expectSideEffectImportSpecifier = false;
-			}
+			// End `import { ... }` / `export { ... }` clause where semicolon may be omitted.
+			if (seenImportOrExport && importOrExportDepth === 0 && token === SyntaxKind.CloseBraceToken) { expectSideEffectImportSpecifier = false }
 		}
 
 		if (replacements.length === 0) { return code }

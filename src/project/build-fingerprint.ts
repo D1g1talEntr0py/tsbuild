@@ -1,6 +1,6 @@
 import { Json } from '../json';
 import { format } from '../constants';
-import type { CompilerOptions } from 'typescript';
+import type { CompilerOptions } from 'typescript/sync';
 import type { Pattern, ProjectBuildConfiguration } from '../@types';
 
 const serializePattern = (pattern: Pattern): string => pattern instanceof RegExp ? `/${pattern.source}/${pattern.flags}` : pattern;

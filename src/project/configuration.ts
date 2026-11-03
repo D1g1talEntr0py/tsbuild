@@ -1,22 +1,73 @@
-import { sys, formatDiagnostics, parseJsonConfigFileContent, readConfigFile, findConfigFile } from 'typescript';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
+import { formatDiagnostics } from 'typescript/sync';
+import { toRootedDirectoryPath } from 'typescript/path';
 import { Paths } from '../paths';
 import { Json } from '../json';
 import { Logger } from '../logger';
 import { ConfigurationError } from '../errors';
 import { IncrementalBuildCache } from '../incremental-build-cache';
 import { inferEntryPoints, normalizeEntryPoints, type PackageJson } from '../entry-points';
-import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, cacheDirectory, buildInfoFile, Platform } from '../constants';
+import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, Platform, BuildOutputStyle } from '../constants';
 import { diagnosticsHost } from './diagnostics';
+import type { API } from 'typescript/sync';
 import type { AbsolutePath, RelativePath, CommandLineOptions, TypeScriptOptions, TypeScriptConfiguration, ReadConfigResult, EntryPoints, JsonString, BuildConfiguration } from '../@types';
 
 /** Default CLI-only runtime options for project construction. */
 export const defaultCommandLineOptions: CommandLineOptions = { clearCache: false, force: false, watch: false, minify: false };
 
 const domPredicate = (lib: string) => [ 'DOM', 'LIB.DOM.D.TS' ].includes(lib.toUpperCase());
-const jsonTsbuildKeys = [ 'entryPoints', 'platform', 'bundle', 'clean', 'packages', 'external', 'noExternal', 'dts', 'env', 'sourceMap', 'splitting', 'banner', 'footer', 'plugins', 'iife' ] as const;
+const jsonTsbuildKeys = [ 'entryPoints', 'platform', 'bundle', 'clean', 'outputStyle', 'packages', 'external', 'noExternal', 'dts', 'env', 'sourceMap', 'splitting', 'banner', 'footer', 'plugins', 'iife' ] as const;
 const jsonDtsKeys = [ 'entryPoints', 'resolve' ] as const;
 const jsonBannerFooterKeys = [ 'js', 'css' ] as const;
 const jsonIifeKeys = [ 'globalName' ] as const;
+const declarationFileExpression = /\.d\.(?:[^./]+\.)?[cm]?ts$/;
+
+/**
+ * Computes the deepest directory containing every non-declaration root file.
+ * TypeScript 7 no longer infers this layout root for `outDir` and reports TS5011 instead, so tsbuild supplies it as the implicit `rootDir`.
+ * @param fileNames - Absolute root file names from the parsed configuration
+ * @returns The common source directory, or undefined when there are no source roots
+ */
+function commonSourceDirectory(fileNames: readonly string[]) {
+	let common: string[] | undefined;
+
+	for (const fileName of fileNames) {
+		if (declarationFileExpression.test(fileName)) { continue }
+
+		const segments = Paths.directoryName(fileName).split('/');
+
+		if (common === undefined) { common = segments; continue }
+
+		let length = 0;
+		while (length < common.length && common[length] === segments[length]) { length++ }
+
+		common.length = length;
+	}
+
+	return common && (common.join('/') || '/');
+}
+
+/**
+ * Finds the nearest tsconfig.json by walking up from a directory.
+ * @param directory - Directory to start searching from
+ * @returns Absolute path of the nearest tsconfig.json, or undefined when none exists
+ */
+function findConfigFile(directory: AbsolutePath): AbsolutePath | undefined {
+	for (let current = directory, parent = dirname(current) as AbsolutePath; ; current = parent, parent = dirname(current) as AbsolutePath) {
+		const candidate = Paths.join(current, 'tsconfig.json');
+		if (existsSync(candidate)) { return candidate }
+		if (parent === current) { return undefined }
+	}
+}
+
+/**
+ * Reads a UTF-8 file, returning undefined when it cannot be read.
+ * @param path - Absolute file path
+ */
+function readOptionalFile(path: AbsolutePath): string | undefined {
+	try { return readFileSync(path, 'utf8') } catch { return undefined }
+}
 
 /**
  * Rejects unknown keys in a JSON configuration object.
@@ -66,6 +117,7 @@ function validateJsonTsbuildConfiguration(tsbuild: unknown) {
 
 /**
  * Resolves configuration by merging options with tsconfig.json.
+ * @param api - TypeScript API session used to read and parse the configuration
  * @param directory - Project root directory
  * @param typeScriptOptions - Partial TypeScript options to merge
  * @param options - Command-line options
@@ -74,18 +126,29 @@ function validateJsonTsbuildConfiguration(tsbuild: unknown) {
  * @param options.watch - Watch mode
  * @returns Resolved configuration and TypeScript parser results
  */
-export function resolveConfiguration(directory: AbsolutePath, typeScriptOptions: TypeScriptOptions, { minify, force, watch }: CommandLineOptions): TypeScriptConfiguration {
-	const configFile = findConfigFile(directory, sys.fileExists) as AbsolutePath ?? Paths.join(directory, './tsconfig.json');
-	const configResult: ReadConfigResult = readConfigFile(configFile, sys.readFile);
+export function resolveConfiguration(api: API, directory: AbsolutePath, typeScriptOptions: TypeScriptOptions, { minify, force, watch, outputStyle }: CommandLineOptions): TypeScriptConfiguration {
+	const configFile = findConfigFile(directory) ?? Paths.join(directory, './tsconfig.json');
+	const configResult = api.readConfigFile(configFile) as ReadConfigResult;
 
 	if (configResult.error !== undefined) {
 		throw new ConfigurationError(formatDiagnostics([configResult.error], diagnosticsHost));
 	}
 
 	validateJsonTsbuildConfiguration(configResult.config.tsbuild);
+	const outputStyles = Object.values(BuildOutputStyle);
+	const isBuildOutputStyle = (value: unknown): value is BuildOutputStyle => outputStyles.some((style) => style === value);
+	if (outputStyle !== undefined && !isBuildOutputStyle(outputStyle)) {
+		throw new ConfigurationError(`Invalid value for "--outputStyle": ${String(outputStyle)}. Valid values: ${outputStyles.join(', ')}`);
+	}
+
+	for (const outputStyle of [ configResult.config.tsbuild?.outputStyle, typeScriptOptions.tsbuild?.outputStyle ]) {
+		if (outputStyle !== undefined && !isBuildOutputStyle(outputStyle)) {
+			throw new ConfigurationError(`Invalid value for "tsbuild.outputStyle": ${String(outputStyle)}. Valid values: ${outputStyles.join(', ')}`);
+		}
+	}
 
 	const bundle = typeScriptOptions.tsbuild?.bundle ?? configResult.config.tsbuild?.bundle ?? true;
-	const { lib } = parseJsonConfigFileContent({ ...configResult.config, compilerOptions: { ...configResult.config.compilerOptions, ...typeScriptOptions.compilerOptions } }, sys, directory, undefined, configFile).options;
+	const { lib } = api.parseJsonConfigFileContent({ ...configResult.config, compilerOptions: { ...configResult.config.compilerOptions, ...typeScriptOptions.compilerOptions } }, { configFileName: configFile }).options;
 	const platform = typeScriptOptions.tsbuild?.platform ?? configResult.config.tsbuild?.platform ?? (lib?.some(domPredicate) ? Platform.BROWSER : Platform.NODE);
 	const noExternal = typeScriptOptions.tsbuild?.noExternal ?? configResult.config.tsbuild?.noExternal ?? [];
 	const hasExplicitEntryPoints = typeScriptOptions.tsbuild?.entryPoints !== undefined || configResult.config.tsbuild?.entryPoints !== undefined;
@@ -94,7 +157,7 @@ export function resolveConfiguration(directory: AbsolutePath, typeScriptOptions:
 	let inferredEntryPoints: EntryPoints<RelativePath> | undefined;
 	if (!hasExplicitEntryPoints && bundle) {
 		const packageJsonPath = Paths.join(directory, 'package.json');
-		const packageJsonContent = sys.readFile(packageJsonPath) as JsonString<PackageJson>;
+		const packageJsonContent = readOptionalFile(packageJsonPath) as JsonString<PackageJson> | undefined;
 		if (packageJsonContent) {
 			try {
 				const pkgJson = Json.parse<PackageJson>(packageJsonContent);
@@ -131,11 +194,12 @@ export function resolveConfiguration(directory: AbsolutePath, typeScriptOptions:
 			...defaultTsbuildConfig,
 			...configResult.config.tsbuild,
 			...typeScriptOptions.tsbuild,
+			outputStyle: outputStyle ?? typeScriptOptions.tsbuild?.outputStyle ?? configResult.config.tsbuild?.outputStyle ?? BuildOutputStyle.SUMMARY,
 			dts: { ...defaultTsbuildConfig.dts, ...configResult.config.tsbuild?.dts, ...typeScriptOptions.tsbuild?.dts },
 			watch: defaultTsbuildConfig.watch
 		},
 		compilerOptions: {
-			...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, incremental: true, tsBuildInfoFile: Paths.join(cacheDirectory, buildInfoFile), lib: [] },
+			...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, incremental: true, lib: [] },
 			...configResult.config.compilerOptions,
 			...typeScriptOptions.compilerOptions,
 			// Auto-inject 'node' only on Node platform — browser/neutral builds shouldn't pay the cost of loading @types/node (~3 MB of declarations).
@@ -153,19 +217,27 @@ export function resolveConfiguration(directory: AbsolutePath, typeScriptOptions:
 			})()
 		}
 	};
+
 	baseConfig.tsbuild.entryPoints = normalizeEntryPoints(baseConfig.tsbuild.entryPoints);
 
-	const { options, fileNames, errors } = parseJsonConfigFileContent(baseConfig, sys, directory);
+	// Resolve relative to the requested project directory even when the config was found in an ancestor; TypeScript still needs a config file name to accept `incremental`
+	const { options, fileNames, errors } = api.parseJsonConfigFileContent(baseConfig, { configFileName: Paths.join(directory, basename(configFile)) });
+	const rootDir = options.rootDir ?? commonSourceDirectory(fileNames);
 
 	// Build final configuration with all required fields
 	// Note: compilerOptionOverrides must be spread last to ensure they take precedence
 	return {
 		...baseConfig,
-		compilerOptions: { ...baseConfig.compilerOptions, ...options, lib: lib ?? options.lib ?? [], ...compilerOptionOverrides },
+		compilerOptions: {
+			...options,
+			lib: lib ?? options.lib,
+			...(rootDir === undefined ? {} : { rootDir: toRootedDirectoryPath(rootDir, undefined) }),
+			...compilerOptionOverrides
+		},
 		directory,
 		configFilePath: configFile,
 		rootNames: fileNames,
 		configFileParsingDiagnostics: errors,
-		buildCache: baseConfig.compilerOptions.incremental ? new IncrementalBuildCache(directory, baseConfig.compilerOptions.tsBuildInfoFile) : undefined
+		buildCache: baseConfig.compilerOptions.incremental ? new IncrementalBuildCache(directory) : undefined
 	};
 }

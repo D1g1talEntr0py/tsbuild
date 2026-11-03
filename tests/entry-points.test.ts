@@ -29,16 +29,73 @@ describe('resolveEntryPoints', () => {
 		expect(entries.custom).toBe('./src/index.ts');
 	});
 
-	it('expands immediate files with deterministic precedence for colliding stems', async () => {
+	it('expands files with deterministic precedence for colliding stems', async () => {
 		vi.spyOn(Files, 'readDirectory').mockResolvedValueOnce([ 'index.ts', 'index.js', 'data.json' ]);
 		expect(await resolveEntryPoints(directory, { ignored: './src' })).toEqual({ data: '/project/src/data.json', index: '/project/src/index.ts' });
 	});
 
+	it.each([ './src/index.ts', './src' ])('checks the configured path %s only once', async (entryPoint) => {
+		const fsp = await import('node:fs/promises');
+		const lstatSpy = vi.spyOn(fsp, 'lstat');
+
+		try {
+			await resolveEntryPoints(directory, { entry: entryPoint });
+			expect(lstatSpy.mock.calls.filter(([path]) => path === Paths.absolute(directory, entryPoint))).toHaveLength(1);
+		} finally {
+			lstatSpy.mockRestore();
+		}
+	});
+
+	it('checks a missing configured path only once', async () => {
+		const fsp = await import('node:fs/promises');
+		const lstatSpy = vi.spyOn(fsp, 'lstat');
+
+		try {
+			await expect(resolveEntryPoints(directory, { entry: './missing.ts' })).rejects.toThrow(ConfigurationError);
+			expect(lstatSpy).toHaveBeenCalledExactlyOnceWith('/project/missing.ts');
+		} finally {
+			lstatSpy.mockRestore();
+		}
+	});
+
+	it.each([ '/project/src/index.ts', '/project/src', '/project/missing' ])('rejects symbolic links to %s', async (target) => {
+		vol.symlinkSync(target, '/project/link');
+		await expect(resolveEntryPoints(directory, { entry: './link' })).rejects.toThrow(ConfigurationError);
+	});
+
+	it('propagates filesystem errors from configured paths', async () => {
+		const fsp = await import('node:fs/promises');
+		const error = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+		const lstatSpy = vi.spyOn(fsp, 'lstat').mockRejectedValueOnce(error);
+
+		try {
+			await expect(resolveEntryPoints(directory, { entry: './src/index.ts' })).rejects.toBe(error);
+		} finally {
+			lstatSpy.mockRestore();
+		}
+	});
+
 	it('overwrites collisions in configured iteration order without moving the key', async () => {
 		const result = await resolveEntryPoints(directory, { expanded: './src', index: './other.ts' });
-		expect(result).toEqual({ data: '/project/src/data.json', index: '/project/other.ts' });
-		expect(Object.keys(result)).toEqual([ 'data', 'index' ]);
-		expect(await resolveEntryPoints(directory, { index: './other.ts', expanded: './src' })).toEqual({ index: '/project/src/index.ts', data: '/project/src/data.json' });
+		expect(result).toEqual({ data: '/project/src/data.json', index: '/project/other.ts', 'nested/child': '/project/src/nested/child.ts' });
+		expect(Object.keys(result)).toEqual([ 'data', 'index', 'nested/child' ]);
+		expect(await resolveEntryPoints(directory, { index: './other.ts', expanded: './src' })).toEqual({ index: '/project/src/index.ts', data: '/project/src/data.json', 'nested/child': '/project/src/nested/child.ts' });
+	});
+
+	it('expands nested directories recursively with names that preserve the directory structure', async () => {
+		vol.fromJSON({ '/project/lib/index.ts': '', '/project/lib/internal/helper.ts': '', '/project/lib/internal/deep/util.ts': '', '/project/lib/internal/deep/util.js': '' });
+		const result = await resolveEntryPoints(directory, { lib: './lib' });
+
+		expect(result).toEqual({ index: '/project/lib/index.ts', 'internal/deep/util': '/project/lib/internal/deep/util.ts', 'internal/helper': '/project/lib/internal/helper.ts' });
+		expect(Object.keys(result)).toEqual([ 'index', 'internal/deep/util', 'internal/helper' ]);
+	});
+
+	it('does not follow symbolic links inside expanded directories', async () => {
+		vol.fromJSON({ '/project/lib/index.ts': '', '/outside/secret.ts': '' });
+		vol.symlinkSync('/outside', '/project/lib/linked-directory');
+		vol.symlinkSync('/outside/secret.ts', '/project/lib/linked-file.ts');
+
+		expect(await resolveEntryPoints(directory, { lib: './lib' })).toEqual({ index: '/project/lib/index.ts' });
 	});
 
 	it('rejects asynchronously with the first missing configured path', async () => {

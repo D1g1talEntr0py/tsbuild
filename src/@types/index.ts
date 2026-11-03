@@ -1,9 +1,10 @@
 import type { WriteFileOptions } from 'node:fs';
 import type { Plugin, TsconfigRaw } from 'esbuild';
 import type { FileSystemEvent, WatchrOptions } from '@d1g1tal/watchr';
-import type { CompilerOptions, Diagnostic, ProjectReference, ScriptTarget } from 'typescript';
+import type { CompilerOptions, Diagnostic, ProjectReference } from 'typescript/sync';
+import type { ScriptTarget } from 'typescript/ast';
 import type { PerformanceEntry, PerformanceMeasureOptions } from 'node:perf_hooks';
-
+import type { PerformancePhase } from '../performance-phase';
 declare global {
 	interface ImportMeta {
 		env?: { tsbuild_version?: string };
@@ -24,6 +25,7 @@ type Mutable<T> = Expand<{
   -readonly [K in keyof T]: T[K];
 }>;
 
+type VoidFunction = () => void;
 type Fn<P = any, R = any> = (...args: P[]) => R;
 type TypedFunction<T extends (...args: any[]) => any> = (...args: Parameters<T>) => ReturnType<T>;
 type InferredFunction<T = Fn> = T extends (...args: infer P) => infer R ? (...args: P) => R : never;
@@ -41,10 +43,13 @@ type Constructor<P extends unknown[] = unknown[], R = unknown> = new (...args: P
 interface Closable { close: () => void | Promise<void> };
 type ClosableConstructor = Constructor<any[], Closable>;
 
+type BuildOutputStyle = 'dashboard' | 'pipeline' | 'artifacts' | 'summary' | 'detailed';
 type PerformanceSubStep = { name: string; duration: string; ms: number; result?: WrittenFile[] };
-type PerformanceEntryDetail<T = unknown[]> = { message: string, result?: T, steps?: PerformanceSubStep[], notes?: string[], overheadMs?: number };
+type PerformanceEntryDetail<T = unknown[]> = { phase: PerformancePhase, result?: T, steps?: PerformanceSubStep[], phases?: PerformanceSubStep[], outputStyle?: BuildOutputStyle, interactive?: boolean, buildPhase?: boolean, notes?: string[], overheadMs?: number };
 type DetailedPerformanceMeasureOptions<R> = Modify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
-interface DetailedPerformanceEntry<D> extends PerformanceEntry { detail: PerformanceEntryDetail<D> };
+interface DetailedPerformanceEntry<D> extends PerformanceEntry {
+	detail: PerformanceEntryDetail<D>
+};
 
 type Pattern = string | RegExp;
 
@@ -125,6 +130,8 @@ type BuildOptions = {
 	bundle?: boolean;
 	/** Remove all files from the output directory before building. Defaults to true */
 	clean?: boolean;
+	/** Build report layout: dashboard, pipeline, artifacts, summary (default), or detailed */
+	outputStyle?: BuildOutputStyle;
 	/** Default behavior for node_modules dependencies */
 	packages?: 'bundle' | 'external';
 	/** Specific dependencies to externalize (don't bundle) */
@@ -157,6 +164,7 @@ type CommandLineOptions = {
 	force: boolean;
 	watch: boolean;
 	minify: boolean;
+	outputStyle?: string;
 };
 
 type BuildConfiguration = ExpandedModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { force: boolean, minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
@@ -171,10 +179,12 @@ type ProjectBuildConfiguration = Expand<Readonly<Modify<BuildConfiguration, { en
 }>>;
 
 type TypeScriptCompilerOptions = Modify<Pick<CompilerOptions, KnownKeys<CompilerOptions>>, { target?: ScriptTarget }>;
-type TypeScriptCompilerConfiguration = MarkRequired<TypeScriptCompilerOptions, 'target' | 'outDir' | 'noEmit' | 'sourceMap' | 'lib' | 'incremental' | 'tsBuildInfoFile'>;
+
+/** Compiler options accepted programmatically; like `tsconfig.json`, path options are plain strings resolved against the config directory */
+type TypeScriptCompilerOptionsInput = Modify<TypeScriptCompilerOptions, { declarationDir?: string; outDir?: string; rootDir?: string; rootDirs?: string[]; typeRoots?: string[]; tsBuildInfoFile?: string; project?: string; configFilePath?: string }>;
 
 type TypeScriptOptions = {
-	compilerOptions?: TypeScriptCompilerOptions;
+	compilerOptions?: TypeScriptCompilerOptionsInput;
 	tsbuild?: BuildOptions;
 };
 
@@ -187,6 +197,17 @@ type CachedDeclaration = {
 	fileReferences: ReadonlySet<string>;
 };
 
+/** Stat signature of one compiler input: absolute path, modification time and size */
+type BuildInputStat = readonly [ path: string, mtimeMs: number, size: number ];
+
+/** Inputs of a successful type-check, persisted so an unchanged project can skip the compiler entirely */
+type BuildInputManifest = {
+	/** Deterministic key of the root names, compiler options and TypeScript version */
+	key: string;
+	/** Stat signatures of every source file in the program (project sources, libs and dependency declarations) */
+	files: ReadonlyArray<BuildInputStat>;
+};
+
 /** Persistent cache payload stored in the version-stamped .tsbuild/dts_cache.v{N}.br */
 type BuildCache = {
 	/** Cache format version for compatibility checking */
@@ -195,25 +216,26 @@ type BuildCache = {
 	files: Map<string, CachedDeclaration>;
 	/** Build configuration fingerprint: hash of output-affecting options (minify, iife, declaration, platform, etc.) */
 	fingerprint?: string;
+	/** Compiler inputs of the build that produced this cache */
+	manifest?: BuildInputManifest;
 };
 
 interface BuildCacheManager {
 	invalidate(): void;
 	restore(target: Map<string, CachedDeclaration>): Promise<void>;
-	save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string): Promise<void>;
+	save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string, manifest?: BuildInputManifest): Promise<void>;
 	setExpectedOutputArtifacts(outputArtifacts: ReadonlyArray<AbsolutePath>): void;
 	expectedOutputsExist(): Promise<boolean>;
 	isValid(): boolean;
-	isBuildInfoFile(filePath: AbsolutePath): boolean;
-	/** Synchronously checks whether persisted incremental state exists on disk (i.e. .tsbuildinfo). */
-	hasPersistedState(): boolean;
+	/** Returns the persisted input manifest when it matches the given key and every recorded input is unchanged on disk. */
+	upToDateManifest(key: string): Promise<BuildInputManifest | undefined>;
 	/** Checks whether the build configuration has changed since the cache was last saved. */
 	fingerprintMatches(currentFingerprint: string): Promise<boolean>;
 };
 
 type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	clean: boolean;
-	compilerOptions: TypeScriptCompilerConfiguration;
+	compilerOptions: CompilerOptions;
 	tsbuild: BuildConfiguration;
 	directory: AbsolutePath;
 	/** Absolute path to the resolved tsconfig.json used for this project (passed to tsnode as the plugin scope's tsconfig) */
@@ -261,6 +283,7 @@ type FormatSupplier = (text: string) => string;
 type LogEntryType = 'info' | 'success' | 'done' | 'error' | 'warn';
 
 export type {
+	VoidFunction,
 	Fn,
 	TypedFunction,
 	InferredFunction,
@@ -278,6 +301,8 @@ export type {
 	ProjectBuildConfiguration,
 	BuildConfiguration,
 	BuildCache,
+	BuildInputStat,
+	BuildInputManifest,
 	BuildCacheManager,
 	WrittenFile,
 	SourceFile,
@@ -286,6 +311,7 @@ export type {
 	ClosableConstructor,
 	CompilerOptionOverrides,
 	PerformanceSubStep,
+	BuildOutputStyle,
 	PendingFileChange,
 	JsxRenderingMode,
 	FormatSupplier,
@@ -303,5 +329,5 @@ export type {
 	PluginFactory,
 	CommandLineOptions,
 	IifeOptions,
-	Plugin,
+	Plugin
 }

@@ -6,7 +6,7 @@
 [![codecov](https://img.shields.io/codecov/c/github/D1g1talEntr0py/tsbuild?branch=main&label=coverage)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
 [![License: MIT](https://img.shields.io/github/license/D1g1talEntr0py/tsbuild)](https://github.com/D1g1talEntr0py/tsbuild/blob/main/LICENSE)
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript->=5.6.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript->=7.1-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 A TypeScript build tool that combines two tools into one workflow: **TypeScript's type system** for correctness and **esbuild** for speed. Built for modern ESM-only projects on Node.js 24+.
 
@@ -19,7 +19,7 @@ TC39 standard decorators are supported natively — no additional dependencies n
 - 🚀 **Blazing Fast** - Leverages esbuild for rapid bundling and transpilation
 - 🔍 **Full Type Safety** - Uses TypeScript API for comprehensive type checking
 - 📦 **Declaration Bundling** - Automatically bundles `.d.ts` files into single entry points
-- ⚡ **Incremental Builds** - Intelligent caching with `.tsbuildinfo` for fast rebuilds
+- ⚡ **Incremental Builds** - Persistent input manifest and declaration cache for near-instant no-change rebuilds
 - 👁️ **Watch Mode** - File watching with automatic rebuilds on changes
 - 🎨 **TC39 Decorators** - Native support for standard decorators, no extra dependencies required
 - 🔌 **Plugin System** - Extensible architecture with custom esbuild plugins
@@ -115,7 +115,7 @@ By default, bare specifiers (e.g. `lodash-es`) are kept as external imports. Use
 
 ### Preferred `tsconfig.json` setup — incremental (recommended)
 
-`incremental` defaults to `true` in tsbuild unless you explicitly set it to `false` in your `tsconfig.json`. With incremental enabled, TypeScript only re-emits changed files on each build and the declaration cache is preserved across runs, making repeated builds significantly faster.
+`incremental` defaults to `true` in tsbuild unless you explicitly set it to `false` in your `tsconfig.json`. With incremental enabled, tsbuild preserves the declaration cache across runs and skips compilation when its recorded inputs are unchanged. Watch rebuilds reuse compiler state through TypeScript snapshots.
 
 ```jsonc
 {
@@ -139,14 +139,14 @@ By default, bare specifiers (e.g. `lodash-es`) are kept as external imports. Use
 
 ### Preferred `tsconfig.json` setup — non-incremental
 
-Set `incremental: false` to opt out of the `.tsbuildinfo` cache entirely. Every build is a full compilation from scratch. Useful for CI environments where you want deterministic, cache-free output.
+Set `incremental: false` to opt out of the incremental cache entirely. Every build is a full compilation from scratch. Useful for CI environments where you want deterministic, cache-free output.
 
 ```jsonc
 {
   "compilerOptions": {
     "outDir": "./dist",
     "declaration": true,
-    "incremental": false,          	// disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
+    "incremental": false,          	// disables tsbuild's input manifest and DTS cache
     "isolatedModules": true,				// required — flags constructs esbuild can't safely transpile
     "verbatimModuleSyntax": true,
     "strict": true,									// Not needed with TypeScript 6 and above, since strict mode is enabled by default
@@ -185,7 +185,9 @@ That's it. tsbuild reads your `compilerOptions`, infers entry points from your `
 
 #### Your tsconfig.json Does the Heavy Lifting
 
-Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, `baseUrl`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
+Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
+
+For JavaScript emission, esbuild's `alwaysStrict` setting follows `compilerOptions.strict`. If `strict` is omitted, tsbuild uses TypeScript 7's strict-by-default behavior; an explicit `strict: false` is preserved.
 
 The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behavior, entry points, output formatting, and similar build-specific settings.
 
@@ -193,6 +195,8 @@ This means your type-checker and your build always use the exact same TypeScript
 
 The only `compilerOptions` setting tsbuild requires:
 - **`outDir`** — determines where built files are written
+
+TypeScript 7 requires an explicit `rootDir` whenever `outDir` is set and the sources do not sit directly beside `tsconfig.json`. When `rootDir` is omitted, tsbuild sets it to the common directory of your source files (e.g. `src/`), which preserves the familiar `dist/` layout. Set `rootDir` explicitly to override it.
 
 Declaration generation is **not required**. If `declaration: true` is already set in your `tsconfig.json`, tsbuild will automatically generate and bundle `.d.ts` files. If it's not set, tsbuild skips that step — no changes needed either way.
 
@@ -241,11 +245,14 @@ tsbuild --minify  # or -m
 # Force a full rebuild, bypassing incremental compilation.
 tsbuild --force  # or -f
 
-# Clear the incremental build cache (.tsbuild/dts_cache.v5.br) before building.
+# Clear the incremental build cache (.tsbuild/dts_cache.v6.br) before building.
 tsbuild --clearCache  # or -c
 
 # Build with watch mode
 tsbuild --watch  # or -w
+
+# Choose a build report layout
+tsbuild --outputStyle detailed
 
 # Type-check only (no bundling)
 tsbuild --noEmit  # or -n
@@ -260,7 +267,7 @@ tsbuild --help  # or -h
 tsbuild --version  # or -v
 ```
 
-> **Note**: `--watch`, `--force`, and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. Programmatic callers pass them as the explicit `CliOptions` argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default.
+> **Note**: `--watch`, `--force`, and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. `--outputStyle` accepts `dashboard`, `pipeline`, `artifacts`, `summary` (default), or `detailed`; it overrides `tsbuild.outputStyle` from `tsconfig.json`. Programmatic callers pass runtime options as the explicit `CliOptions` argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default.
 
 ### Exit Codes
 
@@ -298,7 +305,7 @@ Incremental compilation is **enabled by default** — no configuration needed. T
 ```jsonc
 {
   "compilerOptions": {
-    "incremental": false  // disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
+    "incremental": false  // disables tsbuild's input manifest and DTS cache
   }
 }
 ```
@@ -307,10 +314,12 @@ With incremental enabled, each build maintains two caches inside a `.tsbuild/` d
 
 | Cache | File | What it stores |
 |-------|------|----------------|
-| TypeScript | `.tsbuild/.tsbuildinfo` | Which source files changed and their type information |
-| DTS cache | `.tsbuild/dts_cache.v5.br` | Pre-processed declaration files (Brotli-compressed) |
+| Input manifest | `.tsbuild/dts_cache.v6.br` | Every file the compiler read (size and mtime) plus a key derived from the compiler options |
+| DTS cache | `.tsbuild/dts_cache.v6.br` | Pre-processed declaration files (Brotli-compressed) |
 
-On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
+Both live in a single Brotli-compressed file. The manifest is only written after an error-free type-check. When every recorded input is unchanged, the compiler options and build fingerprint match, and all recorded outputs still exist, tsbuild reuses the cached declarations and skips compilation and output phases. Missing outputs force regeneration. No-op time depends on input/output counts and filesystem latency, since path safety, output existence and input stats are still checked.
+
+Restoring TypeScript compiler state in a new process is not currently supported by the public TypeScript 7.1 API, so a changed input outside watch mode runs a full type-check.
 
 **Config change detection** — tsbuild stores a fingerprint of the current build configuration (minify, platform, source maps, iife, splitting, banner/footer, env, noExternal, dts options, etc.) alongside the DTS cache. If any of these settings change between builds, the output phase is forced even when TypeScript reports no source changes. The fingerprint is updated at the end of each build so subsequent runs do not repeatedly trigger a forced rebuild.
 
@@ -332,9 +341,9 @@ Or add the entry manually:
 
 **`--force` (`-f`)** — Runs the output phase (esbuild + DTS bundling) even when TypeScript detects no changes. Useful when something outside the source files changed (e.g. an environment variable or esbuild config) and you need to regenerate output without touching the caches.
 
-**`--clearCache` (`-c`)** — Deletes the entire `.tsbuild/` directory before building, wiping both `.tsbuildinfo` and the DTS cache. The next build runs as if it's the first time. Use this when you suspect the cache is stale or after significant config changes.
+**`--clearCache` (`-c`)** — Deletes the entire `.tsbuild/` directory before building, wiping both the input manifest and the DTS cache. The next build runs as if it's the first time. Use this when you suspect the cache is stale or after significant config changes.
 
-**Normal build (no flags)** — TypeScript compares source file hashes against `.tsbuildinfo`, re-emits only what changed, and the DTS cache is updated accordingly.
+**Normal build (no flags)** — tsbuild compares every recorded compiler input against the manifest; if anything changed, the project is type-checked and the DTS cache is updated accordingly.
 
 ## Configuration Options
 
@@ -396,7 +405,7 @@ If your editor still doesn't pick this up for `tsconfig.json`, add a per-workspa
 }
 ```
 
-If a directory is provided, all files within will be used as entry points.
+If a directory is provided, every file within it is used as an entry point, including files in subdirectories (symbolic links are not followed). Output names preserve the relative directory structure, so `./src/internal/helper.ts` from a `./src` entry is emitted as `internal/helper.js`. This is how `bundle: false` builds (whose default entry point is `./src`) emit a transpiled file for every source module.
 
 When `entryPoints` is omitted entirely, tsbuild automatically infers entry points from `package.json` by reverse-mapping output paths back to their source files. Resolution order:
 
@@ -422,7 +431,11 @@ When `entryPoints` is omitted entirely, tsbuild automatically infers entry point
 }
 ```
 
-The `resolve` option controls whether to bundle external types from `node_modules` into your declaration files. When `false` (default for Node.js), external imports remain as import statements. When `true`, the bundler attempts to inline external types. This defaults to:
+The `resolve` option controls whether to bundle external types from `node_modules` into your declaration files. When `false` (default for Node.js), external imports remain as import statements. When `true`, the bundler attempts to inline external types. External imports keep their import attributes (e.g. `with { "resolution-mode": "import" }`), and imports of the same module with different attributes are not merged.
+
+Re-exports of bundled modules keep the exports tsc generated. `export * from` re-exports every binding except `default`. Explicit exports take precedence. A name that several star exports bind differently is ambiguous and is left out. `export type *` keeps those bindings type-only. `export * as ns from` becomes a `declare namespace` that includes `default`, and is exported under its original name.
+
+This defaults to:
 - `false` for `platform: "node"` (recommended for Node.js projects - keeps external types as imports)
 - `true` for `platform: "browser"` and `platform: "neutral"` (bundles everything for standalone distribution)
 
@@ -452,6 +465,7 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
   "tsbuild": {
     "platform": "node",          // Target platform: 'node' | 'browser' | 'neutral'
     "clean": true,               // Remove output directory contents before building (default: true)
+    "outputStyle": "summary",    // Build report: dashboard | pipeline | artifacts | summary | detailed
     "sourceMap": true,           // Generate source maps (boolean | 'inline' | 'external' | 'both')
     "splitting": true,           // Enable code splitting
     "bundle": true,              // Enable/disable bundling
@@ -471,6 +485,8 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
 ```
 
 **Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--force`, `--watch`, and `--minify` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape. Putting them in `tsconfig.json` produces a configuration error with the matching CLI flag guidance.
+
+`outputStyle` controls the terminal build report and defaults to `"summary"` (design 4). Choose `"dashboard"` (1), `"pipeline"` (2), `"artifacts"` (3), or `"detailed"` (5) to use another layout. Summary output lists up to five files and notes how many were omitted; builds never wait for input. In watch mode in an interactive terminal, the note becomes a `Press M for more` prompt: press `M` to show the remaining files and repeat the build summary below them; any other key, or the next rebuild, dismisses it. Use `"detailed"` to list every output. The blue TypeScript header is shared by every style.
 
 ### Environment Variables
 
@@ -516,7 +532,7 @@ Watch mode snapshots `tsconfig.json` and `package.json` configuration when it st
 
 Watch mode uses Watchr 6 with initial events disabled and waits for watcher startup before reporting that it is watching. Watch targets must exist; startup failures are reported rather than silently watching the current directory. An empty source include list with no local plugin dependencies does not start a watcher.
 
-TypeScript 5 remains supported for building projects. TypeScript 5 consumers typechecking tsbuild's public API must set `skipLibCheck: true` because Watchr 6 declarations reference `esnext.temporal`; TypeScript 6 supports those declarations. tsbuild already enables `skipLibCheck` internally.
+tsbuild 4 requires TypeScript 7.1 or newer and uses its native compiler API. Use tsbuild 3 for TypeScript 5 and 6 projects.
 
 ## Advanced Features
 
@@ -595,7 +611,19 @@ await project.build();
 
 Projects are registered for automatic process-shutdown cleanup when they are constructed, so callers do not have to call `close()` for normal process termination. `await using` closes the project when its scope ends, including when the scope throws. It is supported by the project's Node.js and TypeScript requirements. For deterministic cleanup before the process terminates, call `await project.close()` in a `finally` block or use `await using`. Keep watch projects alive until watching is no longer needed; leaving an `await using` scope stops the watcher.
 
-`close()` stops watcher scheduling and releases in-memory resources immediately, then waits for pending cache writes and esbuild disposal. It is idempotent, uses a 5-second default timeout (overridable with `close(timeoutMs)`), and rejects when cleanup fails or exceeds that timeout. The CLI awaits it automatically for non-watch builds. `shutdown()` remains a deprecated alias for compatibility.
+Set `compilerOptions.noEmit` in configuration or constructor options to check a project without validating, cleaning or writing build outputs:
+
+```typescript
+await using project = await new TypeScriptProject(process.cwd(), { compilerOptions: { noEmit: true } }).build();
+```
+
+`build()` takes no arguments and reads `compilerOptions.noEmit` from the resolved configuration. It returns the project for async disposal outside watch mode, or `null` to keep a watch project alive, so the pattern above also works in watch mode. Type-check-only watch rebuilds never run the output phases. Configuration is resolved at construction; create a new project to change emission mode or pick up configuration changes. The CLI applies `--noEmit` through constructor options and calls `build()`, using the resolved configuration.
+
+`build()` is the single entry point for builds and type-checks; replace previous `typeCheck()` calls with `build()` on a project configured with `compilerOptions.noEmit: true`.
+
+`close()` stops watcher scheduling immediately, waits for active builds, then drains pending cache writes and esbuild disposal before releasing compiler and in-memory resources. It is idempotent, uses a 5-second default timeout (overridable with `close(timeoutMs)`), and rejects when asynchronous cleanup or synchronous resource disposal fails, or when cleanup exceeds that timeout. A timeout does not cancel I/O or release resources still in use; cleanup continues after the rejection. The CLI awaits it automatically for non-watch builds.
+
+The reported **Build** duration measures `build()`, not end-to-end CLI time. It excludes project construction/configuration and final shutdown. Cache compression/persistence starts after output phases and can finish during `close()`. To measure a complete non-watch invocation, time construction, `await project.build()` and `await project.close()` together; whole-process CLI timing additionally includes module loading, process startup and exit.
 
 `@closeOnExit` registers the project with the process manager. On `SIGINT` (Ctrl+C), the process manager automatically calls `close()`, waits for registered asynchronous cleanup to settle, and then exits with code 0. The synchronous Node.js `exit` event also calls `close()` as a final fallback, but cannot await asynchronous cleanup. Use `await using` or `await project.close()` only when cleanup must complete before your code continues or the process terminates.
 
@@ -616,7 +644,7 @@ These are used internally but can be leveraged when extending tsbuild.
 
 **TypeScriptProject** (`src/type-script-project.ts`) - Central orchestrator that manages the build lifecycle
 **FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage with optional caching support
-**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v5.br`
+**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v6.br`
 **ProcessManager** (`src/process-manager.ts`) - Global cleanup coordinator for graceful shutdowns
 
 ### Plugin System
@@ -644,12 +672,13 @@ tsbuild is designed for speed:
 - **Incremental builds** - Only recompile changed files
 - **In-memory declarations** - No intermediate disk I/O for `.d.ts` files
 - **Parallel processing** - Declaration bundling and transpilation run in parallel after type checking completes
-- **Smart caching** - Leverages `.tsbuildinfo` for TypeScript incremental compilation
+- **Smart caching** - An input manifest skips the compiler entirely when nothing changed
+- **Native compiler** - Type-checking runs on the TypeScript 7 native compiler
 
 Typical build times for the tsbuild project itself:
-- Full build: ~450-500ms
-- Incremental rebuild (no changes): ~5ms
-- Type-check only: ~10-15ms
+- Full build: ~200ms
+- Incremental rebuild (no changes): ~5-10ms
+- Type-check only (cold): ~100-150ms
 
 ## Acknowledgments
 
@@ -674,7 +703,6 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 - **Windows** - Watch mode is not supported on Windows because the `@d1g1tal/watchr` dependency supports Linux and macOS only. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) and run tsbuild inside the Linux environment.
 - **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
 - **Config plugins need a default export** - Plugins referenced in `tsconfig.json` must be modules whose default export is a plugin factory or esbuild `Plugin` object; anything else requires the programmatic API
-- **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed
 
 ## Comparison with Other Tools
 
@@ -715,7 +743,17 @@ pnpm test:coverage
 
 # Lint
 pnpm lint
+
+# Build-speed benchmark
+pnpm bench
+
+# Declaration structure/type quality against regular tsc emit
+pnpm bench:dts
 ```
+
+The declaration benchmark reports missing types, structural/type inconsistencies,
+duplicate declarations, broken references, and shared type identity across entry
+points. See [declaration comparison methodology](docs/performance-baseline.md#bundler-declaration-comparison).
 
 ### Self-hosting
 

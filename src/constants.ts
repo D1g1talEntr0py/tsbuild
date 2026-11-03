@@ -1,10 +1,14 @@
-import { JsxEmit, ScriptTarget } from 'typescript';
+import { JsxEmit } from 'typescript/sync';
+import { ScriptTarget } from 'typescript/ast';
 import type { CompilerOptionOverrides, EsTarget, JsxRenderingMode, RelativePath } from './@types';
+import { PerformancePhase } from './performance-phase';
 
 /** Build system constants and configurations */
 const dataUnits = [ 'B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB' ] as const;
 const Package = { BUNDLE: 'bundle', EXTERNAL: 'external' } as const;
 const Platform = { NODE: 'node', BROWSER: 'browser', NEUTRAL: 'neutral' } as const;
+const BuildOutputStyle = { DASHBOARD: 'dashboard', PIPELINE: 'pipeline', ARTIFACTS: 'artifacts', SUMMARY: 'summary', DETAILED: 'detailed' } as const;
+type BuildOutputStyle = typeof BuildOutputStyle[keyof typeof BuildOutputStyle];
 const BuildMessageType = { ERROR: 'error', WARNING: 'warning' } as const;
 const DependencyEntryType = { DEPENDENCIES: 'dependencies', PEER_DEPENDENCIES: 'peerDependencies' } as const;
 const compilerOptionOverrides: CompilerOptionOverrides = {
@@ -26,8 +30,6 @@ const compilerOptionOverrides: CompilerOptionOverrides = {
 
 /** Maps TypeScript ScriptTarget enum to esbuild-compatible EsTarget string */
 const scriptTargetToEsTarget: Record<ScriptTarget, EsTarget> = {
-	[ScriptTarget.ES3]: 'ES2015',
-	[ScriptTarget.ES5]: 'ES2015',
 	[ScriptTarget.ES2015]: 'ES2015',
 	[ScriptTarget.ES2016]: 'ES2016',
 	[ScriptTarget.ES2017]: 'ES2017',
@@ -39,6 +41,8 @@ const scriptTargetToEsTarget: Record<ScriptTarget, EsTarget> = {
 	[ScriptTarget.ES2023]: 'ES2023',
 	[ScriptTarget.ES2024]: 'ES2024',
 	[ScriptTarget.ES2025]: 'ES2025',
+	// esbuild has no es2026 target yet
+	[ScriptTarget.ES2026]: 'ESNext',
 	[ScriptTarget.ESNext]: 'ESNext',
 	[ScriptTarget.JSON]: 'ESNext'
 };
@@ -53,10 +57,10 @@ const jsxEmitMap: Partial<Record<JsxEmit, JsxRenderingMode>> = {
 
 /**
  * Converts TypeScript's ScriptTarget enum to an esbuild-compatible EsTarget string.
- * @param target - The TypeScript ScriptTarget enum value
+ * @param target - The TypeScript ScriptTarget enum value. Defaults to ScriptTarget.ESNext if not provided.
  * @returns The corresponding EsTarget string (e.g., 'ES2022', 'ESNext')
  */
-const toEsTarget: (target: ScriptTarget) => EsTarget = (target: ScriptTarget) => scriptTargetToEsTarget[target];
+const toEsTarget: (target?: ScriptTarget) => EsTarget = (target: ScriptTarget = ScriptTarget.ESNext) => scriptTargetToEsTarget[target];
 
 /** Returns undefined for any input, useful for defaulting optional values. */
 const alwaysUndefined = () => undefined;
@@ -94,11 +98,9 @@ const defaultEntryPoint = 'index';
 const defaultSourceDirectory = './src' as RelativePath;
 const defaultEntryFile = 'src/index.ts' as RelativePath;
 const cacheDirectory = '.tsbuild' as RelativePath;
-const buildInfoFile = 'tsconfig.tsbuildinfo';
-/** Cache format version - increment when cache structure changes (v4: V8 serialization + Map-based file storage) */
-const dtsCacheVersion = 5;
-// Version-stamped so the filename alone proves structural compatibility: a present file is always
-// the current version, letting the .tsbuildinfo/cache consistency guard use a plain existence check.
+/** Cache format version - increment when cache structure changes (v6: input manifest replaces .tsbuildinfo) */
+const dtsCacheVersion = 6;
+// Version-stamped so the filename alone proves structural compatibility: a stale cache from an older format has a different filename and is never read.
 const dtsCacheFile: string = `dts_cache.v${dtsCacheVersion}.br`;
 const format = 'esm';
 const newLine = '\n';
@@ -116,6 +118,8 @@ export {
 	compilerOptionOverrides,
 	Package,
 	Platform,
+	BuildOutputStyle,
+	PerformancePhase,
 	BuildMessageType,
 	DependencyEntryType,
 	sourceScriptExtensionExpression,
@@ -130,7 +134,6 @@ export {
 	defaultEntryPoint,
 	defaultEntryFile,
 	cacheDirectory,
-	buildInfoFile,
 	dtsCacheFile,
 	dtsCacheVersion,
 	format,

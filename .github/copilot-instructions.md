@@ -13,13 +13,13 @@
 
 ## Project Snapshot
 - `tsbuild` = TypeScript type-check + `.d.ts` emit, esbuild bundling, TC39 standard decorators only (legacy `experimentalDecorators`/`emitDecoratorMetadata` are rejected with a `ConfigurationError`).
-- Runtime/tooling: Node >=24.0 (engines; CI tests 24/26), pnpm 12+.
+- Runtime/tooling: Node >=24.0 (engines; CI tests 24/26), pnpm 12+, TypeScript >=7.1 native API (`typescript/sync`, `typescript/ast`, `typescript/fs`, `typescript/path`); compiler state lives in disposable API snapshots (`using`/`DisposableStack`).
 - Build pipeline: type-check -> transpile -> declaration bundle.
 
 ## Core Architecture
-- `TypeScriptProject`: build orchestrator; decorators `@closeOnExit`, `@logPerformance`, `@debounce`; incremental via `.tsbuildinfo`.
+- `TypeScriptProject`: build orchestrator; decorators `@closeOnExit`, `@logPerformance`, `@debounce`; incremental via an input manifest (compiler inputs' size/mtime + options key) stored in the dts cache; no `.tsbuildinfo`.
 - `FileManager`: in-memory `.d.ts` store + write callback; declaration pre-processing.
-- `IncrementalBuildCache`: persistent Brotli declaration cache at `.tsbuild/dts_cache.v<version>.br` (filename version-stamped; kept consistent with `.tsbuildinfo`).
+- `IncrementalBuildCache`: persistent Brotli declaration cache at `.tsbuild/dts_cache.v<version>.br` (filename version-stamped; also holds the input manifest, written only after an error-free type-check).
 - DTS bundler (`src/dts/`): TypeScript AST + `magic-string` (not Rollup/ESTree), dependency graph + topo sort, import/export stripping, identifier collision handling, per-instance resolution cache, `collectIdentifiers` WeakMap cache.
 - Plugins (`src/plugins/`):
   - `external-modules.ts`: bare specifiers external by default; `noExternal` forces bundling.
@@ -33,6 +33,8 @@
 - `processDeclarations()` and `transpile()` run in parallel and are independent.
 - esbuild plugin registration order is significant.
 - `compilerOptionOverrides` in `src/constants.ts` are intentional and high-risk to change.
+- Without an explicit `rootDir`, configuration sets it to the common directory of non-declaration root files (TS7 makes TS5011 a hard error).
+- TS 7.1 snapshot programs neither read nor write `.tsbuildinfo`; do not use the internal `createBuildOrchestrator` until TypeScript exposes public persisted build state.
 
 ## Config, CLI, Errors
 - Config source: `tsbuild` in `tsconfig.json`, validated by `schema.json`.

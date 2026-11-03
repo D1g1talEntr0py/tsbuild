@@ -111,20 +111,19 @@ function resolveConditionalExport(exportValue: PackageJsonExportValue): string |
 	if (Array.isArray(exportValue)) {
 		for (const value of exportValue) {
 			const resolved = resolveConditionalExport(value);
+
 			if (resolved !== undefined) { return resolved }
 		}
+	} else {
+		for (const condition of importConditions) {
+			const value = exportValue[condition];
 
-		return undefined;
-	}
+			if (value === undefined) { continue }
 
-	for (const condition of importConditions) {
-		const value = exportValue[condition];
+			const resolved = resolveConditionalExport(value);
 
-		if (value === undefined) { continue }
-
-		const resolved = resolveConditionalExport(value);
-
-		if (resolved !== undefined) { return resolved }
+			if (resolved !== undefined) { return resolved }
+		}
 	}
 
 	return undefined;
@@ -183,10 +182,10 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 		const binEntries = typeof packageJson.bin === 'string' ? { [packageJson.name ?? 'cli']: packageJson.bin } : packageJson.bin;
 
 		for (const [ name, outputPath ] of Object.entries(binEntries)) {
-			if (entryPoints[name] === undefined) {
-				const sourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
-				if (sourcePath) { entryPoints[name] = sourcePath }
-			}
+			if (entryPoints[name] !== undefined) { continue }
+
+			const sourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
+			if (sourcePath) { entryPoints[name] = sourcePath }
 		}
 	}
 
@@ -230,8 +229,8 @@ function updateEntryPoints(entryPoints: EntryPoints<AbsolutePath> | undefined, p
 async function resolveEntryPoints(directory: AbsolutePath, entries: Record<string, string>): Promise<EntryPoints<AbsolutePath>> {
 	const expandedEntryPoints: EntryPoints<AbsolutePath> = {};
 
-	for (const [ name, entryPoint ] of Object.entries(entries)) {
-		for (const [ resolvedName, resolvedPath ] of Object.entries(await resolveEntryPoint(directory, name, entryPoint))) {
+	for (const entryPoints of await Array.fromAsync(Object.entries(entries), ([ name, entryPoint ]) => resolveEntryPoint(directory, name, entryPoint))) {
+		for (const [ resolvedName, resolvedPath ] of Object.entries(entryPoints)) {
 			expandedEntryPoints[resolvedName] = resolvedPath;
 		}
 	}
@@ -246,27 +245,35 @@ async function resolveEntryPoints(directory: AbsolutePath, entries: Record<strin
  * @param entryPoint - Configured entry path
  * @returns Expanded entry mapping for this entry
  */
-async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string) {
+async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string): Promise<EntryPoints<AbsolutePath>> {
 	const resolvedPath = Paths.absolute(directory, entryPoint);
 
-	if (await Paths.isDirectory(resolvedPath)) { return expandDirectoryEntryPoints(resolvedPath) }
-
-	if (await Paths.isFile(resolvedPath)) { return { [name]: resolvedPath } }
-
-	throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+	switch (await Paths.getType(resolvedPath)) {
+		case 'directory': return expandDirectoryEntryPoints(resolvedPath);
+		case 'file': return { [name]: resolvedPath };
+		case undefined: throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+	}
 }
 
 /**
- * Expands a directory entry into per-file entries using file stem names.
- * @param directory - Absolute directory path
- * @returns Entry mapping with one key per file in the directory
+ * Recursively expands a directory entry into per-file entries named by their path relative to the configured directory.
+ * Symbolic links are not followed.
+ * @param directory - Absolute directory path to scan
+ * @param prefix - Output name prefix of `directory` relative to the configured directory
+ * @param entries - Entry mapping accumulated across subdirectories
+ * @returns Entry mapping with one key per file, preserving the subdirectory structure (e.g. `internal/helper`)
  */
-async function expandDirectoryEntryPoints(directory: AbsolutePath) {
-	const entries: EntryPoints<AbsolutePath> = {};
-
+async function expandDirectoryEntryPoints(directory: AbsolutePath, prefix = '', entries: EntryPoints<AbsolutePath> = {}): Promise<EntryPoints<AbsolutePath>> {
 	for (const file of (await Files.readDirectory(directory)).sort()) {
 		const filePath = Paths.join(directory, file);
-		if (await Paths.isFile(filePath)) { entries[Paths.parse(file).name] = filePath }
+
+		switch (await Paths.getType(filePath)) {
+			case 'directory': {
+				await expandDirectoryEntryPoints(filePath, `${prefix}${file}/`, entries);
+				break;
+			}
+			case 'file': entries[`${prefix}${Paths.parse(file).name}`] = filePath;
+		}
 	}
 
 	return entries;

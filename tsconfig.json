@@ -14,8 +14,7 @@
 		"allowUnreachableCode": false,
 		"noPropertyAccessFromIndexSignature": true,
 		"exactOptionalPropertyTypes": false,
-		"rootDir": "./src",
-		"lib": [ "esnext" ],
+		"lib": [ "ESNext" ],
 		"types": [ "node" ],
 		"module": "preserve",
 		"paths": { "src/*": [ "./src/*" ] }

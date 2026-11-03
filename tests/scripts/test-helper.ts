@@ -1,8 +1,10 @@
 import { vol, type DirectoryJSON } from 'memfs';
 import { vi } from 'vitest';
 import { resolve, join, dirname, isAbsolute, extname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { Loader, Plugin } from 'esbuild';
-import ts from 'typescript';
+import { API } from 'typescript/sync';
+import { serverFS, type FileSystemCallbacks } from 'typescript/fs';
 import type { CachedDeclaration } from '../../src/@types';
 import { DeclarationProcessor } from '../../src/dts/declaration-processor';
 
@@ -12,44 +14,69 @@ export { vol };
 /**
  * Test helper for setting up memfs-based tests.
  * Provides utilities for mocking the filesystem, creating test projects,
- * and patching TypeScript's sys object to work with memfs.
+ * and a shared TypeScript native API whose filesystem overlays memfs on the real filesystem.
  */
 export class TestHelper {
-	private static originalSys: typeof ts.sys | undefined;
+	private static sharedApi: API | undefined;
+	private static importOutputId = 0;
 
 	/**
-	 * Resets the memfs volume and sets up TypeScript lib files.
+	 * Shared TypeScript API for parsing and module resolution in tests.
+	 * Paths present in memfs are served from memfs; everything else (TypeScript libs, node_modules) falls through to the OS.
+	 */
+	static get api(): API {
+		return this.sharedApi ??= new API({ cwd: process.cwd(), fs: this.memfsCallbacks() });
+	}
+
+	/** Closes the shared TypeScript API process. */
+	static closeApi() {
+		this.sharedApi?.close();
+		this.sharedApi = undefined;
+	}
+
+	/**
+	 * Host filesystem callbacks that read from memfs and fall back to the OS for paths memfs does not contain.
+	 */
+	static memfsCallbacks(): FileSystemCallbacks {
+		const isDirectory = (path: string) => vol.existsSync(path) && vol.statSync(path).isDirectory();
+		const isFile = (path: string) => vol.existsSync(path) && !vol.statSync(path).isDirectory();
+
+		return {
+			directoryExists: (path) => isDirectory(path) || serverFS.useOS,
+			fileExists: (path) => isFile(path) || serverFS.useOS,
+			getAccessibleEntries: (path) => {
+				if (!isDirectory(path)) { return serverFS.useOS }
+				const files: string[] = [];
+				const directories: string[] = [];
+				for (const entry of vol.readdirSync(path) as string[]) {
+					(isDirectory(join(path, entry)) ? directories : files).push(entry);
+				}
+				return { files, directories, symlinks: undefined };
+			},
+			readFile: (path) => isFile(path) ? vol.readFileSync(path, 'utf8') as string : serverFS.useOS,
+			realpath: (path) => vol.existsSync(path) ? path : serverFS.useOS,
+			stat: (path) => {
+				if (!vol.existsSync(path)) { return serverFS.useOS }
+				const { mode, size, mtime } = vol.statSync(path);
+				return { mode: Number(mode), size: Number(size), mtime };
+			},
+			writeFile: (path, content) => {
+				vol.mkdirSync(dirname(path), { recursive: true });
+				vol.writeFileSync(path, content);
+			},
+			removeFile: (path) => { vol.rmSync(path, { recursive: true, force: true }) }
+		};
+	}
+
+	/**
+	 * Resets the memfs volume and stubs @types/node.
 	 * Call this in beforeEach for tests that need memfs.
 	 */
 	static async setupMemfs() {
 		vol.reset();
 		vol.mkdirSync(process.cwd(), { recursive: true });
 
-		// Copy typescript libs to memfs
-		const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
 		const path = await vi.importActual<typeof import('node:path')>('node:path');
-		const { createRequire } = await vi.importActual<typeof import('node:module')>('node:module');
-		const require = createRequire(import.meta.url);
-
-		try {
-			const tsLibPath = path.dirname(require.resolve('typescript/package.json'));
-			const libDir = path.join(tsLibPath, 'lib');
-
-			if (fs.existsSync(libDir)) {
-				const files = fs.readdirSync(libDir).filter((f: string) => f.startsWith('lib.') && f.endsWith('.d.ts'));
-				const memLibDir = path.join(tsLibPath, 'lib');
-				vol.mkdirSync(memLibDir, { recursive: true });
-
-				for (const file of files) {
-					const content = fs.readFileSync(path.join(libDir, file), 'utf-8');
-					vol.writeFileSync(path.join(memLibDir, file), content);
-					// Also copy to cwd as fallback
-					vol.writeFileSync(path.join(process.cwd(), file), content);
-				}
-			}
-		} catch (e) {
-			console.warn('Failed to copy typescript libs:', e);
-		}
 
 		// Create a minimal @types/node stub so `types: ["node"]` in compilerOptions
 		// doesn't emit TS2688 ("Cannot find type definition file for 'node'") in the
@@ -57,8 +84,6 @@ export class TestHelper {
 		const atTypesNodeDir = path.join(process.cwd(), 'node_modules', '@types', 'node');
 		vol.mkdirSync(atTypesNodeDir, { recursive: true });
 		vol.writeFileSync(path.join(atTypesNodeDir, 'index.d.ts'), '// stub\nexport {};\n');
-
-		await this.patchTsSys();
 	}
 
 	/**
@@ -81,11 +106,10 @@ export class TestHelper {
 	}
 
 	/**
-	 * Restores original ts.sys and resets memfs.
+	 * Resets memfs.
 	 * Call this in afterEach.
 	 */
 	static teardownMemfs() {
-		this.restoreTsSys();
 		vol.reset();
 	}
 
@@ -159,8 +183,8 @@ export class TestHelper {
 	 * what the build system produces.
 	 */
 	static createCachedDeclaration(code: string): CachedDeclaration {
-		const sourceFile = ts.createSourceFile('temp.d.ts', code, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);
-		const { code: processedCode, typeReferences, fileReferences } = DeclarationProcessor.preProcess(sourceFile);
+		using retained = this.api.createSourceFile('/temp.d.ts', code);
+		const { code: processedCode, typeReferences, fileReferences } = DeclarationProcessor.preProcess(retained.sourceFile);
 		return {
 			code: processedCode,
 			typeReferences,
@@ -195,20 +219,12 @@ export class TestHelper {
 	}
 
 	/**
-	 * Gets TypeScript lib files from memfs.
+	 * Loads generated JavaScript as an ESM module for runtime assertions.
 	 */
-	static getLibFiles(): Record<string, string> {
-		const files: Record<string, string> = {};
-		const cwd = process.cwd();
-		if (vol.existsSync(cwd)) {
-			const dirFiles = vol.readdirSync(cwd) as string[];
-			for (const file of dirFiles) {
-				if (file.startsWith('lib.') && file.endsWith('.d.ts')) {
-					files[file] = vol.readFileSync(join(cwd, file), 'utf-8') as string;
-				}
-			}
-		}
-		return files;
+	static async importOutput<T extends object>(path: string): Promise<T> {
+		const url = pathToFileURL(path);
+		url.searchParams.set('test', String(this.importOutputId++));
+		return await import(url.href) as T;
 	}
 
 	/**
@@ -349,95 +365,6 @@ export class TestHelper {
 		}
 
 		return { dir, cleanup: () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
-	}
-
-	/**
-	 * Patches ts.sys to use memfs.
-	 */
-	static async patchTsSys() {
-		if (this.originalSys) return;
-
-		this.originalSys = { ...ts.sys };
-		const originalReadDirectory = ts.sys.readDirectory;
-
-		ts.sys.readFile = (path: string, encoding?: string) => {
-			if (vol.existsSync(path) && !vol.statSync(path).isDirectory()) {
-				return vol.readFileSync(path, encoding as BufferEncoding || 'utf8') as string;
-			}
-			return undefined;
-		};
-
-		ts.sys.writeFile = (path: string, data: string) => {
-			vol.mkdirSync(dirname(path), { recursive: true });
-			vol.writeFileSync(path, data);
-		};
-
-		ts.sys.fileExists = (path: string) => {
-			try {
-				return vol.existsSync(path) && !vol.statSync(path).isDirectory();
-			} catch {
-				return false;
-			}
-		};
-
-		ts.sys.directoryExists = (path: string) => {
-			try {
-				return vol.existsSync(path) && vol.statSync(path).isDirectory();
-			} catch {
-				return false;
-			}
-		};
-
-		ts.sys.getDirectories = (path: string) => {
-			if (vol.existsSync(path) && vol.statSync(path).isDirectory()) {
-				return (vol.readdirSync(path) as string[]).filter(f => {
-					const fullPath = join(path, f);
-					return vol.existsSync(fullPath) && vol.statSync(fullPath).isDirectory();
-				});
-			}
-			return [];
-		};
-
-		ts.sys.readDirectory = (path: string, extensions?: readonly string[], exclude?: readonly string[], include?: readonly string[], depth?: number): string[] => {
-			if (!vol.existsSync(path)) {
-				return originalReadDirectory(path, extensions, exclude, include, depth);
-			}
-
-			const files: string[] = [];
-			const walk = (dir: string, currentDepth: number) => {
-				if (depth !== undefined && currentDepth > depth) return;
-				if (!vol.existsSync(dir) || !vol.statSync(dir).isDirectory()) return;
-				if (exclude && exclude.some(ex => dir.includes(ex))) return;
-
-				for (const entry of vol.readdirSync(dir) as string[]) {
-					const fullPath = join(dir, entry);
-					if (vol.statSync(fullPath).isDirectory()) {
-						if (exclude && exclude.some(ex => fullPath.includes(ex))) continue;
-						walk(fullPath, currentDepth + 1);
-					} else {
-						if (!extensions || extensions.some(ext => fullPath.endsWith(ext))) {
-							files.push(fullPath);
-						}
-					}
-				}
-			};
-			walk(path, 0);
-			return files;
-		};
-
-		ts.sys.realpath = (path: string) => path;
-		ts.sys.resolvePath = (path: string) => resolve(path);
-		ts.sys.getCurrentDirectory = () => process.cwd();
-	}
-
-	/**
-	 * Restores original ts.sys.
-	 */
-	static restoreTsSys() {
-		if (this.originalSys) {
-			Object.assign(ts.sys, this.originalSys);
-			this.originalSys = undefined;
-		}
 	}
 
 	/**

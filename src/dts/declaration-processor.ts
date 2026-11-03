@@ -1,6 +1,4 @@
 import {
-	canHaveModifiers,
-	forEachChild,
 	isClassDeclaration,
 	isEmptyStatement,
 	isEnumDeclaration,
@@ -21,21 +19,30 @@ import {
 	ModifierFlags,
 	NodeFlags,
 	SyntaxKind,
-	getCombinedModifierFlags,
 	type Node,
+	type ModifiersBase,
 	type ModuleDeclaration,
 	type FileReference,
 	type SourceFile,
 	type Declaration,
 	type Statement,
 	type VariableDeclaration
-} from 'typescript';
+} from 'typescript/ast';
+import { getCombinedModifierFlags } from 'typescript/ast/utils';
 import MagicString from 'magic-string';
 import { BundleError } from '../errors';
 import { FileExtension, newLine, typeMatcher } from '../constants';
 import type { NameRange, PreProcessOutput } from './@types';
 
 const commaCharacter = 44;
+
+/**
+ * Checks whether a node is a `declare global { }` augmentation, which declares no bundle-level name.
+ * @param node The node to check.
+ */
+function isGlobalAugmentation(node: Node): boolean {
+	return isModuleDeclaration(node) && node.keyword !== SyntaxKind.NamespaceKeyword && isIdentifier(node.name) && node.name.text === 'global';
+}
 
 /** Error thrown when encountering unsupported syntax during DTS processing */
 export class UnsupportedSyntaxError extends BundleError {
@@ -81,7 +88,8 @@ export class DeclarationProcessor {
 	 * @returns The pre-processed output, which includes the modified code, type references, and file references
 	 */
 	static preProcess(sourceFile: SourceFile): PreProcessOutput {
-		const code = new MagicString(sourceFile.getFullText());
+		const fullText = sourceFile.text;
+		const code = new MagicString(fullText);
 		// All the names that are declared in the `SourceFile`
 		const declaredNames = new Set<string>();
 		// All the names that are exported
@@ -135,7 +143,8 @@ export class DeclarationProcessor {
 			for (const { fileName, pos } of fileReferences) {
 				referenceDirectives.add(fileName);
 
-				let end = sourceFile.getLineEndOfPosition(pos);
+				let end = fullText.indexOf(newLine, pos);
+				if (end === -1) { end = fullText.length }
 				if (code.slice(end, end + 1) === newLine) { end += 1 }
 
 				code.remove(lineStarts[sourceFile.getLineAndCharacterOfPosition(pos).line], end);
@@ -160,7 +169,7 @@ export class DeclarationProcessor {
 		 * @param node The node to check.
 		 */
 		function checkInlineImport(node: Node) {
-			forEachChild(node, checkInlineImport);
+			node.forEachChild(checkInlineImport);
 
 			if (isImportTypeNode(node)) {
 				if (!isLiteralTypeNode(node.argument) || !isStringLiteral(node.argument.literal)) {
@@ -235,10 +244,8 @@ export class DeclarationProcessor {
 		 * Fixes the modifiers of a node.
 		 * @param node The node to fix.
 		 */
-		function fixModifiers(node: Node) {
+		function fixModifiers(node: ModifiersBase) {
 			// remove the `export` and `default` modifier, add a `declare` if its missing.
-			if (!canHaveModifiers(node)) { return }
-
 			let hasDeclare = false;
 
 			for (const modifier of node.modifiers ?? []) {
@@ -296,18 +303,18 @@ export class DeclarationProcessor {
 		// Pass 1: Walk through all statements and process them
 		for (const node of sourceFile.statements) {
 			if (isExportDeclaration(node)) {
-				// Handle 'export type' declarations - keep them but strip the 'type' keyword
-				if (node.isTypeOnly) {
-					// Find the 'type' keyword position (after 'export' and before the export clause or 'from')
+				// Handle 'export type { ... }' declarations - keep them but strip the 'type' keyword. Star forms keep it: `export type *` makes every re-exported binding type-only
+				if (node.isTypeOnly && node.exportClause !== undefined && !isNamespaceExport(node.exportClause)) {
+					// Find the 'type' keyword position (between 'export' and the export clause)
 					const exportKeywordEnd = node.getStart() + 'export'.length;
-					const nextTokenStart = node.exportClause?.getStart() ?? node.moduleSpecifier?.getStart() ?? node.getEnd();
-					const typeMatch = code.slice(exportKeywordEnd, nextTokenStart).match(typeMatcher);
+					const exportClauseStart = node.exportClause.getStart();
+					const typeMatch = code.slice(exportKeywordEnd, exportClauseStart).match(typeMatcher);
 
 					if (typeMatch?.index !== undefined) {
 						const typeKeywordStart = exportKeywordEnd + typeMatch.index;
 						const typeKeywordEnd = typeKeywordStart + 'type'.length;
 						// Remove 'type' keyword and any trailing whitespace
-						const afterType = code.slice(typeKeywordEnd, nextTokenStart);
+						const afterType = code.slice(typeKeywordEnd, exportClauseStart);
 						code.remove(typeKeywordStart, typeKeywordEnd + afterType.length - afterType.trimStart().length);
 					}
 				}
@@ -324,7 +331,7 @@ export class DeclarationProcessor {
 						exportedNames.add(name);
 					}
 
-					if (!(node.flags & NodeFlags.GlobalAugmentation)) {
+					if (!isGlobalAugmentation(node)) {
 						pushNamedNode(name, createNameRange(node));
 					}
 				}
@@ -511,7 +518,7 @@ export class DeclarationProcessor {
 			}
 
 			// Recurse into children for other possible matches deeper in the tree
-			forEachChild(node, visitNode);
+			node.forEachChild(visitNode);
 		}
 
 		visitNode(sourceFile);
