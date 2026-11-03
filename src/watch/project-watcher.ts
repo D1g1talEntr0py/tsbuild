@@ -104,7 +104,7 @@ export class ProjectWatcher {
 	 */
 	async #start(fileWatcher: Watchr): Promise<void> {
 		try { await fileWatcher.start() } catch (error) {
-			if (this.#closed && error instanceof Error && error.message === 'watcher closed before becoming ready.') { return }
+			if (this.#closed && Error.isError(error) && error.message === 'watcher closed before becoming ready.') { return }
 			throw error;
 		}
 	}

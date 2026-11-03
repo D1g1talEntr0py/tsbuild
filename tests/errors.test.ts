@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
-import { BuildError, TypeCheckError, BundleError, ConfigurationError, castError } from 'src/errors';
+import { BuildError, TypeCheckError, BundleError, ConfigurationError, castError, isErrnoException } from 'src/errors';
 import { UnsupportedSyntaxError } from 'src/dts/declaration-processor';
 import ts from 'typescript';
 
@@ -16,6 +17,12 @@ describe('module boundaries', () => {
 describe('castError', () => {
 	it('returns Error as-is', () => {
 		const error = new Error('test');
+		expect(castError(error)).toBe(error);
+	});
+
+	it('returns cross-realm Errors as-is', () => {
+		const error = runInNewContext('new Error("test")');
+		expect(Error.isError(error)).toBe(true);
 		expect(castError(error)).toBe(error);
 	});
 
@@ -41,6 +48,14 @@ describe('castError', () => {
 		const result = castError(undefined);
 		expect(result).toBeInstanceOf(Error);
 		expect(result.message).toBe('Unknown error');
+	});
+});
+
+describe('isErrnoException', () => {
+	it('recognizes cross-realm Errors with a code', () => {
+		const error = runInNewContext('Object.assign(new Error("missing"), { code: "ENOENT" })');
+		expect(isErrnoException(error)).toBe(true);
+		if (isErrnoException(error)) { expect(error.code).toBe('ENOENT') }
 	});
 });
 
