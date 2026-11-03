@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as esbuild from 'esbuild';
 import { build, context, formatMessages } from 'esbuild';
 import { vol } from 'memfs';
-import { JsxEmit } from 'typescript';
+import { JsxEmit } from 'typescript/sync';
 import { EsbuildRunner } from '../../src/project/esbuild-runner';
 import { Paths } from '../../src/paths';
 import { Files } from '../../src/files';
@@ -10,8 +10,9 @@ import { Logger } from '../../src/logger';
 import { BuildError, BundleError, ConfigurationError } from '../../src/errors';
 import { resolvePlugins } from '../../src/plugins/resolve-plugin';
 import type { AbsolutePath } from '../../src/@types';
+import { TestHelper } from '../scripts/test-helper';
 import type { BuildContext, BuildOptions, BuildResult, Message, PluginBuild } from 'esbuild';
-import type { CompilerOptions } from 'typescript';
+import type { CompilerOptions } from 'typescript/sync';
 
 vi.mock('esbuild', () => ({ build: vi.fn(), context: vi.fn(), formatMessages: vi.fn() }));
 vi.mock('../../src/plugins/resolve-plugin', () => ({ resolvePlugins: vi.fn() }));
@@ -27,6 +28,7 @@ const buildContext: BuildContext = { rebuild, dispose, watch: vi.fn(), serve: vi
 
 function createRunner(overrides: Partial<ConstructorParameters<typeof EsbuildRunner>[0]['buildOptions']> = {}, compilerOptions: CompilerOptions = {}): EsbuildRunner {
 	return new EsbuildRunner({
+		api: TestHelper.api,
 		directory,
 		configFilePath: Paths.absolute(directory, 'tsconfig.json'),
 		compilerOptions,
@@ -201,7 +203,7 @@ describe('EsbuildRunner', () => {
 
 	it('forwards build and compiler options without changing esbuild defaults', async () => {
 		const compilerOptions: CompilerOptions = {
-			alwaysStrict: true, strict: true, jsx: JsxEmit.ReactJSX, jsxFactory: 'jsx', jsxFragmentFactory: 'Fragment', jsxImportSource: 'custom-jsx',
+			strict: true, jsx: JsxEmit.ReactJSX, jsxFactory: 'jsx', jsxFragmentFactory: 'Fragment', jsxImportSource: 'custom-jsx',
 			paths: { '@local/*': [ './src/*' ] }, useDefineForClassFields: true, verbatimModuleSyntax: true
 		};
 		const runner = createRunner({ packages: 'bundle', platform: 'browser', target: 'ES2024', sourceMap: 'external', banner: { js: 'banner' }, footer: { js: 'footer' }, minify: true }, compilerOptions);
@@ -210,9 +212,24 @@ describe('EsbuildRunner', () => {
 			format: 'esm', write: false, metafile: true, treeShaking: true, logLevel: 'silent', absWorkingDir: directory,
 			entryPoints, bundle: true, packages: 'bundle', platform: 'browser', sourcemap: 'external', target: 'ES2024', banner: { js: 'banner' }, footer: { js: 'footer' },
 			outdir: '/project/dist', splitting: true, chunkNames: '[hash]', minify: true, supported: { decorators: false },
-			tsconfigRaw: { compilerOptions: { ...compilerOptions, jsx: 'react-jsx', target: 'ES2024' } }, define: {}
+			tsconfigRaw: { compilerOptions: { ...compilerOptions, alwaysStrict: true, jsx: 'react-jsx', target: 'ES2024' } }, define: {}
 		}));
 		await runner[Symbol.asyncDispose]();
+	});
+
+	describe.each([ true, false ])('strict mode with watch enabled: %s', (enabled) => {
+		it.each([
+			{ compilerOptions: {}, expected: true },
+			{ compilerOptions: { strict: true }, expected: true },
+			{ compilerOptions: { strict: false }, expected: false }
+		] satisfies { compilerOptions: CompilerOptions; expected: boolean }[])('resolves $compilerOptions to alwaysStrict: $expected', async ({ compilerOptions, expected }) => {
+			const runner = createRunner({ watch: { enabled, recursive: true, persistent: true, emitInitial: false } }, compilerOptions);
+			await runner.run(entryPoints);
+			expect(enabled ? context : build).toHaveBeenCalledWith(expect.objectContaining({
+				tsconfigRaw: { compilerOptions: expect.objectContaining({ alwaysStrict: expected }) }
+			}));
+			await runner[Symbol.asyncDispose]();
+		});
 	});
 
 	it('resets reusable output state even when the next rebuild writes nothing', async () => {

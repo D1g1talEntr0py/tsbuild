@@ -39,6 +39,20 @@ afterEach(async () => {
 });
 
 describe('RebuildQueue', () => {
+	it('stops and clears the queue when a using scope exits exceptionally', async () => {
+		const scopedQueue = new RebuildQueue({ renameTimeoutMs: 3, sourceText, rebuild });
+
+		expect(() => {
+			using resource = scopedQueue;
+			resource.enqueue('add', undefined, path);
+			throw new Error('scope failed');
+		}).toThrow('scope failed');
+
+		scopedQueue.enqueue('add', undefined, otherPath);
+		await settle();
+		expect(rebuild).not.toHaveBeenCalled();
+	});
+
 	it('deduplicates a save burst and dispatches the latest same-path event once', async () => {
 		queue.enqueue('change', stats(3, 1), path);
 		queue.enqueue('change', stats(3, 2), path);
@@ -301,6 +315,48 @@ describe('RebuildQueue', () => {
 		await settle();
 		expect(sourceText).toHaveBeenCalledTimes(1);
 		expect(rebuild).not.toHaveBeenCalled();
+	});
+
+	it('replays confirmed changes when events arrive during the stability turn', async () => {
+		vol.fromJSON({ [otherPath]: 'x' });
+		sourceText.mockImplementationOnce(() => {
+			setImmediate(() => queue.enqueue('add', stats(0, 0), otherPath));
+			return 'old';
+		});
+		queue.enqueue('change', stats(3, 1), path);
+		await vi.waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));
+		expect(rebuild.mock.calls[0]![0]).toMatchObject([ { event: 'change', path }, { event: 'add', path: otherPath } ]);
+		await settle();
+		expect(rebuild).toHaveBeenCalledTimes(1);
+	});
+
+	it('drops a deferred content change superseded by a newer change to the same path', async () => {
+		sourceText.mockImplementationOnce(() => {
+			setImmediate(() => {
+				vol.fromJSON({ [path]: 'newer' });
+				queue.enqueue('change', stats(5, 2), path);
+			});
+			return 'old';
+		});
+		queue.enqueue('change', stats(3, 1), path);
+		await vi.waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));
+		expect(rebuild.mock.calls[0]![0]).toHaveLength(1);
+		expect(rebuild.mock.calls[0]![0]).toMatchObject([ { event: 'change', path } ]);
+	});
+
+	it('keeps deferred non-change events for a path touched again', async () => {
+		vol.fromJSON({ [otherPath]: '' });
+		sourceText.mockImplementationOnce(() => {
+			setImmediate(() => {
+				vol.fromJSON({ [otherPath]: 'x' });
+				queue.enqueue('change', stats(1, 2), otherPath);
+			});
+			return 'old';
+		});
+		queue.enqueue('add', stats(0, 0), otherPath);
+		queue.enqueue('change', stats(3, 1), path);
+		await vi.waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));
+		expect(rebuild.mock.calls[0]![0]).toMatchObject([ { event: 'add', path: otherPath }, { event: 'change', path }, { event: 'change', path: otherPath } ]);
 	});
 
 	it('does not rearm rename timers or dispatch pending changes after stopping an active rebuild', async () => {

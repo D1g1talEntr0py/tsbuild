@@ -1,19 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { ScriptTarget, JsxEmit } from 'typescript';
+import { JsxEmit } from 'typescript/sync';
+import { ScriptTarget } from 'typescript/ast';
 import {
 	dataUnits, compilerOptionOverrides, Package, Platform, BuildMessageType,
 	DependencyEntryType, sourceScriptExtensionExpression, typeScriptExtensionExpression,
 	processEnvExpansionPattern, inlineTypePattern, Encoding, defaultDirOptions,
 	defaultCleanOptions, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint,
-	defaultEntryFile, cacheDirectory, buildInfoFile, dtsCacheFile, dtsCacheVersion,
+	defaultEntryFile, cacheDirectory, dtsCacheFile, dtsCacheVersion,
 	format, newLine, typeMatcher, FileExtension, toEsTarget, toJsxRenderingMode
 } from 'src/constants';
 
 describe('constants', () => {
 	describe('toEsTarget', () => {
 		const targetMatrix: [ScriptTarget, string][] = [
-			[ScriptTarget.ES3, 'ES2015'],
-			[ScriptTarget.ES5, 'ES2015'],
 			[ScriptTarget.ES2015, 'ES2015'],
 			[ScriptTarget.ES2016, 'ES2016'],
 			[ScriptTarget.ES2017, 'ES2017'],
@@ -23,9 +22,9 @@ describe('constants', () => {
 			[ScriptTarget.ES2021, 'ES2021'],
 			[ScriptTarget.ES2022, 'ES2022'],
 			[ScriptTarget.ES2023, 'ES2023'],
-			// ES2024+ may not exist in older TypeScript versions
-			...(ScriptTarget.ES2024 !== undefined ? [[ScriptTarget.ES2024, 'ES2024'] as [ScriptTarget, string]] : []),
-			...(ScriptTarget.ES2025 !== undefined ? [[ScriptTarget.ES2025, 'ES2025'] as [ScriptTarget, string]] : []),
+			[ScriptTarget.ES2024, 'ES2024'],
+			[ScriptTarget.ES2025, 'ES2025'],
+			[ScriptTarget.ES2026, 'ESNext'],
 			[ScriptTarget.ESNext, 'ESNext'],
 			[ScriptTarget.JSON, 'ESNext'],
 		];
@@ -165,7 +164,6 @@ describe('constants', () => {
 			expect(defaultSourceDirectory).toBe('./src');
 			expect(defaultEntryFile).toBe('src/index.ts');
 			expect(cacheDirectory).toBe('.tsbuild');
-			expect(buildInfoFile).toBe('tsconfig.tsbuildinfo');
 			expect(dtsCacheFile).toBe(`dts_cache.v${dtsCacheVersion}.br`);
 			expect(format).toBe('esm');
 			expect(newLine).toBe('\n');

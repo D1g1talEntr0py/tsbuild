@@ -2,21 +2,34 @@ import { TextFormat } from '../text-formatter';
 import { Logger } from '../logger';
 import { isWrittenFiles } from '../files';
 import { closeOnExit } from './close-on-exit';
-import { PerformanceObserver, performance, type PerformanceEntryList } from 'perf_hooks';
+import { PerformanceObserver, performance, type PerformanceEntryList } from 'node:perf_hooks';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction } from '../@types';
+import { BuildOutputStyle } from '../constants';
+import { PerformancePhase } from '../performance-phase';
+import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction, BuildOutputStyle as BuildOutputStyleType, PerformanceSubStep } from '../@types';
 
 type PhaseMeasurement = { duration: number; result?: WrittenFile[] };
+type BuildPerformanceContext = { measurements: Map<PerformancePhase, PhaseMeasurement>; outputStyle: BuildOutputStyleType; interactive: boolean };
 
 const type = 'measure';
-const buildMessage = 'Build';
-const bundleMessage = 'Bundle';
-const initializationMessage = 'Initialization';
-const typeCheckMessage = 'Type-checking/Emit';
-const declarationMessage = 'Process Declarations';
-const transpileMessage = 'Transpile';
-const groupedPhaseMessages = new Set([ declarationMessage, transpileMessage ]);
-const buildPhaseMeasurements = new AsyncLocalStorage<Map<string, PhaseMeasurement>>();
+const groupedPhases = new Set<PerformancePhase>([ PerformancePhase.DECLARATIONS, PerformancePhase.TRANSPILE ]);
+const buildPhaseOrder = [ PerformancePhase.INITIALIZATION, PerformancePhase.COMPILE, PerformancePhase.BUNDLE, PerformancePhase.DECLARATIONS, PerformancePhase.TRANSPILE ];
+const buildPhases = new Set<PerformancePhase>(buildPhaseOrder);
+const buildPhaseMeasurements = new AsyncLocalStorage<BuildPerformanceContext>();
+
+/**
+ * Selects the output layout for the build currently running in this async context.
+ * @param outputStyle - The configured build report style.
+ * @param interactive - Whether the report may prompt for keyboard input (only while the process is kept alive, e.g. watch mode).
+ */
+function setBuildOutputStyle(outputStyle: BuildOutputStyleType, interactive = false): void {
+	const buildContext = buildPhaseMeasurements.getStore();
+
+	if (buildContext !== undefined) {
+		buildContext.outputStyle = outputStyle;
+		buildContext.interactive = interactive;
+	}
+}
 
 /**
  * Calculates build time not represented by the displayed critical-path phases.
@@ -24,21 +37,10 @@ const buildPhaseMeasurements = new AsyncLocalStorage<Map<string, PhaseMeasuremen
  * @param measurements - Phase measurements captured within the current build
  * @returns Displayed overhead in milliseconds
  */
-function calculateOverhead(buildDuration: number, measurements: ReadonlyMap<string, PhaseMeasurement>) {
-	const duration = (message: string) => Math.trunc(measurements.get(message)?.duration ?? 0);
-	const initialization = duration(initializationMessage);
-	const typeCheck = duration(typeCheckMessage);
-	const bundle = duration(bundleMessage);
+function calculateOverhead(buildDuration: number, measurements: ReadonlyMap<PerformancePhase, PhaseMeasurement>) {
+	const duration = (phase: PerformancePhase) => Math.trunc(measurements.get(phase)?.duration ?? 0);
 
-	return Math.max(0, Math.trunc(buildDuration) - initialization - typeCheck - bundle);
-}
-
-/**
- * Orders and narrows entries to the shape this module always populates via `measure()`'s `options.detail`.
- * @param entries - Entries produced by this module's own PerformanceObserver
- */
-function toOrderedDetailedEntries(entries: PerformanceEntryList) {
-	return entries.reverse() as DetailedPerformanceEntry<unknown>[];
+	return Math.max(0, Math.trunc(buildDuration) - duration(PerformancePhase.INITIALIZATION) - duration(PerformancePhase.COMPILE) - duration(PerformancePhase.BUNDLE));
 }
 
 /** A class that logs the performance of methods using the Performance API */
@@ -53,24 +55,35 @@ class PerformanceLogger implements Closable {
 
 	/**
 	 * Measures the performance of a method and logs the result.
-	 * @param message - The message to log with the performance measurement
-	 * @param groupedPhases - Child measurements to render beneath this measurement
+	 * @param phase - The performance phase to log with the performance measurement
+	 * @param childPhases - Child measurements to render beneath this measurement
 	 * @returns A Stage 3 method decorator that measures execution time of the decorated method
 	 */
-	measure(message: string, groupedPhases: readonly string[] = []) {
-		const _measure = <R>(propertyKey: string, result: R, startTime: number, options: PerformanceMeasureOptions<R>): R => {
+	measure(phase: PerformancePhase, ...childPhases: PerformancePhase[]) {
+		const _measure = <R>(propertyKey: string, result: R, startTime: number, options: PerformanceMeasureOptions<R>, buildContext: BuildPerformanceContext | undefined): R => {
 			({ startTime: options.end } = performance.mark(propertyKey));
 			const duration = options.end - startTime;
-			const phaseMeasurements = buildPhaseMeasurements.getStore();
-			if (message === buildMessage) {
-				if (phaseMeasurements !== undefined) { options.detail.overheadMs = calculateOverhead(duration, phaseMeasurements) }
+			const phaseMeasurements = buildContext?.measurements;
+
+			if (phase === PerformancePhase.BUILD) {
+				if (phaseMeasurements !== undefined) {
+					options.detail.overheadMs = calculateOverhead(duration, phaseMeasurements);
+					options.detail.outputStyle = buildContext?.outputStyle ?? BuildOutputStyle.SUMMARY;
+					options.detail.interactive = buildContext?.interactive;
+					options.detail.phases = buildPhaseOrder.flatMap((phase): PerformanceSubStep[] => {
+						const measurement = phaseMeasurements.get(phase);
+
+						return measurement === undefined ? [] : [{ name: phase, duration: PerformanceLogger.#formatDuration(measurement.duration), ms: Math.trunc(measurement.duration), result: measurement.result }];
+					});
+				}
 			} else {
 				const outputFiles = Array.isArray(result) && isWrittenFiles(result) ? result : undefined;
-				phaseMeasurements?.set(message, { duration, ...(outputFiles === undefined ? {} : { result: outputFiles }) });
+				if (buildContext !== undefined && buildPhases.has(phase)) { options.detail.buildPhase = true }
+				phaseMeasurements?.set(phase, { duration, ...(outputFiles === undefined ? {} : { result: outputFiles }) });
 			}
 
-			if (groupedPhases.length > 0) {
-				options.detail.steps = groupedPhases.flatMap((phase) => {
+			if (childPhases.length > 0) {
+				options.detail.steps = childPhases.flatMap((phase) => {
 					const measurement = phaseMeasurements?.get(phase);
 					return measurement === undefined ? [] : [{ name: phase, duration: PerformanceLogger.#formatDuration(measurement.duration), ms: measurement.duration, result: measurement.result }];
 				});
@@ -88,15 +101,16 @@ class PerformanceLogger implements Closable {
 
 			return function(this: T, ...args: A): R {
 				const invoke = (): R => {
+					const buildContext = buildPhaseMeasurements.getStore();
 					const startTime = performance.mark(propertyKey).startTime;
-					const options: PerformanceMeasureOptions<R> = { start: startTime, detail: { message } };
+					const options: PerformanceMeasureOptions<R> = { start: startTime, detail: { phase } };
 					const result = targetMethod.apply(this, args);
 
 					// Promise<R> collapses to R at runtime when R is itself a Promise; TS can't express that, hence the cast
-					return result instanceof Promise ? result.then((r: R) => _measure(propertyKey, r, startTime, options)) as R : _measure(propertyKey, result, startTime, options);
+					return result instanceof Promise ? result.then((r: R) => _measure(propertyKey, r, startTime, options, buildContext)) as R : _measure(propertyKey, result, startTime, options, buildContext);
 				};
 
-				return message === buildMessage ? buildPhaseMeasurements.run(new Map(), invoke) : invoke();
+				return phase === PerformancePhase.BUILD ? buildPhaseMeasurements.run({ measurements: new Map(), outputStyle: BuildOutputStyle.SUMMARY, interactive: false }, invoke) : invoke();
 			};
 		};
 	}
@@ -119,25 +133,27 @@ class PerformanceLogger implements Closable {
 	 */
 	#logEntries(entries: PerformanceEntryList) {
 		// Reverse the list to display the most recent entries first
-		for (const { name, duration, detail: { message, result = [], steps, overheadMs } } of toOrderedDetailedEntries(entries)) {
-			if (groupedPhaseMessages.has(message)) {
+		for (const { name, duration, detail: { phase, result = [], steps, phases = [], overheadMs, outputStyle, interactive, buildPhase } } of entries.reverse() as DetailedPerformanceEntry<unknown>[]) {
+			if (groupedPhases.has(phase) || buildPhase) {
 				performance.clearMeasures(name);
 				performance.clearMarks(name);
 				continue;
 			}
 
-			// Special formatting for top-level "Build" step ⚡
-			if (message === buildMessage) {
-				Logger.separator();
-				if (process.exitCode) {
-					Logger.error(`✗ Build failed in ${TextFormat.cyan(PerformanceLogger.#formatDuration(duration))}\n`);
-				} else {
-					if (typeof overheadMs === 'number') { Logger.log(`  Overhead ${TextFormat.yellow(`(${PerformanceLogger.#formatDuration(overheadMs)})`)}`, 'info') }
-					Logger.step(`Completed in ${TextFormat.blueBright(PerformanceLogger.#formatDuration(duration))}\n`);
-				}
+			if (phase === PerformancePhase.BUILD) {
+				Logger.buildReport({
+					style: outputStyle ?? BuildOutputStyle.SUMMARY,
+					duration: PerformanceLogger.#formatDuration(duration),
+					durationMs: Math.trunc(duration),
+					overhead: typeof overheadMs === 'number' ? PerformanceLogger.#formatDuration(overheadMs) : undefined,
+					overheadMs,
+					phases,
+					success: !process.exitCode,
+					interactive
+				});
 			} else {
-				Logger.step(`${message} ${TextFormat.dim(`(${PerformanceLogger.#formatDuration(duration)})`)}`);
-				if (steps?.length) { Logger.subSteps(steps, message === bundleMessage) }
+				Logger.step(`${phase} ${TextFormat.dim(`(${PerformanceLogger.#formatDuration(duration)})`)}`);
+				if (steps?.length) { Logger.subSteps(steps, phase === PerformancePhase.BUNDLE) }
 
 				// If there are result files, log them with tree formatting
 				if (Array.isArray(result) && isWrittenFiles(result) && result.length > 0) { Logger.success('', ...result) }
@@ -172,4 +188,4 @@ const measure: typeof PerformanceLogger.prototype.measure = performanceLogger.me
 /** Synchronously logs any measurements still queued for async observer delivery. */
 const flushPerformanceLog = (): void => performanceLogger.flush();
 
-export { measure as logPerformance, flushPerformanceLog };
+export { measure as logPerformance, flushPerformanceLog, setBuildOutputStyle };

@@ -10,14 +10,18 @@ const ProcessEvent = {
 const sigintCleanupTimeoutMs = 5000;
 
 /** Manages process events and allows registering closeable classes to be closed on exit */
-class ProcessManager implements Closable {
+class ProcessManager implements Closable, Disposable {
 	#hasHandledExit = false;
 	readonly #closeableClasses: Closable[] = [];
+	readonly #listeners = new DisposableStack();
 
 	constructor() {
 		process.addListener(ProcessEvent.exit, this.#handleExit);
+		this.#listeners.defer(() => process.removeListener(ProcessEvent.exit, this.#handleExit));
 		process.addListener(ProcessEvent.sigint, this.#consoleExit);
+		this.#listeners.defer(() => process.removeListener(ProcessEvent.sigint, this.#consoleExit));
 		process.addListener(ProcessEvent.uncaughtException, this.#handleUncaughtException);
+		this.#listeners.defer(() => process.removeListener(ProcessEvent.uncaughtException, this.#handleUncaughtException));
 	}
 
 	/**
@@ -38,12 +42,15 @@ class ProcessManager implements Closable {
 		if (index !== -1) { this.#closeableClasses.splice(index, 1) }
 	}
 
-	/** Closes the process manager and removes all listeners */
+	/** Detaches process listeners and releases registrations without closing registered resources. */
 	close(): void {
 		this.#closeableClasses.length = 0;
-		process.removeListener(ProcessEvent.exit, this.#handleExit);
-		process.removeListener(ProcessEvent.sigint, this.#consoleExit);
-		process.removeListener(ProcessEvent.uncaughtException, this.#handleUncaughtException);
+		this.#listeners.dispose();
+	}
+
+	/** Detaches the manager when a `using` scope ends; does not close registered resources. */
+	[Symbol.dispose](): void {
+		this.close();
 	}
 
 	/** Handles normal process exit */

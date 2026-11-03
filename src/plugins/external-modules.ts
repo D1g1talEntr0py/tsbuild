@@ -2,9 +2,8 @@ import { Paths } from '../paths';
 import { createPatternMatcher } from '../pattern-matcher';
 import type { Pattern } from '../@types';
 import type { OnResolveResult, Plugin } from 'esbuild';
-import type { MapLike } from 'typescript';
 
-type ExternalModulesPluginOptions = { dependencies?: Pattern[], noExternal?: Pattern[], paths?: MapLike<string[]> };
+type ExternalModulesPluginOptions = { dependencies?: Pattern[], noExternal?: Pattern[], paths?: Record<string, string[]> };
 
 /**
  * Converts a tsconfig `paths` key to an exact string or wildcard matcher.

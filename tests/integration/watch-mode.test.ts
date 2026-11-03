@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import { writeFile, readFile, stat, rename } from 'node:fs/promises';
+import { writeFile, readFile, stat, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';
 import { processManager } from '../../src/process-manager';
@@ -8,14 +8,13 @@ import { Logger } from '../../src/logger';
 import { Paths } from '../../src/paths';
 import { ProjectWatcher } from '../../src/watch/project-watcher';
 import { TestHelper } from '../scripts/test-helper';
+import { bundleDeclarations } from '../../src/dts/declaration-bundler';
 import { WatchrStats, type WatchrEventHandler } from '@d1g1tal/watchr';
 import type { AbsolutePath } from '../../src/@types';
 
-// Wraps the named export so rebuild's direct call to it (proving oldProgram reuse, not a
-// createIncrementalProgram() round-trip which never forwards oldProgram) is observable.
-vi.mock('typescript', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('typescript')>();
-	return { ...actual, createEmitAndSemanticDiagnosticsBuilderProgram: vi.fn(actual.createEmitAndSemanticDiagnosticsBuilderProgram) };
+vi.mock('../../src/dts/declaration-bundler', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../src/dts/declaration-bundler')>();
+	return { ...actual, bundleDeclarations: vi.fn(actual.bundleDeclarations) };
 });
 
 // Temporary fixture removal may cause operational errors during cleanup.
@@ -57,7 +56,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		cleanup = c;
 
 		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
-		await project.build();
+		expect(await project.build()).toBeNull();
 		await new Promise<void>(resolve => setImmediate(resolve));
 		await expect(stat(join(dir, '.tsbuild', 'tsconfig.tsbuildinfo'))).rejects.toMatchObject({ code: 'ENOENT' });
 		await expect(readUtf8(join(dir, 'dist', 'index.d.ts'))).resolves.toContain('version');
@@ -86,6 +85,34 @@ describe('TypeScriptProject - Watch Mode', () => {
 		}
 	});
 
+	it('keeps type-check-only watch rebuilds from producing outputs', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const value: number = 1;' }
+		});
+		cleanup = c;
+		const errorSpy = vi.spyOn(Logger, 'error');
+		project = new TypeScriptProject(dir, { compilerOptions: { noEmit: true } }, { clearCache: false, force: false, watch: true, minify: false });
+
+		try {
+			{
+				await using resource = await project.build();
+				expect(resource).toBeNull();
+			}
+			await writeFile(join(dir, 'src/index.ts'), 'export const value: number = "bad";');
+
+			await vi.waitFor(() => {
+				expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Found 1 error'));
+			}, { timeout: 7_500, interval: 100 });
+
+			await expect(stat(join(dir, 'dist/index.js'))).rejects.toMatchObject({ code: 'ENOENT' });
+			await expect(stat(join(dir, 'dist/index.d.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
+			expect(process.exitCode).toBeUndefined();
+		} finally {
+			await project.close();
+			errorSpy.mockRestore();
+		}
+	});
+
 	it('triggers a rebuild when a watched source file changes', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
@@ -109,11 +136,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		expect(process.exitCode).toBeUndefined();
 	});
 
-	it('reuses the prior BuilderProgram as oldProgram on rebuild instead of a from-scratch parse', { timeout: 15_000 }, async () => {
-		const ts = await import('typescript');
-		const createBuilderSpy = vi.mocked(ts.createEmitAndSemanticDiagnosticsBuilderProgram);
-		createBuilderSpy.mockClear();
-
+	it('applies consecutive source changes to JavaScript and declarations in the live compiler session', { timeout: 15_000 }, async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
 			tsconfig: { tsbuild: { clean: false } }
@@ -124,28 +147,78 @@ describe('TypeScriptProject - Watch Mode', () => {
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
-		// The initial build goes through createIncrementalProgram()'s internal builder factory,
-		// not the named export our rebuild path calls directly.
-		expect(createBuilderSpy).not.toHaveBeenCalled();
+		for (const value of [ 2, 3 ]) {
+			await writeFile(join(dir, 'src/index.ts'), `export const version = ${value};`);
 
-		await writeFile(join(dir, 'src/index.ts'), 'export const version = 2;');
+			await vi.waitFor(async () => {
+				expect(await readUtf8(join(dir, 'dist/index.js'))).toMatch(new RegExp(`version\\s*=\\s*${value}`));
+				expect(await readUtf8(join(dir, 'dist/index.d.ts'))).toContain(`version = ${value}`);
+				expect(process.exitCode).toBeUndefined();
+			}, { timeout: 7_500, interval: 100 });
+		}
+	});
 
-		await vi.waitFor(() => {
-			expect(createBuilderSpy).toHaveBeenCalledTimes(1);
-		}, { timeout: 7_500, interval: 100 });
+	it('bounds live syntax cache paths through signature changes, deletion, rename and re-addition', { timeout: 20_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version: number = 0;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		await project.build();
+		const cache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+		const indexPath = Paths.absolute(dir, 'dist/index.d.ts');
+		const originalPath = Paths.absolute(dir, 'dist/item.d.ts');
+		const renamedPath = Paths.absolute(dir, 'dist/renamed.d.ts');
+		const item = (version: number) => `export const value: number = ${version}; export interface Shape { step${version}: string }`;
+		const entry = (version: number, name?: string) => `export const version: number = ${version};${name ? ` export * from "./${name}.js";` : ''}`;
+		const verify = async (version: number, path?: AbsolutePath) => {
+			await vi.waitFor(async () => {
+				expect(await readUtf8(join(dir, 'dist/index.js'))).toMatch(new RegExp(`version\\s*=\\s*${version}\\b`));
+				const declaration = await readUtf8(join(dir, 'dist/index.d.ts'));
+				if (path === undefined) {
+					expect(declaration).not.toContain('interface Shape');
+				} else {
+					expect(declaration).toContain(`step${version}: string`);
+					expect(await readUtf8(join(dir, 'dist/index.js'))).toMatch(new RegExp(`value\\s*=\\s*${version}\\b`));
+				}
+				expect([...cache.keys()].sort()).toEqual([ indexPath, ...(path === undefined ? [] : [ path ]) ].sort());
+				expect(vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache).toBe(cache);
+				expect(process.exitCode).toBeUndefined();
+			}, { timeout: 7_500, interval: 50 });
+		};
+		try {
+			await new Promise<void>(resolve => setImmediate(resolve));
+			await writeFile(join(dir, 'src/item.ts'), item(1));
+			await writeFile(join(dir, 'src/index.ts'), entry(1, 'item'));
+			await verify(1, originalPath);
+			const original = cache.get(originalPath)!.sourceFile;
 
-		// Object the first rebuild produced — the next rebuild must chain from THIS exact
-		// in-memory instance, not a fresh reconstruction from disk .tsbuildinfo.
-		const firstBuilderProgram = createBuilderSpy.mock.results[0].value;
+			await writeFile(join(dir, 'src/item.ts'), item(2));
+			await writeFile(join(dir, 'src/index.ts'), entry(2, 'item'));
+			await verify(2, originalPath);
+			expect(cache.get(originalPath)!.sourceFile).not.toBe(original);
+			const changed = cache.get(originalPath)!.sourceFile;
 
-		await writeFile(join(dir, 'src/index.ts'), 'export const version = 3;');
+			await rename(join(dir, 'src/item.ts'), join(dir, 'src/renamed.ts'));
+			await writeFile(join(dir, 'src/renamed.ts'), item(3));
+			await writeFile(join(dir, 'src/index.ts'), entry(3, 'renamed'));
+			await verify(3, renamedPath);
+			expect(cache.has(originalPath)).toBe(false);
 
-		await vi.waitFor(() => {
-			expect(createBuilderSpy).toHaveBeenCalledTimes(2);
-		}, { timeout: 7_500, interval: 100 });
+			await writeFile(join(dir, 'src/index.ts'), entry(4));
+			await unlink(join(dir, 'src/renamed.ts'));
+			await verify(4);
 
-		const [ , , , oldProgram ] = createBuilderSpy.mock.calls[1];
-		expect(oldProgram).toBe(firstBuilderProgram);
+			await writeFile(join(dir, 'src/item.ts'), item(5));
+			await writeFile(join(dir, 'src/index.ts'), entry(5, 'item'));
+			await verify(5, originalPath);
+			expect(cache.get(originalPath)!.sourceFile).not.toBe(changed);
+			expect(cache.has(renamedPath)).toBe(false);
+		} finally {
+			await project.close();
+		}
+		expect(cache.size).toBe(0);
 	});
 
 	it('reloads a scoped TypeScript plugin when an imported plugin dependency changes', { timeout: 15_000 }, async () => {

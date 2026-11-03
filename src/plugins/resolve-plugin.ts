@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { discoverLocalDependencies } from './plugin-dependencies';
 import { nodeModulesPathPattern, typeScriptExtensionExpression } from '../constants';
 import type { Plugin } from 'esbuild';
-import type { CompilerOptions } from 'typescript';
+import type { API, CompilerOptions } from 'typescript/sync';
 import type { NamespacedUnregister, OnImport } from '@d1g1tal/tsnode/api';
 import type { PluginDescriptor, PluginIdentifier, PluginFactory, AbsolutePath, PackageSpecifier, PluginSpecifier } from '../@types';
 
@@ -13,6 +13,7 @@ type PluginScope = {
 	handle: NamespacedUnregister | undefined;
 	parentURL: string;
 	compilerOptions: CompilerOptions;
+	api: API;
 	dependencies: Set<AbsolutePath>;
 };
 
@@ -31,6 +32,8 @@ export type PluginScopeOptions = {
 	tsconfigPath: AbsolutePath;
 	/** Resolved options used by the dependency-tracking fallback */
 	compilerOptions: CompilerOptions;
+	/** TypeScript API session used by the dependency-tracking fallback */
+	api: API;
 };
 
 /** Result of resolving a project's configured plugins into esbuild Plugin objects. */
@@ -94,7 +97,7 @@ function resolvePluginReference(reference: PluginIdentifier, projectDir: Absolut
  * @param scope The tsnode scope handle (when created) and stable parent URL for scoped imports
  * @returns The resolved esbuild Plugin
  */
-async function resolveReference({ descriptor, resolved, localTypeScriptPath }: PluginReference, { handle, parentURL, compilerOptions, dependencies }: PluginScope) {
+async function resolveReference({ descriptor, resolved, localTypeScriptPath }: PluginReference, { handle, parentURL, compilerOptions, api, dependencies }: PluginScope) {
 	const [ specifier, options ] = typeof descriptor === 'string' ? [ descriptor, undefined ] : descriptor;
 
 	let module: Record<string, unknown>;
@@ -106,7 +109,7 @@ async function resolveReference({ descriptor, resolved, localTypeScriptPath }: P
 	}
 
 	if (localTypeScriptPath !== undefined) {
-		for (const dependency of discoverLocalDependencies(localTypeScriptPath, compilerOptions)) {
+		for (const dependency of discoverLocalDependencies(api, localTypeScriptPath, compilerOptions)) {
 			dependencies.add(dependency);
 		}
 	}
@@ -143,14 +146,14 @@ async function resolveReference({ descriptor, resolved, localTypeScriptPath }: P
  * decorators, and other non-erasable syntax work the same as in the rest of the project. JS files and bare
  * package specifiers continue to load via native `import()`, unchanged from prior behavior.
  *
- * The returned `dispose()` must be called by the caller only once the build (including plugin `onEnd` callbacks)
+ * The returned configuration must be disposed by the caller only once the build (including plugin `onEnd` callbacks)
  * has finished, since those callbacks may dynamically import further local TypeScript modules.
  * @param plugins The array of plugins and/or plugin references
  * @param projectDir The project root directory for resolving relative paths
  * @param scopeOptions Namespace/tsconfig path/compiler options used to isolate and resolve this project's TypeScript plugin scope
- * @returns Resolved esbuild Plugin objects, the discovered local TypeScript dependency graph, and a dispose callback
+ * @returns Resolved esbuild Plugin objects, the discovered local TypeScript dependency graph, and a disposable scope
  */
-export async function resolvePlugins(plugins: Array<Plugin | PluginIdentifier>, projectDir: AbsolutePath, { namespace, tsconfigPath: tsconfig, compilerOptions }: PluginScopeOptions): Promise<PluginConfiguration> {
+export async function resolvePlugins(plugins: Array<Plugin | PluginIdentifier>, projectDir: AbsolutePath, { namespace, tsconfigPath: tsconfig, compilerOptions, api }: PluginScopeOptions): Promise<PluginConfiguration> {
 	let handle: NamespacedUnregister | undefined;
 	const dependencies = new Set<AbsolutePath>();
 	const resolved: Plugin[] = [];
@@ -180,7 +183,7 @@ export async function resolvePlugins(plugins: Array<Plugin | PluginIdentifier>, 
 				handle = (await import('@d1g1tal/tsnode/api')).register({ namespace, tsconfig, onImport });
 			}
 
-			resolved.push(await resolveReference(reference, { handle, parentURL, compilerOptions, dependencies }));
+			resolved.push(await resolveReference(reference, { handle, parentURL, compilerOptions, api, dependencies }));
 		}
 
 		return { plugins: resolved, dependencies, [Symbol.dispose]: () => handle?.unregister() };

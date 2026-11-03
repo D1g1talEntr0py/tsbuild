@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { Files } from '../files';
 import { isErrnoException } from '../errors';
 import type { WatchrStats, FileSystemEvent } from '@d1g1tal/watchr';
-import type { AbsolutePath, PendingFileChange } from '../@types';
+import type { AbsolutePath, Closable, PendingFileChange } from '../@types';
 
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
 type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
@@ -27,7 +27,7 @@ const isRenameEventFilter = ({ event, nextPath }: PendingFileChange) => nextPath
  * Returns whether a watcher event renames a file or directory.
  * @param event - Watcher event type
  */
-export function isRenameEvent(event: FileSystemEvent): boolean {
+export function isRenameEvent(event: FileSystemEvent): event is 'rename' | 'renameDir' {
 	return event === 'rename' || event === 'renameDir';
 }
 
@@ -37,14 +37,14 @@ export function isRenameEvent(event: FileSystemEvent): boolean {
  */
 export function formatPendingChangeSummary(changes: ReadonlyArray<PendingFileChange>): string {
 	const renamedFiles = changes.filter(isRenameEventFilter).length;
+
 	if (renamedFiles > 0) { return `${renamedFiles} file${renamedFiles === 1 ? '' : 's'} renamed detected.` }
 
 	return `${changes.length} file change${changes.length === 1 ? '' : 's'} detected.`;
 }
 
 /** Owns watcher-event deduplication, content filtering, and serial rebuild scheduling. */
-export class RebuildQueue {
-	readonly #options: RebuildQueueOptions;
+export class RebuildQueue implements Closable, Disposable {
 	#rebuildDispatch: NodeJS.Timeout | undefined;
 	#renameCycleTimer: NodeJS.Timeout | undefined;
 	#renameCycleDeadline = 0;
@@ -53,12 +53,15 @@ export class RebuildQueue {
 	#rebuildInFlight = false;
 	#rebuildPending = false;
 	#stopped = false;
-	readonly #pendingChanges: Map<string, QueuedPendingChange> = new Map();
-	readonly #pendingChangeKeysByPath: Map<AbsolutePath, string> = new Map();
-	readonly #pendingChangeStats: Map<AbsolutePath, ContentChangeSnapshot> = new Map();
-	readonly #pendingChangeVersions: Map<AbsolutePath, number> = new Map();
-	readonly #renameCyclePaths: Set<AbsolutePath> = new Set();
-	readonly #contentStates: Map<AbsolutePath, ContentChangeState> = new Map();
+	/** Confirmed changes collected by a rebuild attempt that yielded to newer events; replayed by the next attempt. */
+	#deferredChanges: QueuedPendingChange[] = [];
+	readonly #options: RebuildQueueOptions;
+	readonly #renameCyclePaths = new Set<AbsolutePath>();
+	readonly #pendingChanges = new Map<string, QueuedPendingChange>();
+	readonly #pendingChangeKeysByPath = new Map<AbsolutePath, string>();
+	readonly #pendingChangeStats = new Map<AbsolutePath, ContentChangeSnapshot>();
+	readonly #pendingChangeVersions = new Map<AbsolutePath, number>();
+	readonly #contentStates = new Map<AbsolutePath, ContentChangeState>();
 
 	/**
 	 * Creates a queue with the watcher rename-pairing timeout and project callbacks.
@@ -78,6 +81,7 @@ export class RebuildQueue {
 	 */
 	enqueue(event: FileSystemEvent, stats: WatchrStats | undefined, path: AbsolutePath, nextPath?: AbsolutePath): void {
 		if (this.#stopped) { return }
+
 		const renameCycleActive = this.#isRenameCycleActive();
 		const followsActiveRename = this.#renameCyclePaths.has(path) || (nextPath !== undefined && this.#renameCyclePaths.has(nextPath));
 
@@ -88,6 +92,7 @@ export class RebuildQueue {
 		if (isRenameEvent(event)) {
 			this.#activateRenameCycle();
 			this.#renameCyclePaths.add(path);
+
 			if (nextPath !== undefined) { this.#renameCyclePaths.add(nextPath) }
 		} else if (this.#renameCyclePaths.has(path) || (nextPath !== undefined && this.#renameCyclePaths.has(nextPath))) {
 			return;
@@ -104,10 +109,12 @@ export class RebuildQueue {
 
 		const relatedKeys = new Set<string>();
 		const pathKey = this.#pendingChangeKeysByPath.get(path);
+
 		if (pathKey !== undefined) { relatedKeys.add(pathKey) }
 
 		if (nextPath !== undefined) {
 			const nextPathKey = this.#pendingChangeKeysByPath.get(nextPath);
+
 			if (nextPathKey !== undefined) { relatedKeys.add(nextPathKey) }
 		}
 
@@ -119,8 +126,10 @@ export class RebuildQueue {
 		for (const key of relatedKeys) { this.#deletePendingChange(key) }
 
 		const key = pendingChangeKey(event, path);
+
 		this.#pendingChanges.set(key, { event, path, nextPath, version });
 		this.#pendingChangeKeysByPath.set(path, key);
+
 		if (nextPath !== undefined) { this.#pendingChangeKeysByPath.set(nextPath, key) }
 
 		this.#queueRevision++;
@@ -128,7 +137,7 @@ export class RebuildQueue {
 	}
 
 	/** Permanently closes the queue and synchronously cancels delayed dispatch. */
-	stop(): void {
+	close(): void {
 		this.#stopped = true;
 
 		if (this.#rebuildDispatch !== undefined) {
@@ -144,6 +153,17 @@ export class RebuildQueue {
 		this.#rebuildPending = false;
 	}
 
+	/** Stops future work; retained state remains until the owner drains and disposes the queue. */
+	stop(): void {
+		this.close();
+	}
+
+	/** Stops future work and releases retained state without waiting for active callbacks or reads. */
+	[Symbol.dispose](): void {
+		this.close();
+		this.clear();
+	}
+
 	/** Releases retained state after the owner has stopped the queue and drained its build. */
 	clear(): void {
 		this.#renameCyclePaths.clear();
@@ -154,6 +174,7 @@ export class RebuildQueue {
 		this.#pendingChangeKeysByPath.clear();
 		this.#contentStates.clear();
 		this.#pendingChanges.clear();
+		this.#deferredChanges = [];
 	}
 
 	/**
@@ -163,7 +184,9 @@ export class RebuildQueue {
 	 */
 	markApplied(change: PendingFileChange): void {
 		if (this.#stopped) { return }
+
 		const { event, path, nextPath } = change;
+
 		if (nextPath !== undefined && isRenameEvent(event)) {
 			const previousState = this.#contentStates.get(path);
 			if (previousState !== undefined) {
@@ -222,7 +245,7 @@ export class RebuildQueue {
 			return;
 		}
 
-		if (this.#pendingChanges.size === 0) { return }
+		if (!this.#hasPendingWork()) { return }
 
 		if (this.#rebuildDispatch !== undefined) {
 			if (!this.#isRenameCycleActive()) { return }
@@ -244,6 +267,7 @@ export class RebuildQueue {
 	 */
 	async #awaitQueueStability(expectedRevision: number): Promise<boolean> {
 		await new Promise<void>((resolve) => setImmediate(resolve));
+
 		return this.#queueRevision === expectedRevision;
 	}
 
@@ -252,15 +276,13 @@ export class RebuildQueue {
 	 * @param expectedRevision - Queue revision captured at dispatch
 	 */
 	async #triggerRebuild(expectedRevision: number) {
-		if (this.#stopped || this.#pendingChanges.size === 0) { return }
+		if (this.#stopped || !this.#hasPendingWork()) { return }
 
-		if (this.#queueRevision !== expectedRevision) {
-			this.#requestRebuild();
-			return;
-		}
+		if (this.#queueRevision !== expectedRevision) { return this.#requestRebuild() }
 
 		if (this.#rebuildInFlight) {
 			this.#rebuildPending = true;
+
 			return;
 		}
 
@@ -279,8 +301,9 @@ export class RebuildQueue {
 
 			const settledRevision = this.#queueRevision;
 			if (settledRevision !== expectedRevision && this.#pendingChanges.size > 0) {
-				this.#requestRebuild();
-				return;
+				this.#deferredChanges = pendingFileChanges;
+
+				return this.#requestRebuild();
 			}
 
 			if (pendingFileChanges.length === 0) { return }
@@ -291,8 +314,9 @@ export class RebuildQueue {
 			if (this.#stopped) { return }
 
 			if (!stable) {
-				this.#requestRebuild();
-				return;
+				this.#deferredChanges = pendingFileChanges;
+
+				return this.#requestRebuild();
 			}
 
 			await this.#options.rebuild(pendingFileChanges);
@@ -310,9 +334,21 @@ export class RebuildQueue {
 		}
 	}
 
-	/** Drains queued watcher events, including events arriving during content hashing. */
+	/** Returns whether queued or deferred changes still need a rebuild. */
+	#hasPendingWork() {
+		return this.#pendingChanges.size > 0 || this.#deferredChanges.length > 0;
+	}
+
+	/**
+	 * Drains queued watcher events, including events arriving during content hashing.
+	 * Changes deferred by an earlier yielded attempt come first, minus plain content changes superseded by a newer event for the same path.
+	 */
 	async #collectPendingFileChanges() {
+		const deferredChanges = this.#deferredChanges;
+		this.#deferredChanges = [];
+
 		const pendingFileChanges: QueuedPendingChange[] = [];
+
 		while (this.#pendingChanges.size > 0) {
 			const queuedChanges = [ ...this.#pendingChanges.values() ];
 
@@ -328,7 +364,14 @@ export class RebuildQueue {
 			}
 		}
 
-		return pendingFileChanges;
+		if (deferredChanges.length === 0) { return pendingFileChanges }
+
+		const queuedChangePathMapper = ({ path }: QueuedPendingChange) => path;
+		const deferredChangeFilter = ({ event, path, nextPath }: QueuedPendingChange) => nextPath !== undefined || event !== 'change' || !touchedPaths.has(path);
+
+		const touchedPaths = new Set(pendingFileChanges.map(queuedChangePathMapper));
+
+		return [ ...deferredChanges.filter(deferredChangeFilter), ...pendingFileChanges ];
 	}
 
 	/**
@@ -349,12 +392,15 @@ export class RebuildQueue {
 
 			if (stats?.size !== undefined && stats.modifiedTimeMs !== undefined && previousState?.stats?.size === stats.size && previousState.stats.modifiedTimeMs === stats.modifiedTimeMs) {
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 				return false;
 			}
 
 			if (stats?.size !== undefined && previousState?.stats?.size !== undefined && previousState.stats.size !== stats.size) {
 				this.#contentStates.set(path, { digest: previousState.digest, stats });
+
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 				return true;
 			}
 
@@ -364,12 +410,12 @@ export class RebuildQueue {
 
 			if (previousState === undefined) {
 				const sourceText = this.#options.sourceText(path);
-				if (sourceText !== undefined) {
-					if (digest === createHash('sha1').update(sourceText).digest('hex')) {
-						this.#contentStates.set(path, { digest, stats });
-						this.#pendingChangeStats.delete(path);
-						return false;
-					}
+
+				if (sourceText !== undefined && digest === createHash('sha1').update(sourceText).digest('hex')) {
+					this.#contentStates.set(path, { digest, stats });
+					this.#pendingChangeStats.delete(path);
+
+					return false;
 				}
 			}
 
@@ -384,6 +430,7 @@ export class RebuildQueue {
 
 			if (code === 'ENOENT') {
 				if (this.#pendingChangeVersions.get(path) === version) { this.#pendingChangeStats.delete(path) }
+
 				return false;
 			}
 

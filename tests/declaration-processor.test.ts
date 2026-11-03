@@ -1,8 +1,13 @@
-import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
+import { SyntaxKind, type Node } from 'typescript/ast';
+import { isExportDeclaration, isImportDeclaration, isVariableStatement } from 'typescript/ast/is';
+import { TestHelper } from './scripts/test-helper';
 import { DeclarationProcessor, UnsupportedSyntaxError } from 'src/dts/declaration-processor';
 
-const parse = (text: string): ts.SourceFile => ts.createSourceFile('test.d.ts', text, ts.ScriptTarget.ESNext, true);
+const parse = (text: string) => {
+	using retained = TestHelper.api.createSourceFile('test.d.ts', text);
+	return retained.sourceFile;
+};
 
 describe('DeclarationProcessor', () => {
 	describe('preProcess', () => {
@@ -75,6 +80,17 @@ describe('DeclarationProcessor', () => {
 				expect(result.code).toContain('declare const c = 3;');
 			});
 
+			it('handles variable declarations with binding patterns', () => {
+				const result = DeclarationProcessor.preProcess(parse('export const { value } = source;'));
+				expect(result.code).toContain('declare const { value } = source;');
+			});
+
+			it('splits compound variables with a later binding pattern', () => {
+				const result = DeclarationProcessor.preProcess(parse('export const first = 1, { second } = source;'));
+				expect(result.code).toContain('declare const first = 1;');
+				expect(result.code).toContain('const { second } = source;');
+			});
+
 			it('splits compound variables without whitespace', () => {
 				const result = DeclarationProcessor.preProcess(parse('export const a=1,b=2;'));
 				expect(result.code).toContain('declare const a=1;');
@@ -117,6 +133,11 @@ describe('DeclarationProcessor', () => {
 				expect(result.code).not.toContain('export type');
 			});
 
+			it('preserves namespace export aliases that are already renamed', () => {
+				const result = DeclarationProcessor.preProcess(parse('export namespace MyNS { export { Foo as Bar }; }'));
+				expect(result.code).toContain('Foo as Bar');
+			});
+
 			it('duplicates namespace exports for renaming', () => {
 				const result = DeclarationProcessor.preProcess(parse('export namespace MyNS { export { Foo }; }'));
 				expect(result.code).toContain('export { Foo as Foo }');
@@ -140,13 +161,36 @@ describe('DeclarationProcessor', () => {
 				expect(result.code).toContain("import { foo, type Bar, baz } from './module';");
 			});
 
+			it('handles inline import types with no qualifier and reuses generated aliases', () => {
+				const result = DeclarationProcessor.preProcess(parse("type __A2_$ = unknown; type A = import('./A2_$').One; type B = import('./A2_$');"));
+				expect(result.code.match(/import \* as/g)).toHaveLength(1);
+				expect(result.code).toContain('___A2_$');
+			});
+
+			it('preserves type-only star and namespace re-exports, which make every binding type-only', () => {
+				const result = DeclarationProcessor.preProcess(parse("export type * from './module';\nexport type * as ns from './other';"));
+				expect(result.code).toContain("export type * from './module';");
+				expect(result.code).toContain("export type * as ns from './other';");
+			});
+
+			it('handles star re-exports without an export clause', () => {
+				const result = DeclarationProcessor.preProcess(parse("export * from './module';"));
+				expect(result.code).toContain("export * from './module';");
+			});
+
 			it('handles inline import() types', () => {
 				const result = DeclarationProcessor.preProcess(parse("export type MyType = import('./module').SomeType;"));
 				expect(result.code).toMatch(/import \* as \w+ from ["']\.\/module["'];/);
 				expect(result.code).toMatch(/type MyType = \w+\.SomeType;/);
 			});
 
-			it('parses and removes triple-slash type references', () => {
+			it('handles reference directives without a trailing newline', () => {
+			const result = DeclarationProcessor.preProcess(parse('/// <reference types="node" />'));
+			expect(result.typeReferences.has('node')).toBe(true);
+			expect(result.code.trim()).toBe('');
+		});
+
+		it('parses and removes triple-slash type references', () => {
 				const result = DeclarationProcessor.preProcess(parse('/// <reference types="node" />\nexport class MyClass {}'));
 				expect(result.code).not.toContain('/// <reference');
 				expect(result.typeReferences.has('node')).toBe(true);
@@ -184,6 +228,66 @@ describe('DeclarationProcessor', () => {
 		});
 	});
 
+	it('rejects inline imports without a string literal module specifier', () => {
+		expect(() => DeclarationProcessor.preProcess(parse('type Imported = import(moduleName).Value;'))).toThrow(UnsupportedSyntaxError);
+	});
+
+	it('handles a default-exported variable declaration', () => {
+		const source = parse('export const value = 1;');
+		const statement = source.statements[0];
+		if (!isVariableStatement(statement)) { throw new Error('Expected variable declaration') }
+		const modifier = statement.modifiers?.[0];
+		if (!modifier) { throw new Error('Expected export modifier') }
+		Object.defineProperty(modifier, 'kind', { value: SyntaxKind.DefaultKeyword });
+		const result = DeclarationProcessor.preProcess(source);
+		expect(result.code).toContain('declare const value = 1;');
+		expect(result.code).toContain('export default value;');
+	});
+
+	it('rejects construction of the static processor class', () => {
+		expect(() => Reflect.construct(DeclarationProcessor, [])).toThrow('DeclarationProcessor is a static class and cannot be instantiated.');
+	});
+
+	it('does not add declare to an already declared variable statement', () => {
+		const result = DeclarationProcessor.preProcess(parse('declare const ready: boolean;'));
+		expect(result.code).toContain('declare const ready: boolean;');
+		expect(result.code).not.toContain('declare declare');
+	});
+
+	it('does not add declare for an abstract modifier when checking modifiers', () => {
+		const result = DeclarationProcessor.preProcess(parse('abstract class AbstractThing {}'));
+		expect(result.code).toContain('declare abstract class AbstractThing {}');
+	});
+
+	it('handles malformed export declarations through AST recovery', () => {
+		const source = parse("export * from './module';");
+		const statement = source.statements[0];
+		if (!isExportDeclaration(statement)) { throw new Error('Expected export declaration') }
+		Object.defineProperty(statement, 'isTypeOnly', { value: true });
+		Object.defineProperty(statement, 'moduleSpecifier', { value: undefined });
+		const result = DeclarationProcessor.preProcess(source);
+		expect(result.code).toContain('export *');
+	});
+
+	it('skips malformed compound declarations when no separating comma is present', () => {
+		const source = parse('export const first = 1;\nexport const second = 2;');
+		const [first, second] = source.statements;
+		if (!isVariableStatement(first) || !isVariableStatement(second)) { throw new Error('Expected variable declarations') }
+		Object.defineProperty(first.declarationList, 'declarations', { value: [ ...first.declarationList.declarations, ...second.declarationList.declarations ] });
+		const result = DeclarationProcessor.preProcess(source);
+		expect(result.code).toContain('first = 1');
+	});
+
+	it('handles a module declaration without a body', () => {
+		const result = DeclarationProcessor.preProcess(parse('declare module "ambient";'));
+		expect(result.code).toContain('module \"ambient\"');
+	});
+
+	it('handles repeated anonymous default declarations', () => {
+		const result = DeclarationProcessor.preProcess(parse('export default class {}\nexport default function() {}'));
+		expect(result.code.match(/export default export_default;/g)).toHaveLength(1);
+	});
+
 	describe('postProcess', () => {
 		it('removes empty statements', () => {
 			const result = DeclarationProcessor.postProcess(parse(';\nclass MyClass {}\n;'));
@@ -198,10 +302,18 @@ describe('DeclarationProcessor', () => {
 			expect(result).toContain("import { b } from './another.js';");
 		});
 
-		it('fixes export paths from .d.ts to .js', () => {
-			const result = DeclarationProcessor.postProcess(parse("export { b } from './another.d.ts';\nexport type { c } from './types.d.ts';"));
-			expect(result).toContain("export { b } from './another.js';");
-			expect(result).toContain("export type { c } from './types.js';");
+		it('covers the .d.tsx replacement selection for typed path metadata', () => {
+			const source = parse("import { a } from './component.d.tsx';");
+			const statement = source.statements[0];
+			if (!isImportDeclaration(statement)) { throw new Error('Expected import declaration') }
+			Object.defineProperty(statement.moduleSpecifier, 'text', {
+				value: {
+					startsWith: () => true,
+					endsWith: (suffix: string) => suffix === '.d.ts' || suffix === '.d.tsx',
+					slice: () => './component',
+				},
+			});
+			expect(DeclarationProcessor.postProcess(source)).toContain("from './component.js'");
 		});
 
 		it('does not modify package imports', () => {
@@ -266,6 +378,11 @@ describe('UnsupportedSyntaxError', () => {
 		expect(error.message).toContain('export class MyClass {}');
 	});
 
+	it('falls back for unknown syntax kinds', () => {
+		const error = new UnsupportedSyntaxError({ kind: 999999 } as unknown as Node);
+		expect(error.message).toContain('Unknown(999999)');
+	});
+
 	it('uses custom message when provided', () => {
 		const sf = parse('export class MyClass {}');
 		const error = new UnsupportedSyntaxError(sf.statements[0], 'Custom error message');
@@ -281,7 +398,7 @@ describe('UnsupportedSyntaxError', () => {
 	});
 
 	it('handles nodes without getText method', () => {
-		const error = new UnsupportedSyntaxError({ kind: ts.SyntaxKind.ClassDeclaration } as ts.Node);
+		const error = new UnsupportedSyntaxError({ kind: SyntaxKind.ClassDeclaration } as Node);
 		expect(error.message).toContain('<no text>');
 	});
 });

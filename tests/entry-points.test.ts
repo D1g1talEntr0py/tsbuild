@@ -57,6 +57,14 @@ describe('resolveEntryPoints', () => {
 		expect(await resolveEntryPoints(directory, { '*': './src/nested' })).toEqual({ child: '/project/src/nested/child.ts' });
 	});
 
+	it('does not follow symbolic links inside expanded directories', async () => {
+		vol.fromJSON({ '/project/lib/index.ts': '', '/outside/secret.ts': '' });
+		vol.symlinkSync('/outside', '/project/lib/linked-directory');
+		vol.symlinkSync('/outside/secret.ts', '/project/lib/linked-file.ts');
+
+		expect(await resolveEntryPoints(directory, { lib: './lib' })).toEqual({ index: '/project/lib/index.ts' });
+	});
+
 	it('rejects asynchronously with the first missing configured path', async () => {
 		const result = resolveEntryPoints(directory, { first: './missing.ts', second: './also-missing.ts' });
 		expect(result).toBeInstanceOf(Promise);

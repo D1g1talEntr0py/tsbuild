@@ -3,7 +3,7 @@ import { Logger } from '../logger';
 import { defaultSourceDirectory } from '../constants';
 import { flushPerformanceLog } from '../decorators/performance-logger';
 import type { Watchr, WatchrStats, FileSystemEvent, WatchrEventHandler } from '@d1g1tal/watchr';
-import type { AbsolutePath, RelativePath, ProjectBuildConfiguration } from '../@types';
+import type { AbsolutePath, RelativePath, ProjectBuildConfiguration, Closable } from '../@types';
 
 export type FileSystemEventHandler = (event: FileSystemEvent, stats: WatchrStats, path: AbsolutePath, nextPath?: AbsolutePath) => void;
 
@@ -19,7 +19,7 @@ export type ProjectWatcherOptions = {
 const globCharacters = /[*?\\[\]!].*$/;
 
 /** Owns watch targets, watcher readiness, and watcher shutdown for a project. */
-export class ProjectWatcher {
+export class ProjectWatcher implements Closable, Disposable {
 	#fileWatcher?: Watchr;
 	#watchedPaths: readonly AbsolutePath[] = [];
 	#closed = false;
@@ -124,5 +124,10 @@ export class ProjectWatcher {
 		this.#closed = true;
 		this.#fileWatcher?.close();
 		this.#watchedPaths = [];
+	}
+
+	/** Closes the watcher when its owning synchronous disposal scope ends. */
+	[Symbol.dispose](): void {
+		this.close();
 	}
 }

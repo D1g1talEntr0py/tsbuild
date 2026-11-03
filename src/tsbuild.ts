@@ -8,12 +8,13 @@ const options = {
 	force: { type: 'boolean', default: false, short: 'f', description: 'Force a full rebuild' },
 	watch: { type: 'boolean', default: false, short: 'w', description: 'Watch for changes and rebuild' },
 	project: { type: 'string', default: process.cwd(), short: 'p', description: 'Project directory (defaults to current directory)' },
-	noEmit: { type: 'boolean', default: undefined, short: 'n', description: 'Do not emit output files' },
+	noEmit: { type: 'boolean', default: false, short: 'n', description: 'Do not emit output files' },
 	clearCache: { type: 'boolean', default: false, short: 'c', description: 'Clear the cache before the build' },
-	minify: { type: 'boolean', default: false, short: 'm', description: 'Minify the output' }
+	minify: { type: 'boolean', default: false, short: 'm', description: 'Minify the output' },
+	outputStyle: { type: 'string', default: undefined, short: 's', description: 'Build report style (dashboard, pipeline, artifacts, summary, detailed; default: summary)' }
 } as const;
 
-const { values: { help, version, noEmit, project: projectDirectory, ...args } } = parseArgs({ options });
+const { values: { help, version, noEmit, project, ...args } } = parseArgs({ options });
 
 // Handle help option
 if (help) {
@@ -34,12 +35,8 @@ if (help) {
 	try {
 		const { TypeScriptProject } = await import('./type-script-project');
 
-		const project = new TypeScriptProject(projectDirectory, { compilerOptions: noEmit !== undefined ? { noEmit } : {} }, args);
-
 		// Use the project as a resource that will be automatically cleaned up when the process exits, unless in watch mode.
-		await using _resource = project.isWatchMode ? null : project;
-
-		await project.build();
+		await using _resource = await new TypeScriptProject(project, noEmit ? { compilerOptions: { noEmit } } : {}, args).build();
 	} catch (error) {
 		if (error instanceof BuildError) {
 			console.error(error.message);

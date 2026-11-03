@@ -279,11 +279,11 @@ async function resolveEntryPoints(directory: AbsolutePath, entries: Record<strin
 async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string) {
 	const resolvedPath = Paths.absolute(directory, entryPoint);
 
-	if (await Paths.isDirectory(resolvedPath)) { return expandDirectoryEntryPoints(resolvedPath, name.endsWith('*') ? name.slice(0, -1) : '') }
-
-	if (await Paths.isFile(resolvedPath)) { return { [name]: resolvedPath } }
-
-	throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+	switch (await Paths.getType(resolvedPath)) {
+		case 'directory': return expandDirectoryEntryPoints(resolvedPath, name.endsWith('*') ? name.slice(0, -1) : '');
+		case 'file': return { [name]: resolvedPath };
+		case undefined: throw new ConfigurationError(`Entry point does not exist: ${entryPoint}. Add explicit entryPoints to your tsconfig.json tsbuild configuration.`);
+	}
 }
 
 /**
@@ -297,9 +297,11 @@ async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoi
 async function expandDirectoryEntryPoints(directory: AbsolutePath, prefix = '', entries: EntryPoints<AbsolutePath> = {}) {
 	for (const file of (await Files.readDirectory(directory)).sort()) {
 		const filePath = Paths.join(directory, file);
-		if (await Paths.isDirectory(filePath)) {
+		const fileType = await Paths.getType(filePath);
+
+		if (fileType === 'directory') {
 			await expandDirectoryEntryPoints(filePath, `${prefix}${file}/`, entries);
-		} else if (!file.endsWith(FileExtension.DTS) && await Paths.isFile(filePath)) {
+		} else if (!file.endsWith(FileExtension.DTS) && fileType === 'file') {
 			entries[`${prefix}${Paths.parse(file).name}`] = filePath;
 		}
 	}

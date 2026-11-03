@@ -3,13 +3,14 @@ import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
 import { BuildError, TypeCheckError, BundleError, ConfigurationError, castError, isErrnoException } from 'src/errors';
 import { UnsupportedSyntaxError } from 'src/dts/declaration-processor';
-import ts from 'typescript';
+import { SyntaxKind, type Node } from 'typescript/ast';
+import { TestHelper } from './scripts/test-helper';
 
 const errorsSource = readFileSync(new URL('../src/errors.ts', import.meta.url), 'utf8');
 
 describe('module boundaries', () => {
 	it('keeps the errors module TypeScript-free', () => {
-		expect(errorsSource).not.toMatch(/from\s+['"]typescript['"]/);
+		expect(errorsSource).not.toMatch(/from\s+['"]typescript(?:\/[\w/]+)?['"]/);
 		expect(errorsSource).not.toContain('UnsupportedSyntaxError');
 	});
 });
@@ -126,9 +127,13 @@ describe('ConfigurationError', () => {
 });
 
 describe('UnsupportedSyntaxError', () => {
+	const firstStatement = (code: string) => {
+		using retained = TestHelper.api.createSourceFile('/test.d.ts', code);
+		return retained.sourceFile.statements[0];
+	};
+
 	it('formats syntax kind name in message', () => {
-		const sourceFile = ts.createSourceFile('test.d.ts', 'export class Foo {}', ts.ScriptTarget.ESNext, true);
-		const classNode = sourceFile.statements[0];
+		const classNode = firstStatement('export class Foo {}');
 		const error = new UnsupportedSyntaxError(classNode);
 		expect(error.message).toContain('ClassDeclaration');
 		expect(error.message).toContain('Syntax not yet supported');
@@ -136,16 +141,14 @@ describe('UnsupportedSyntaxError', () => {
 	});
 
 	it('uses custom message', () => {
-		const sourceFile = ts.createSourceFile('test.d.ts', 'const x = 1;', ts.ScriptTarget.ESNext, true);
-		const node = sourceFile.statements[0];
+		const node = firstStatement('const x = 1;');
 		const error = new UnsupportedSyntaxError(node, 'Custom error');
 		expect(error.message).toContain('Custom error');
 	});
 
 	it('truncates long node text to 100 characters', () => {
 		const longCode = `export const ${'x'.repeat(200)} = 1;`;
-		const sourceFile = ts.createSourceFile('test.d.ts', longCode, ts.ScriptTarget.ESNext, true);
-		const node = sourceFile.statements[0];
+		const node = firstStatement(longCode);
 		const error = new UnsupportedSyntaxError(node);
 		// The getText() slice(0, 100) should truncate
 		const textPart = error.message.split(' - "')[1];
@@ -153,25 +156,25 @@ describe('UnsupportedSyntaxError', () => {
 	});
 
 	it('handles node without getText method', () => {
-		const fakeNode = { kind: ts.SyntaxKind.Unknown } as ts.Node;
+		const fakeNode = { kind: SyntaxKind.Unknown } as Node;
 		const error = new UnsupportedSyntaxError(fakeNode);
 		expect(error.message).toContain('<no text>');
 	});
 
 	it('handles unknown syntax kind', () => {
-		const fakeNode = { kind: 99999, getText: () => 'test' } as unknown as ts.Node;
+		const fakeNode = { kind: 99999, getText: () => 'test' } as unknown as Node;
 		const error = new UnsupportedSyntaxError(fakeNode);
 		expect(error.message).toContain('Unknown(99999)');
 	});
 
 	it('is an instance of BundleError', () => {
-		const sourceFile = ts.createSourceFile('test.d.ts', 'const x = 1;', ts.ScriptTarget.ESNext, true);
-		expect(new UnsupportedSyntaxError(sourceFile.statements[0])).toBeInstanceOf(BundleError);
+		const statement = firstStatement('const x = 1;');
+		expect(new UnsupportedSyntaxError(statement)).toBeInstanceOf(BundleError);
 	});
 
 	it('has exit code 2 (inherited from BundleError)', () => {
-		const sourceFile = ts.createSourceFile('test.d.ts', 'const x = 1;', ts.ScriptTarget.ESNext, true);
-		const error = new UnsupportedSyntaxError(sourceFile.statements[0]);
+		const statement = firstStatement('const x = 1;');
+		const error = new UnsupportedSyntaxError(statement);
 		expect(error.code).toBe(2);
 	});
 });
