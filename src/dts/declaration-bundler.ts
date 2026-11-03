@@ -263,8 +263,8 @@ class DeclarationBundler {
 		}
 
 		this.#options = dtsBundleOptions;
-		this.#matchExternal = createPatternMatcher(dtsBundleOptions.external, { allowSubpaths: true });
-		this.#matchNoExternal = createPatternMatcher(dtsBundleOptions.noExternal, { allowSubpaths: true });
+		this.#matchExternal = createPatternMatcher(dtsBundleOptions.external, true);
+		this.#matchNoExternal = createPatternMatcher(dtsBundleOptions.noExternal, true);
 
 		for (const [ entryName, entryPoint ] of Object.entries(dtsBundleOptions.entryPoints)) {
 			const dtsPath = this.#entryDeclarationPath(entryPoint);

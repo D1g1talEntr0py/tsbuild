@@ -161,7 +161,8 @@ export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (wri
 	 * @param build The esbuild build context.
 	 */
 	setup(build) {
-		build.onEnd(async ({ outputFiles, metafile: { outputs } = {}, errors }) => {
+		build.onEnd(async ({ outputFiles, metafile, errors }) => {
+			const outputs = metafile?.outputs;
 			if (errors.length > 0 || outputs === undefined) { return }
 
 			let assets: SourceFile[] = [];

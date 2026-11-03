@@ -29,9 +29,10 @@ export const externalModulesPlugin = ({ dependencies = [], noExternal = [], path
 		 */
 		setup(build) {
 			const external = true;
-			const matchNoExternal = createPatternMatcher(noExternal, { allowSubpaths: true });
-			const matchDependencies = createPatternMatcher(dependencies, { allowSubpaths: true });
-			const matchPathAlias = createPatternMatcher(Object.keys(paths).map(createPathAliasPattern));
+			const matchNoExternal = createPatternMatcher(noExternal);
+			const matchDependencies = createPatternMatcher(dependencies);
+			const matchPathAlias = createPatternMatcher(Object.keys(paths).map(createPathAliasPattern), false);
+
 			build.onResolve({ filter: /.*/ }, ({ path }): OnResolveResult | undefined => {
 				switch (true) {
 					case matchNoExternal(path): return;

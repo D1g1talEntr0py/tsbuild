@@ -1,10 +1,5 @@
 import type { Pattern } from './@types';
 
-type PatternMatcherOptions = {
-	/** Match nested specifiers for exact string patterns (`pkg` matches `pkg/subpath`) */
-	allowSubpaths?: boolean;
-};
-
 const alwaysFalse = () => false;
 
 /**
@@ -16,7 +11,7 @@ const alwaysFalse = () => false;
  * @param options Options for the pattern matcher.
  * @returns A function that takes a string and returns true if it matches any of the patterns.
  */
-export function createPatternMatcher(patterns: readonly Pattern[], options: PatternMatcherOptions = {}): (id: string) => boolean {
+export function createPatternMatcher(patterns: readonly Pattern[], allowSubpaths: boolean = true): (id: string) => boolean {
 	const exact = new Set<string>();
 	const prefixes: string[] = [];
 	const regexps: RegExp[] = [];
@@ -24,7 +19,7 @@ export function createPatternMatcher(patterns: readonly Pattern[], options: Patt
 	for (const pattern of patterns) {
 		if (typeof pattern === 'string') {
 			exact.add(pattern);
-			if (options.allowSubpaths) { prefixes.push(pattern + '/') }
+			if (allowSubpaths) { prefixes.push(pattern + '/') }
 		} else {
 			regexps.push(pattern);
 		}
