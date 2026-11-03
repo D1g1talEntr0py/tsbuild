@@ -1,0 +1,948 @@
+[
+  {
+    "timestamp": "2026-10-31T12:11:04.193Z",
+    "typescript": "7.1.0-beta",
+    "node": "v26.13.0",
+    "toolVersions": {
+      "typescript": "5.7.2",
+      "tsup": "8.5.1",
+      "tsdown": "0.22.0",
+      "unbuild": "3.6.1",
+      "unbuildTypescript": "5.9.2",
+      "obuild": "0.4.45",
+      "obuildTypescript": "7.0.2"
+    },
+    "results": [
+      {
+        "scenario": "small",
+        "tool": "tsbuild",
+        "comparison": {
+          "files": [
+            {
+              "path": "index.d.ts",
+              "bytes": 8188,
+              "lines": 239,
+              "digest": "695429462ee9dcbb640a3334725e18cf003715df65bd183e92958da7335c84a8"
+            }
+          ],
+          "bytes": 8188,
+          "lines": 239,
+          "digest": "20e9df609b3a3189e162d8cdba53bcbebf417d4310dc44a067800056e222b45e",
+          "valid": true,
+          "checkedEntries": 1,
+          "expectedExports": 58,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 58,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 1,
+          "publicExports": 58,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "small",
+        "tool": "tsup --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "index.d.ts",
+              "bytes": 8248,
+              "lines": 238,
+              "digest": "c17ba78b3113b05bfc9df09c4eb93e8749cc97dfb294db58325b49109aea3bc6"
+            }
+          ],
+          "bytes": 8248,
+          "lines": 238,
+          "digest": "4e881caf1e9f217ae7d3a5a03182660ef92d4785eb716c01dd45db8c79d1ae55",
+          "valid": true,
+          "checkedEntries": 1,
+          "expectedExports": 58,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 58,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 1,
+          "publicExports": 58,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "small",
+        "tool": "tsdown --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "index.d.mts",
+              "bytes": 7984,
+              "lines": 225,
+              "digest": "5e1743da7aa10b8611008da06bbf9899bb7ca55b849876c84313c684a0e0ba68"
+            }
+          ],
+          "bytes": 7984,
+          "lines": 225,
+          "digest": "4422e83a2f2e522f82fd66634f72feb32a8d77d0d75a0d6509bdb96b86d6aeab",
+          "valid": true,
+          "checkedEntries": 1,
+          "expectedExports": 58,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 58,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 1,
+          "publicExports": 58,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "small",
+        "tool": "unbuild --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "index.d.mts",
+              "bytes": 8189,
+              "lines": 239,
+              "digest": "6ac814bd0608cf26c44ab69ca264df12fa63c9e1526a5e3171f6df56be7054c4"
+            },
+            {
+              "path": "index.d.ts",
+              "bytes": 8189,
+              "lines": 239,
+              "digest": "6ac814bd0608cf26c44ab69ca264df12fa63c9e1526a5e3171f6df56be7054c4"
+            }
+          ],
+          "bytes": 16378,
+          "lines": 478,
+          "digest": "7291f85fb2649134649b2dbbe959baca3d70fdc2d19394cfced8c1c5caadf96f",
+          "valid": true,
+          "checkedEntries": 2,
+          "expectedExports": 116,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 116,
+          "typeDifferences": [],
+          "duplications": [
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "index.d.mts",
+                "index.d.ts"
+              ],
+              "identical": true
+            }
+          ],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 1,
+          "publicExports": 58,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "small",
+        "tool": "obuild --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "index.d.mts",
+              "bytes": 7738,
+              "lines": 224,
+              "digest": "12788cc79a6da14e6981010444697e82601211d37ec4478df7c0aedb988fe733"
+            }
+          ],
+          "bytes": 7738,
+          "lines": 224,
+          "digest": "861d1d359ef6942126357d9c190228d8c30aa5e84b794ba6ced1532bb641e79d",
+          "valid": true,
+          "checkedEntries": 1,
+          "expectedExports": 58,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 58,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 1,
+          "publicExports": 58,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "multi-entry",
+        "tool": "tsbuild",
+        "comparison": {
+          "files": [
+            {
+              "path": "__tsbuild_shared/0.d.ts",
+              "bytes": 843,
+              "lines": 38,
+              "digest": "5300569491638c43bff4a3bb7daf1a8b3accb069fc3197f4f9060b26aba5e485"
+            },
+            {
+              "path": "entry-00.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "793160212387de63868a97f7498f87cb8b0a216293ec2be6dd7c9caec3a5237e"
+            },
+            {
+              "path": "entry-01.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "b04bedfd7569a116a6f8fe0c863409d64c11b83a0721f9bd0406f2ebe938d4d8"
+            },
+            {
+              "path": "entry-02.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "b3264d6c879f0818dd5762ad4c93225d2d58befd8406621d02b009b439c2f800"
+            },
+            {
+              "path": "entry-03.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "f1cdc332bc410a6243cfc930011a705c131adc8804aa57f5c05d5143821d1310"
+            },
+            {
+              "path": "entry-04.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "0aab4b847f530278de7dc579c43416e3c1c24224fdaaf66b377a1690b730cdb4"
+            },
+            {
+              "path": "entry-05.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "376763515fbbe4e6d6fb2a0148eabe5a1f836891e8d8afa1588e2b71cd353c8a"
+            },
+            {
+              "path": "entry-06.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "fe666e172e128e94fd55cf329628822fd00aeacb8c5f2df478673a907f0440b2"
+            },
+            {
+              "path": "entry-07.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "7a85cdacaa1faee07b86aa085200ce6386975c3280dd765e83f30c04f619b079"
+            },
+            {
+              "path": "entry-08.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "abc8efd65aadb77f29e08104dce5dfe0e8c45ccdebdac1718f864f4ca85073bf"
+            },
+            {
+              "path": "entry-09.d.ts",
+              "bytes": 7398,
+              "lines": 204,
+              "digest": "3595fb3b15d05ae0f9289b0543b473f9bc3d596485a8b5a6896033f8f3b7a667"
+            }
+          ],
+          "bytes": 74823,
+          "lines": 2078,
+          "digest": "725486abaffad34f66f0a0a51c4a365d71262332c02ebdd9895d0b840fa9a4a1",
+          "valid": true,
+          "checkedEntries": 10,
+          "expectedExports": 580,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 580,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 10,
+          "publicExports": 580,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "multi-entry",
+        "tool": "tsup --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "entry-00.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "126a8ad1be5003284ea4e5fe4b49637cc91c0ce5bcc160769fbdb07aca4effbf"
+            },
+            {
+              "path": "entry-01.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "4cf0b9ccd76bf2ebbd9f3ab7b3017e9f265c72a76a0c9374d895330168dc952d"
+            },
+            {
+              "path": "entry-02.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "d5d327ad4cf18c0433e607d22aefb589f169d49f7f0a705d14fa05f91d151cff"
+            },
+            {
+              "path": "entry-03.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "67504c90a0a4f1ad87f42ccd0f027f450cbe4d23e82151bae5f1fdda54d8affa"
+            },
+            {
+              "path": "entry-04.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "74699dd423b6f7f091ad294c294de3fc058705f0045d2c8feb13b5c6c6019921"
+            },
+            {
+              "path": "entry-05.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "c9c0cf9087665a46fdb37ae2c585d655231c0e0d6fee655d862d6574c0eeaeb5"
+            },
+            {
+              "path": "entry-06.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "c16695c540aa2f4cc2ebec8644091be08995c3d5b00f0095653e903708e1f158"
+            },
+            {
+              "path": "entry-07.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "0a3b97c8278cc32da15d549ed1b210edb1018db56137ee4370bbc092787dbcd0"
+            },
+            {
+              "path": "entry-08.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "3c3cc4e7979154c98b6735a6b8abad032789ec4e0f758add81489bcff16c9ed9"
+            },
+            {
+              "path": "entry-09.d.ts",
+              "bytes": 7550,
+              "lines": 203,
+              "digest": "2915ac875491ad126afa3c3128b2fccbb36cbbeff2aec599b1da370f44ce9e40"
+            },
+            {
+              "path": "shared-DeuMbzdc.d.ts",
+              "bytes": 908,
+              "lines": 38,
+              "digest": "d800cd69e12a86e70db7e86c2b1593ce6552f6f3429c5e0d94826f8b2274dcdd"
+            }
+          ],
+          "bytes": 76408,
+          "lines": 2068,
+          "digest": "ceda4cb3adcc72e265a4675d74a538296aa44a01e8cf99084b11e87b2774cef1",
+          "valid": true,
+          "checkedEntries": 10,
+          "expectedExports": 580,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 580,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 10,
+          "publicExports": 580,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "multi-entry",
+        "tool": "tsdown --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "entry-00.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "918b1cb396cf56a44814414e424e03ae96a0443f6646695daf230b9fced63a3a"
+            },
+            {
+              "path": "entry-01.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "1712e71c1ad3bdf6d0ec59e973d93cc3a93a370dbf6bde5dc3ecb530e89077f2"
+            },
+            {
+              "path": "entry-02.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "4ce86d6cf357f3bea9747a737ede1b1feb95d08f62749d704f6d4740d0d320ae"
+            },
+            {
+              "path": "entry-03.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "23126bbf0ed4597269fa40a3084fd5c7188e82ccc3173c87fd3c7df7d6b454ea"
+            },
+            {
+              "path": "entry-04.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "769341a747be455fb9f793f9b599cdb5387edd468e6e31669aba2fb8e9479953"
+            },
+            {
+              "path": "entry-05.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "da1c90c7d46b689246e9ccaa16bb8ecccd0e9f2edc180f7d824268d6134236b9"
+            },
+            {
+              "path": "entry-06.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "3557e7db3159584a8ffc86f913b8af7ed84ff0dff4d9cc1720ca447ee812b610"
+            },
+            {
+              "path": "entry-07.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "727eedc97384fd724b17ef6931dc7dd200ba2981c766088f339fd9bd7a93351c"
+            },
+            {
+              "path": "entry-08.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "dcf91a81121250ed0a4fb89fcc8d8763060e1d125326665394efaeff3a28a0b3"
+            },
+            {
+              "path": "entry-09.d.mts",
+              "bytes": 7452,
+              "lines": 194,
+              "digest": "eece8d441d59932fcb44a5b4926c73e9c476796e3a4d3b09b22af26855290367"
+            },
+            {
+              "path": "shared-BzDUuwhW.d.mts",
+              "bytes": 844,
+              "lines": 35,
+              "digest": "f4e8271283892a920643255b712518163b632d92b7ab76d4a121c77c5bbf868c"
+            }
+          ],
+          "bytes": 75364,
+          "lines": 1975,
+          "digest": "45c2db71c9104519bb0a0440d6dbda7f87723bde980e747b06ed5b13195b1eb4",
+          "valid": true,
+          "checkedEntries": 10,
+          "expectedExports": 580,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 580,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 10,
+          "publicExports": 580,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "multi-entry",
+        "tool": "unbuild --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "entry-00.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "f2b78f4a957456ca2a233b6823d4be50f4eb2184dab90c6c704f1ac5f325188c"
+            },
+            {
+              "path": "entry-00.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "b1cd6b576be4f6e00f9181c79b1ba698206645b361c481a7cc792bf0922537f5"
+            },
+            {
+              "path": "entry-01.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "c899124b843072e824226ed0c4494e788a7e06c89d501e05be81569885f587a9"
+            },
+            {
+              "path": "entry-01.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "3febb02e9c86f7477376cc227d7e784eb8d892aa976e268acf622a7c0bd2b59c"
+            },
+            {
+              "path": "entry-02.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "b0234040ae8ddf0db815d43e1bbfc36e80cd6ea89c09cd6c0a61722cdecc2c57"
+            },
+            {
+              "path": "entry-02.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "dd898cb09ef8c6896e4d928b25afe585c1cb7962a7ff9f4d808bd0e9d64aa513"
+            },
+            {
+              "path": "entry-03.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "49c5be3488cdc7a41bd1f789571d7f2c22a2a774111d85e0fafb0d646b839419"
+            },
+            {
+              "path": "entry-03.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "d14849f428419f12186173fc89b1605c40c43ecba240ccc33bfcdb989c3e2962"
+            },
+            {
+              "path": "entry-04.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "ef4f88b405dd66b067dd8340a0224a21c498d5039fab01c98314c4da604ba430"
+            },
+            {
+              "path": "entry-04.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "7b5d0e90a22ac759848d1e6c847d85db20a0d2bc606034905d1b898d08d774ad"
+            },
+            {
+              "path": "entry-05.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "d0dc3396c392fcb4e7e5575eb1aca0aee27b64689f7d8e3c0702d507633cc451"
+            },
+            {
+              "path": "entry-05.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "ce4e4aa167c5aee7adc40aae53668b5878e653a8cc81c6bc4e99ee11528913b0"
+            },
+            {
+              "path": "entry-06.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "4212ec5254b6ac228c8855875d38719447cd0625d7e630fe8b7ded234760aaee"
+            },
+            {
+              "path": "entry-06.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "3b39d37a125757d5a2e53783b530b0e79c496eac7c9d44560b85d633432b73d1"
+            },
+            {
+              "path": "entry-07.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "0ab2b1d5b8c1ba9b5b548438514491662ceeaa6f5ba165cbac8d78ea7af7e65d"
+            },
+            {
+              "path": "entry-07.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "7548ce81b532c1031aa090de6135c101ca97053e75d67bbf68a915aba4199338"
+            },
+            {
+              "path": "entry-08.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "4de61d809544d6260354c3cccd4fb6d7334c9835269e857bf5459ab543f93644"
+            },
+            {
+              "path": "entry-08.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "a845b7c941c295700a5c458555200ceca0a6357c92fde41fdbe2e07d073b55dd"
+            },
+            {
+              "path": "entry-09.d.mts",
+              "bytes": 7533,
+              "lines": 204,
+              "digest": "3ca33d11b4caaf4fee6c92408e3a031d53eff1cdb7539d152cbdc405d49efa40"
+            },
+            {
+              "path": "entry-09.d.ts",
+              "bytes": 7532,
+              "lines": 204,
+              "digest": "a9e9ff5879c2d7b6f32df8ab9879927ce89d33750bb6c056ce655405a1876138"
+            },
+            {
+              "path": "shared/synthetic-bench.Cu-F_qKu.d.mts",
+              "bytes": 899,
+              "lines": 39,
+              "digest": "49259362f5b46f18764869ba22e828e43655ca796749257074f766e8addf9065"
+            },
+            {
+              "path": "shared/synthetic-bench.Cu-F_qKu.d.ts",
+              "bytes": 899,
+              "lines": 39,
+              "digest": "49259362f5b46f18764869ba22e828e43655ca796749257074f766e8addf9065"
+            }
+          ],
+          "bytes": 152448,
+          "lines": 4158,
+          "digest": "dd66c9ea3292e6f09d35c31ef45e733ccd078eae7f4f751c767a609442491da0",
+          "valid": true,
+          "checkedEntries": 20,
+          "expectedExports": 1160,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 1160,
+          "typeDifferences": [],
+          "duplications": [
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-00.d.mts",
+                "entry-00.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-00.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-00.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-01.d.mts",
+                "entry-01.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-01.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-01.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-02.d.mts",
+                "entry-02.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-02.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-02.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-03.d.mts",
+                "entry-03.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-03.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-03.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-04.d.mts",
+                "entry-04.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-04.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-04.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-05.d.mts",
+                "entry-05.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-05.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-05.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-06.d.mts",
+                "entry-06.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-06.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-06.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-07.d.mts",
+                "entry-07.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-07.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-07.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-08.d.mts",
+                "entry-08.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-08.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-08.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "entry-09.d.mts",
+                "entry-09.d.ts"
+              ],
+              "identical": false,
+              "references": [
+                {
+                  "file": "entry-09.d.mts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.mjs"
+                  ]
+                },
+                {
+                  "file": "entry-09.d.ts",
+                  "specifiers": [
+                    "./shared/synthetic-bench.Cu-F_qKu.js"
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "alternate-variant",
+              "files": [
+                "shared/synthetic-bench.Cu-F_qKu.d.mts",
+                "shared/synthetic-bench.Cu-F_qKu.d.ts"
+              ],
+              "identical": true
+            }
+          ],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 10,
+          "publicExports": 580,
+          "missingEntries": []
+        }
+      },
+      {
+        "scenario": "multi-entry",
+        "tool": "obuild --dts",
+        "comparison": {
+          "files": [
+            {
+              "path": "_chunks/shared.d.mts",
+              "bytes": 778,
+              "lines": 34,
+              "digest": "deb944c3b7edc7a6f523936ec3e90c6e4a2e8bfc6d5de30056adf4189e889e4d"
+            },
+            {
+              "path": "entry-00.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "aede7f6d860dccaa388cfc7031670e9c8c99a324c0ce0e0c0eb5fff166b7aa0a"
+            },
+            {
+              "path": "entry-01.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "1d76ab40e711df4435a951affdf5d3e1bc96f0818e78c7b997ab82c4ca797c5e"
+            },
+            {
+              "path": "entry-02.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "a5dc6eeff4e087257d839f2876e0ee04ca381f6370c3452d9f937469b01a28ba"
+            },
+            {
+              "path": "entry-03.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "0f5f069e07913acbaf794b7879598f63c6f1db260b9c67620dd8f52ba3816593"
+            },
+            {
+              "path": "entry-04.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "c98403192491a59ad639f10ff87c9034a80ec65c474b56be8c34689cdb574a07"
+            },
+            {
+              "path": "entry-05.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "6d98732d3ed515c5bfcdf1057812fb09d1b1a2f7731d7eeb0a455aac40e808cc"
+            },
+            {
+              "path": "entry-06.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "de50cd566a7df814578f817c13d156a60a9d446ce8728f60bcb7e8c3b08ba03d"
+            },
+            {
+              "path": "entry-07.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "1df82b7bfc16edbd2779aed2bdf702693b1f6671d5fe5d922f8ca13b1f966104"
+            },
+            {
+              "path": "entry-08.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "94457aa8a2375a1c9ceb21e50f7f0f482c911f90c45495e77c5835b253e0d75a"
+            },
+            {
+              "path": "entry-09.d.mts",
+              "bytes": 7167,
+              "lines": 192,
+              "digest": "e13a12c7a60e8c8074617a166398c1f470bb269dc7206b63ba53894235daf509"
+            }
+          ],
+          "bytes": 72448,
+          "lines": 1954,
+          "digest": "7d285e541f90428e12f07a61802ddd6c2be87ebce5be83abc91d4f0459ae2d2c",
+          "valid": true,
+          "checkedEntries": 10,
+          "expectedExports": 580,
+          "missingExports": [],
+          "extraExports": [],
+          "errors": [],
+          "structuralDifferences": [],
+          "structuresMatched": 580,
+          "typeDifferences": [],
+          "duplications": [],
+          "declarationErrors": [],
+          "missingReferences": [],
+          "expectedEntries": 10,
+          "publicExports": 580,
+          "missingEntries": []
+        }
+      }
+    ]
+  }
+]

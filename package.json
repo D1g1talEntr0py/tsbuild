@@ -54,6 +54,7 @@
     "test:watch": "vitest",
     "test:compat": "tsnode tests/scripts/test-ts-compat.ts --versions 3",
     "bench": "tsnode ./tests/scripts/benchmark.ts",
+    "bench:dts": "tsnode ./tests/scripts/benchmark-declarations.ts",
     "perf:profile": "tsnode ./tests/scripts/profile.ts"
   },
   "dependencies": {
