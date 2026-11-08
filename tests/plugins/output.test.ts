@@ -14,7 +14,7 @@ import { vol, fs as memfs } from 'memfs';
 import { join } from 'node:path';
 import { createWriteOutputPlugin } from 'src/plugins/output';
 import type { AbsolutePath, WrittenFile } from 'src/@types';
-import type { BuildResult, Metafile, OutputFile, PluginBuild } from 'esbuild';
+import type { BuildResult, Metafile, OnEndResult, OutputFile, PluginBuild } from 'esbuild';
 
 const outputDir = '/test-output' as AbsolutePath;
 
@@ -47,7 +47,7 @@ function lazyOutputFile(path: string, text: string, onText: () => void): OutputF
 }
 
 describe('outputPlugin', () => {
-	let onEndCallback: (result: BuildResult) => Promise<void>;
+	let onEndCallback: (result: BuildResult) => Promise<void | OnEndResult>;
 	let onWritten: (writtenFiles: WrittenFile[]) => void;
 
 	beforeEach(() => {
@@ -62,6 +62,106 @@ describe('outputPlugin', () => {
 	});
 
 	afterEach(() => { vol.reset() });
+
+	it('rejects missing relative imports before writing unbundled output', async () => {
+		const filePath = join(outputDir, 'index.js');
+		let validationResult: void | OnEndResult;
+		const pluginBuild: Partial<PluginBuild> = {
+			onEnd: vi.fn((callback) => { onEndCallback = callback })
+		};
+		createWriteOutputPlugin(outputDir, onWritten, { resolveImports: true }).setup(pluginBuild as PluginBuild);
+
+		validationResult = await onEndCallback(buildResultWith(
+			[outputFile(filePath, 'import "./utils.js";')],
+			{ 'index.js': { entryPoint: 'src/index.ts', imports: [outputImport('./utils.js')] } }
+		));
+
+		expect(validationResult?.errors).toEqual([
+			{ text: 'Unbundled output "index.js" imports "./utils.js", but no matching output was generated. Add it to tsbuild.entryPoints alongside the other required entries.' }
+		]);
+		expect(onWritten).not.toHaveBeenCalled();
+		await expect(memfs.promises.access(filePath)).rejects.toThrow();
+	});
+
+	it('accepts extensionless relative imports when the rewritten output exists', async () => {
+		const indexPath = join(outputDir, 'index.js');
+		const depPath = join(outputDir, 'dep.js');
+		let validationResult: void | OnEndResult;
+		const pluginBuild: Partial<PluginBuild> = {
+			onEnd: vi.fn((callback) => { onEndCallback = callback })
+		};
+		createWriteOutputPlugin(outputDir, onWritten, { resolveImports: true }).setup(pluginBuild as PluginBuild);
+
+		validationResult = await onEndCallback(buildResultWith(
+			[outputFile(indexPath, 'import "./dep";'), outputFile(depPath, 'export const value = 1;')],
+			{
+				'index.js': { entryPoint: 'src/index.ts', imports: [outputImport('./dep')] },
+				'dep.js': { entryPoint: 'src/dep.ts' }
+			}
+		));
+
+		expect(validationResult).toBeUndefined();
+		expect(onWritten).toHaveBeenCalledOnce();
+		expect(await memfs.promises.readFile(indexPath, 'utf8')).toBe('import "./dep.js";');
+	});
+
+	it('does not resolve relative directory specifiers as files', async () => {
+		const indexPath = join(outputDir, 'index.js');
+		const pluginBuild: Partial<PluginBuild> = {
+			onEnd: vi.fn((callback) => { onEndCallback = callback })
+		};
+		createWriteOutputPlugin(outputDir, onWritten, { resolveImports: true }).setup(pluginBuild as PluginBuild);
+
+		const validationResult = await onEndCallback(buildResultWith(
+			[outputFile(indexPath, 'import "./dir/";\nimport "./query-dir/?raw";\nimport "./fragment-dir/#section";')],
+			{ 'index.js': { entryPoint: 'src/index.ts', imports: [
+				outputImport('./dir/'),
+				outputImport('./query-dir/?raw'),
+				outputImport('./fragment-dir/#section'),
+			] } }
+		));
+
+		expect(validationResult).toBeUndefined();
+		expect(onWritten).toHaveBeenCalledOnce();
+		expect(await memfs.promises.readFile(indexPath, 'utf8')).toBe('import "./dir/";\nimport "./query-dir/?raw";\nimport "./fragment-dir/#section";');
+	});
+
+	it('copies relative non-JavaScript imports from beside the source file into unbundled output', async () => {
+		const indexPath = join(outputDir, 'index.js');
+		const pluginBuild: Partial<PluginBuild> = {
+			onEnd: vi.fn((callback) => { onEndCallback = callback })
+		};
+		vol.fromJSON({ 'src/data/config.json': '{"value":1}' }, outputDir);
+		createWriteOutputPlugin(outputDir, onWritten, { resolveImports: true }).setup(pluginBuild as PluginBuild);
+
+		const validationResult = await onEndCallback(buildResultWith(
+			[outputFile(indexPath, 'import config from "./data/config.json" with { type: "json" };')],
+			{ 'index.js': { entryPoint: 'src/index.ts', imports: [outputImport('./data/config.json'), outputImport('./data/config.json')] } }
+		));
+
+		expect(validationResult).toBeUndefined();
+		expect(onWritten).toHaveBeenCalledOnce();
+		expect(await memfs.promises.readFile(join(outputDir, 'data/config.json'), 'utf8')).toBe('{"value":1}');
+	});
+
+	it('rejects relative non-JavaScript imports whose source file does not exist', async () => {
+		const indexPath = join(outputDir, 'index.js');
+		const pluginBuild: Partial<PluginBuild> = {
+			onEnd: vi.fn((callback) => { onEndCallback = callback })
+		};
+		createWriteOutputPlugin(outputDir, onWritten, { resolveImports: true }).setup(pluginBuild as PluginBuild);
+
+		const validationResult = await onEndCallback(buildResultWith(
+			[outputFile(indexPath, 'import "./styles.css";')],
+			{ 'index.js': { entryPoint: 'src/index.ts', imports: [outputImport('./styles.css')] } }
+		));
+
+		expect(validationResult?.errors).toEqual([
+			{ text: expect.stringContaining('Unbundled output imports "src/styles.css", but the file could not be read: ENOENT') }
+		]);
+		expect(onWritten).not.toHaveBeenCalled();
+		await expect(memfs.promises.access(indexPath)).rejects.toThrow();
+	});
 
 	it('has the correct name', () => {
 		expect(createWriteOutputPlugin(outputDir, onWritten).name).toBe('tsbuild:write-output');
