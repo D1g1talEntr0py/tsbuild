@@ -750,6 +750,9 @@ pnpm bench
 
 # Declaration structure/type quality against regular tsc emit
 pnpm bench:dts
+
+# Runtime/build profiling, including 200 high-complexity type-checking modules
+pnpm perf:profile
 ```
 
 The declaration benchmark reports missing types, structural/type inconsistencies,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
@@ -68,6 +69,57 @@ function measureCachePrimitives(): void {
 	measure('V8 serialize + Brotli compress', () => brotliCompressSync(serialized, { params: { [brotliConstants.BROTLI_PARAM_QUALITY]: 5 } }));
 }
 
+async function measureCheckHeavy(): Promise<void> {
+	const { API, EmitOnly, formatDiagnosticsWithColorAndContext } = await import('typescript/sync');
+	const dir = mkdtempSync(join(tmpdir(), 'tsbuild-profile-check-heavy-'));
+	try {
+		const rootFiles: string[] = [];
+		for (let i = 0; i < 200; i++) {
+			const left = Array.from({ length: 60 }, (_, j) => `"a${i}_${j}"`).join(' | ');
+			const right = Array.from({ length: 30 }, (_, j) => `"b${i}_${j}"`).join(' | ');
+			const path = join(dir, `module-${i}.ts`);
+			writeFileSync(path, `type L${i} = ${left};
+type R${i} = ${right};
+type X${i} = \`\${L${i}}-\${R${i}}\`;
+type Obj${i} = { [K in X${i}]: { k: K; n: ${i} } };
+type Vals${i} = Obj${i}[X${i}];
+type Tup${i}<N extends number, A extends unknown[] = []> = A['length'] extends N ? A : Tup${i}<N, [...A, ${i}]>;
+type Add${i}<A extends number, B extends number> = [...Tup${i}<A>, ...Tup${i}<B>]['length'];
+export const s${i}: Add${i}<400, 399> = 799;
+export function pick${i}(v: Vals${i}): X${i} { return v.k; }
+export const o${i}: Partial<Obj${i}> = {};
+declare const all${i}: Vals${i}[];
+export const ks${i} = all${i}.map((v) => v.k satisfies X${i});
+`);
+			rootFiles.push(path);
+		}
+
+		using api = new API({ cwd: dir });
+		const parsed = api.parseJsonConfigFileContent({
+			compilerOptions: { target: 'ESNext', lib: [ 'ESNext' ], types: [], module: 'ESNext', moduleResolution: 'Bundler', strict: true, declaration: true, skipLibCheck: true },
+			files: rootFiles
+		}, { configFileName: join(dir, 'tsconfig.json') });
+		if (parsed.errors.length > 0) { throw new Error(formatDiagnosticsWithColorAndContext(parsed.errors, api)) }
+
+		console.log('\nHigh-complexity type-checking (200 modules):');
+		using snapshot = measure('check-heavy create snapshot', () => api.createSnapshot({ createPrograms: [ { rootFiles, compilerOptions: parsed.options } ] }));
+		const program = snapshot.operation.createdPrograms[0];
+		const diagnostics = measure('check-heavy complete diagnostics', () => api.batch(
+			program.getProgramDiagnostics.gen(),
+			program.getSyntacticDiagnostics.gen(),
+			program.getGlobalDiagnostics.gen(),
+			program.getSemanticDiagnostics.gen(),
+			program.getDeclarationDiagnostics.gen()
+		).flat());
+		if (diagnostics.length > 0) { throw new Error(formatDiagnosticsWithColorAndContext(diagnostics, api)) }
+
+		const output = measure('check-heavy declaration emit', () => program.emitToString(EmitOnly.OnlyDts));
+		if (output.diagnostics?.length) { throw new Error(formatDiagnosticsWithColorAndContext(output.diagnostics, api)) }
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 async function measureEndToEnd(): Promise<void> {
 	if (!existsSync(bundledCli)) {
 		const bootstrap = spawnSync('pnpm', [ 'build' ], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NO_COLOR: '1' } });
@@ -98,5 +150,6 @@ async function measureEndToEnd(): Promise<void> {
 await measureRuntimePrimitives();
 measureCachePrimitives();
 await measureEndToEnd();
+await measureCheckHeavy();
 console.log('\nPrimitive timings:');
 for (const timing of timings) { report(timing.name, timing.milliseconds) }

@@ -1425,6 +1425,414 @@
         }
       ],
       "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-11-04T18:11:39.800Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 208,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1192,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1054,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1449,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 454,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 156,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 553,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 483,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1018,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 276,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-11-07T11:42:09.982Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 201,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1167,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1025,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1416,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 455,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 150,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 547,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 481,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 1011,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 269,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-11-07T20:07:36.788Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 201,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1166,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1029,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1417,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 453,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 150,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 567,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 484,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 999,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 274,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
+    },
+    {
+      "timestamp": "2026-11-08T11:09:26.874Z",
+      "node": "v26.13.0",
+      "platform": "linux",
+      "scenarios": [
+        {
+          "id": "small",
+          "modules": 10,
+          "entries": 1
+        },
+        {
+          "id": "standard",
+          "modules": 100,
+          "entries": 1
+        },
+        {
+          "id": "large",
+          "modules": 500,
+          "entries": 1
+        },
+        {
+          "id": "multi-entry",
+          "modules": 100,
+          "entries": 10
+        }
+      ],
+      "full": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild",
+          "wall_ms": 208,
+          "peak_rss_mb": null,
+          "output_kb": 124.7216796875
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup --dts",
+          "wall_ms": 1193,
+          "peak_rss_mb": null,
+          "output_kb": 125.1953125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown --dts",
+          "wall_ms": 1037,
+          "peak_rss_mb": null,
+          "output_kb": 139.7958984375
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild --dts",
+          "wall_ms": 1417,
+          "peak_rss_mb": null,
+          "output_kb": 193.01171875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild --dts",
+          "wall_ms": 452,
+          "peak_rss_mb": null,
+          "output_kb": 116.25
+        }
+      ],
+      "no_dts": [
+        {
+          "scenario": "standard",
+          "tool": "tsbuild (compilerOptions.declaration=false)",
+          "wall_ms": 152,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsup",
+          "wall_ms": 549,
+          "peak_rss_mb": null,
+          "output_kb": 53.1142578125
+        },
+        {
+          "scenario": "standard",
+          "tool": "tsdown",
+          "wall_ms": 480,
+          "peak_rss_mb": null,
+          "output_kb": 69.6689453125
+        },
+        {
+          "scenario": "standard",
+          "tool": "unbuild",
+          "wall_ms": 989,
+          "peak_rss_mb": null,
+          "output_kb": 49.794921875
+        },
+        {
+          "scenario": "standard",
+          "tool": "obuild",
+          "wall_ms": 269,
+          "peak_rss_mb": null,
+          "output_kb": 48.2822265625
+        }
+      ],
+      "tsbuild_phases": null
     }
   ]
 }
