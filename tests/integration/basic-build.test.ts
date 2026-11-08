@@ -123,19 +123,18 @@ export type { Branded } from './shared.js';`
 		const entry1 = await readFile(join(dir, 'dist/entry1.d.ts'), 'utf8');
 		const entry2 = await readFile(join(dir, 'dist/entry2.d.ts'), 'utf8');
 		const sharedEntry = await readFile(join(dir, 'dist/shared.d.ts'), 'utf8');
-		const shared = await readFile(join(dir, 'dist/__tsbuild_shared/0.d.ts'), 'utf8');
 		const [ runtime1, runtime2, runtimeShared ] = await Promise.all([
 			TestHelper.importOutput<{ Shared: new () => object; brand: symbol }>(join(dir, 'dist/entry1.js')),
 			TestHelper.importOutput<{ Shared: new () => object; brand: symbol }>(join(dir, 'dist/entry2.js')),
 			TestHelper.importOutput<{ default: new () => object; brand: symbol }>(join(dir, 'dist/shared.js'))
 		]);
-		expect(entry1).toContain(`from './__tsbuild_shared/0.js'`);
-		expect(entry2).toContain(`from './__tsbuild_shared/0.js'`);
-		expect(sharedEntry).toContain(`export * from "./__tsbuild_shared/0.js"`);
+		expect(entry1).toContain(`from './shared.js'`);
+		expect(entry2).toContain(`from './shared.js'`);
 		expect(entry1).not.toContain('class Shared');
 		expect(entry2).not.toContain('class Shared');
-		expect(sharedEntry).toContain(`export { default } from "./__tsbuild_shared/0.js"`);
-		expect(shared).toContain('class Shared');
+		expect(sharedEntry).toContain('class Shared');
+		expect(sharedEntry).toContain('Shared as default');
+		await expect(access(join(dir, 'dist/__tsbuild_shared'))).rejects.toThrow();
 		expect(runtime1.Shared).toBe(runtime2.Shared);
 		expect(runtime1.Shared).toBe(runtimeShared.default);
 		expect(runtime1.brand).toBe(runtime2.brand);

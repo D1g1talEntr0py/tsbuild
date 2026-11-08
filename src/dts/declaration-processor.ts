@@ -81,7 +81,7 @@ export class DeclarationProcessor {
 	 * - Removes any triple-slash directives and records them
 	 * - Creates a synthetic name for any nameless "export default"
 	 * - Resolves inline `import()` statements and generates top-level imports for them
-	 * - Generates a separate `export {}` statement for any item which had its modifiers rewritten
+	 * - Generates a separate `export {}` statement for rewritten declarations not already explicitly exported
 	 * - Duplicates the identifiers of a namespace `export`, so that renaming does not break it
 	 *
 	 * @param sourceFile The source file to process
@@ -94,6 +94,7 @@ export class DeclarationProcessor {
 		const declaredNames = new Set<string>();
 		// All the names that are exported
 		const exportedNames = new Set<string>();
+		const explicitExports = new Set<string>();
 		// The name of the default export
 		let defaultExport = '';
 		// Inlined exports from `fileId` -> <synthetic name>
@@ -303,6 +304,12 @@ export class DeclarationProcessor {
 		// Pass 1: Walk through all statements and process them
 		for (const node of sourceFile.statements) {
 			if (isExportDeclaration(node)) {
+				if (!node.moduleSpecifier && node.exportClause && !isNamespaceExport(node.exportClause)) {
+					for (const { name, propertyName, isTypeOnly } of node.exportClause.elements) {
+						if (!isTypeOnly && (propertyName === undefined || propertyName.text === name.text)) { explicitExports.add(name.text) }
+					}
+				}
+
 				// Handle 'export type { ... }' declarations - keep them but strip the 'type' keyword. Star forms keep it: `export type *` makes every re-exported binding type-only
 				if (node.isTypeOnly && node.exportClause !== undefined && !isNamespaceExport(node.exportClause)) {
 					// Find the 'type' keyword position (between 'export' and the export clause)
@@ -455,6 +462,8 @@ export class DeclarationProcessor {
 
 		// render all the inline imports, and all the exports
 		if (defaultExport !== '') { code.append(`${newLine}export default ${defaultExport};${newLine}`) }
+
+		for (const name of explicitExports) { exportedNames.delete(name) }
 
 		if (exportedNames.size) {
 			code.append(`${newLine}export { ${[...exportedNames].join(', ')} };${newLine}`);

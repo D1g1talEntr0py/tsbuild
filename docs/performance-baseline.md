@@ -187,10 +187,12 @@ runtime.
 [Configuration](../src/project/configuration.ts) enables JavaScript splitting
 by default for bundled builds, so both entry outputs import the same runtime
 class and symbol from a shared chunk. The declaration bundler now detects
-compiler-emitted declaration modules shared by multiple entries, writes each
-once in an internal shared declaration chunk, and leaves references to it in
-the entry bundles. Entry-specific declarations remain bundled, and JavaScript
-output is unchanged.
+compiler-emitted declaration modules shared by multiple entries and writes each
+once: a shared module that is itself an entry point stays in that entry's
+declaration file, and any other shared module is written at its mirrored source
+path (for example `src/@types/index.ts` becomes `@types/index.d.ts`). Entry
+bundles import from those files. Entry-specific declarations remain bundled,
+and JavaScript output is unchanged.
 
 The regression is checked against an actual temporary package build. A
 source-free consumer assigns the private-field class and unique-symbol-branded

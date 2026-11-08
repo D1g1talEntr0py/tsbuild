@@ -245,7 +245,7 @@ tsbuild --minify  # or -m
 # Force a full rebuild, bypassing incremental compilation.
 tsbuild --force  # or -f
 
-# Clear the incremental build cache (.tsbuild/dts_cache.v6.br) before building.
+# Clear the incremental build cache (.tsbuild/dts_cache.v7.br) before building.
 tsbuild --clearCache  # or -c
 
 # Build with watch mode
@@ -314,8 +314,8 @@ With incremental enabled, each build maintains two caches inside a `.tsbuild/` d
 
 | Cache | File | What it stores |
 |-------|------|----------------|
-| Input manifest | `.tsbuild/dts_cache.v6.br` | Every file the compiler read (size and mtime) plus a key derived from the compiler options |
-| DTS cache | `.tsbuild/dts_cache.v6.br` | Pre-processed declaration files (Brotli-compressed) |
+| Input manifest | `.tsbuild/dts_cache.v7.br` | Every file the compiler read (size and mtime) plus a key derived from the compiler options |
+| DTS cache | `.tsbuild/dts_cache.v7.br` | Pre-processed declaration files (Brotli-compressed) |
 
 Both live in a single Brotli-compressed file. The manifest is only written after an error-free type-check. When every recorded input is unchanged, the compiler options and build fingerprint match, and all recorded outputs still exist, tsbuild reuses the cached declarations and skips compilation and output phases. Missing outputs force regeneration. No-op time depends on input/output counts and filesystem latency, since path safety, output existence and input stats are still checked.
 
@@ -644,7 +644,7 @@ These are used internally but can be leveraged when extending tsbuild.
 
 **TypeScriptProject** (`src/type-script-project.ts`) - Central orchestrator that manages the build lifecycle
 **FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage with optional caching support
-**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v6.br`
+**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v7.br`
 **ProcessManager** (`src/process-manager.ts`) - Global cleanup coordinator for graceful shutdowns
 
 ### Plugin System
@@ -660,6 +660,7 @@ The declaration bundling system (`src/dts/declaration-bundler.ts`) is a custom i
 2. **Dependency Sorting** - Topologically sorts modules to ensure correct declaration order
 3. **Code Combination** - Strips imports/exports while preserving external references
 4. **Pre/Post Processing** (`declaration-processor.ts`) - Cleans up directives, splits declarations, fixes modifiers, normalizes exports
+5. **Shared Modules** - A module used by several entry points is emitted once: an entry point stays in its own `.d.ts` and other entries import from it, while any other shared module is written at its mirrored source path (e.g. `src/@types/index.ts` → `dist/@types/index.d.ts`)
 
 This custom bundler works entirely with in-memory declaration files, avoiding the overhead of duplicate TypeScript Program creation with some other bundlers.
 

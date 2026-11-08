@@ -67,30 +67,6 @@ function relativeModuleSpecifier(fromPath: string, toPath: string) {
 }
 
 /**
- * Checks if a source file contains a default export.
- * @param sourceFile The source file to check for a default export
- * @returns True if the source file has a default export, false otherwise
- */
-function hasDefaultExport(sourceFile: SourceFile) {
-	return sourceFile.statements.some((statement) => {
-		if (isExportAssignment(statement)) { return !statement.isExportEquals }
-
-		if (isExportDeclaration(statement) && statement.exportClause && isNamedExports(statement.exportClause)) {
-			for (const { name, propertyName } of statement.exportClause.elements) {
-				if ((propertyName ?? name).text === 'default') { return true }
-			}
-		} else if ((isClassDeclaration(statement) || isFunctionDeclaration(statement) || isEnumDeclaration(statement) || isInterfaceDeclaration(statement) || isTypeAliasDeclaration(statement) || isVariableStatement(statement) || isModuleDeclaration(statement)) && statement.modifiers !== undefined) {
-			// Check for default modifier on class, function, enum, interface, type alias, variable, or module declarations.
-			for (const { kind } of statement.modifiers) {
-				if (kind === SyntaxKind.DefaultKeyword) { return true }
-			}
-		}
-
-		return false;
-	});
-}
-
-/**
  * Merges structured external imports from the same module into single import statements.
  * Pure Map aggregation — no regex, no text parsing.
  *
@@ -202,9 +178,11 @@ class DeclarationBundler implements Disposable {
 	}
 
 	/**
-	 * Bundles entry points while preserving shared declaration modules in separate chunks.
+	 * Bundles entry points without duplicating modules shared between them.
+	 * A shared module that is itself an entry point stays in that entry's output and is imported by the others;
+	 * any other shared module is written once to its own declaration path (mirroring its source path) and imported from there.
 	 * @param entryPoints - Named declaration entry points to bundle
-	 * @returns Bundled entry contents and shared declaration chunk contents
+	 * @returns Bundled entry contents and shared declaration module contents
 	 */
 	async bundle(entryPoints: EntryPoints<AbsolutePath>) {
 		const graphs = new Map<string, { entryPoint: AbsolutePath; outputPath: AbsolutePath; graph: ModuleDependencyGraph }>();
@@ -230,48 +208,44 @@ class DeclarationBundler implements Disposable {
 			}
 		}
 
-		const outputPaths = new Set(Array.from(graphs.values(), ({ outputPath }) => outputPath));
+		const entryOutputs = new Map(Array.from(graphs.values(), ({ entryPoint, outputPath }) => [ entryPoint, outputPath ]));
+		const outputPaths = new Set(entryOutputs.values());
 		const sharedModules = new Map<AbsolutePath, AbsolutePath>();
-		const sharedPaths = Array.from(graphCounts).filter(([ path, count ]) => count > 1 && this.#declarationFiles.has(path));
 
-		// Sort shared paths to ensure consistent output order. The paths are compared lexicographically.
-		sharedPaths.sort(([ left ], [ right ]) => left < right ? -1 : left > right ? 1 : 0);
+		for (const [ path, count ] of graphCounts) {
+			if (count < 2 || !this.#declarationFiles.has(path)) { continue }
 
-		for (const [ index, [ path ] ] of sharedPaths.entries()) {
-			const sharedOutputPath = Paths.join(this.#options.compilerOptions.outDir, '__tsbuild_shared', `${index}${FileExtension.DTS}`);
+			// Entry modules are imported from their own entry output; other shared modules keep their mirrored declaration path
+			const entryOutputPath = entryOutputs.get(path);
 
-			if (outputPaths.has(sharedOutputPath)) { throw new BundleError(`Shared declaration output conflicts with a bundled entry point: ${path}`) }
+			if (entryOutputPath === undefined) {
+				if (!path.startsWith(`${this.#options.compilerOptions.outDir}/`)) { throw new BundleError(`Shared declaration is outside outDir: ${path}`) }
 
-			sharedModules.set(path, sharedOutputPath);
+				if (outputPaths.has(path)) { throw new BundleError(`Shared declaration output conflicts with a bundled entry point: ${path}`) }
+			}
+
+			sharedModules.set(path, entryOutputPath ?? path);
 		}
 
-		const dtsExtension = /\.d\.ts$/u;
 		const entries = new Map<string, string>();
 
 		for (const [ entryName, { entryPoint, outputPath, graph } ] of graphs) {
+			let externalModules: ReadonlyMap<AbsolutePath, AbsolutePath> = sharedModules;
+
 			if (sharedModules.has(entryPoint)) {
-				const module = graph.modules.get(entryPoint);
-
-				if (module === undefined) { throw new BundleError(`Shared declaration entry point was not found: ${entryPoint}`) }
-
-				if (module.sourceFile.statements.some((statement) => isExportAssignment(statement) && statement.isExportEquals)) {
-					throw new BundleError(`Shared declaration entry point uses unsupported export = syntax: ${entryPoint}`);
-				}
-
-				const specifier = JSON.stringify(relativeModuleSpecifier(outputPath, sharedModules.get(entryPoint) as AbsolutePath).replace(dtsExtension, FileExtension.JS));
-				const reExports = [ `export * from ${specifier};` ];
-
-				if (hasDefaultExport(module.sourceFile)) { reExports.push(`export { default } from ${specifier};`) }
-
-				entries.set(entryName, reExports.join(newLine));
-			} else {
-				entries.set(entryName, await this.#bundleGraph(graph, entryPoint, sharedModules, outputPath));
+				const withoutEntry = new Map(sharedModules);
+				withoutEntry.delete(entryPoint);
+				externalModules = withoutEntry;
 			}
+
+			entries.set(entryName, await this.#bundleGraph(graph, entryPoint, externalModules, outputPath));
 		}
 
 		const sharedFiles = new Map<AbsolutePath, string>();
 
 		for (const [ path, outputPath ] of sharedModules) {
+			if (entryOutputs.has(path)) { continue }
+
 			const declaration = this.#declarationFiles.get(path as AbsolutePath);
 
 			if (declaration === undefined) { continue }

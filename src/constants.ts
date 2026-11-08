@@ -98,9 +98,9 @@ const defaultEntryPoint = 'index';
 const defaultSourceDirectory = './src' as RelativePath;
 const defaultEntryFile = 'src/index.ts' as RelativePath;
 const cacheDirectory = '.tsbuild' as RelativePath;
-/** Cache format version - increment when cache structure changes (v6: input manifest replaces .tsbuildinfo) */
-const dtsCacheVersion = 6;
-// Version-stamped so the filename alone proves structural compatibility: a stale cache from an older format has a different filename and is never read.
+/** Cache version - increment when structure or declaration preprocessing changes (v7: deduplicate explicit exports) */
+const dtsCacheVersion = 7;
+// Version-stamped so stale structures and preprocessed declarations have a different filename and are never read.
 const dtsCacheFile: string = `dts_cache.v${dtsCacheVersion}.br`;
 const format = 'esm';
 const newLine = '\n';

@@ -106,6 +106,24 @@ describe('DeclarationProcessor', () => {
 		});
 
 		describe('exports', () => {
+			it.each([
+				'declare const Kind: { readonly VALUE: "value" };\nexport { Kind };\nexport type Kind = typeof Kind[keyof typeof Kind];',
+				'export type Kind = typeof Kind[keyof typeof Kind];\ndeclare const Kind: { readonly VALUE: "value" };\nexport { Kind };',
+				'export declare const Kind: { readonly VALUE: "value" };\nexport type Kind = typeof Kind[keyof typeof Kind];\nexport { Kind };',
+				'declare const Kind: { readonly VALUE: "value" };\nexport { Kind as Kind };\nexport type Kind = typeof Kind[keyof typeof Kind];'
+			])('does not duplicate an explicit export of a merged type and value', (source) => {
+				const result = DeclarationProcessor.preProcess(parse(source));
+				expect(result.code.match(/export \{ Kind(?: as Kind)? \};/g)).toHaveLength(1);
+				expect(result.code).toContain('declare const Kind');
+				expect(result.code).toContain('type Kind');
+			});
+
+			it('preserves both the original and aliased export of an exported declaration', () => {
+				const result = DeclarationProcessor.preProcess(parse('export interface Item { value: string; }\nexport { Item as Renamed };'));
+				expect(result.code).toContain('export { Item as Renamed };');
+				expect(result.code).toContain('export { Item };');
+			});
+
 			it('collects exported names into consolidated export statement', () => {
 				const result = DeclarationProcessor.preProcess(parse(`
 					export class MyClass {}

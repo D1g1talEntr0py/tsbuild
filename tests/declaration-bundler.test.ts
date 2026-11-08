@@ -111,9 +111,9 @@ export interface Branded { readonly [brand]: true; }`],
 
 			const a = TestHelper.readFile(join(outDir, 'a.d.ts'));
 			const b = TestHelper.readFile(join(outDir, 'b.d.ts'));
-			const shared = TestHelper.readFile(join(outDir, '__tsbuild_shared/0.d.ts'));
-			expect(a).toContain(`from './__tsbuild_shared/0.js'`);
-			expect(b).toContain(`from './__tsbuild_shared/0.js'`);
+			const shared = TestHelper.readFile(join(outDir, 'src/shared.d.ts'));
+			expect(a).toContain(`from './src/shared.js'`);
+			expect(b).toContain(`from './src/shared.js'`);
 			expect(a).not.toContain('class Token');
 			expect(b).not.toContain('class Token');
 			expect(shared).toContain('class Token');
@@ -124,7 +124,7 @@ export interface Branded { readonly [brand]: true; }`],
 				fileSystem: createFileSystemWithLib([
 					[ '/check/a.d.ts', a ],
 					[ '/check/b.d.ts', b ],
-					[ '/check/__tsbuild_shared/0.d.ts', shared ],
+					[ '/check/src/shared.d.ts', shared ],
 					[ '/check/consumer.ts', `import type { Token as TokenA, Branded as BrandedA } from './a.js';
 import type { Token as TokenB, Branded as BrandedB } from './b.js';
 declare const tokenA: TokenA;
@@ -133,6 +133,42 @@ declare const brandedA: BrandedA;
 const token: TokenB = tokenA;
 const branded: BrandedB = brandedA;
 export { token, tokenB, branded };` ]
+				]),
+				createPrograms: [ { rootFiles: [ '/check/consumer.ts' ], compilerOptions: { strict: true, module: 99, moduleResolution: 100, noEmit: true, skipLibCheck: false, types: [], verbatimModuleSyntax: true } } ]
+			});
+			const [ program ] = snapshot.operation.createdPrograms;
+			expect([ ...program.getSyntacticDiagnostics(), ...program.getSemanticDiagnostics() ]).toEqual([]);
+		});
+
+		it('preserves explicit exports of merged types and values in shared declarations', async () => {
+			const declarationDirectory = join(outDir, 'src');
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(declarationDirectory, 'a.d.ts'), `export { RequestEvent } from './shared.js';`],
+					[join(declarationDirectory, 'b.d.ts'), `export { RequestEvent } from './shared.js';`],
+					[join(declarationDirectory, 'shared.d.ts'), `declare const RequestEvent: { readonly COMPLETE: 'complete' };
+export { RequestEvent };
+export type RequestEvent = typeof RequestEvent[keyof typeof RequestEvent];`]
+				]),
+				entryPoints: {
+					a: join(declarationDirectory, 'a.d.ts') as AbsolutePath,
+					b: join(declarationDirectory, 'b.d.ts') as AbsolutePath
+				}
+			});
+
+			await bundleDeclarations(options);
+
+			const { createFileSystemWithLib } = await import('typescript/fs');
+			using snapshot = TestHelper.api.createSnapshot({
+				fileSystem: createFileSystemWithLib([
+					[ '/check/a.d.ts', TestHelper.readFile(join(outDir, 'a.d.ts')) ],
+					[ '/check/b.d.ts', TestHelper.readFile(join(outDir, 'b.d.ts')) ],
+					[ '/check/src/shared.d.ts', TestHelper.readFile(join(outDir, 'src/shared.d.ts')) ],
+					[ '/check/consumer.ts', `import { RequestEvent as EventA } from './a.js';
+import { RequestEvent as EventB } from './b.js';
+const eventA: EventA = EventB.COMPLETE;
+const eventB: EventB = EventA.COMPLETE;
+export { eventA, eventB };` ]
 				]),
 				createPrograms: [ { rootFiles: [ '/check/consumer.ts' ], compilerOptions: { strict: true, module: 99, moduleResolution: 100, noEmit: true, skipLibCheck: false, types: [], verbatimModuleSyntax: true } } ]
 			});
@@ -162,14 +198,14 @@ export { token, tokenB, branded };` ]
 		const typeAlias = (i: number) => i % 10 === 0 && i > 0 ? `type T${i} = T${i - 1} | ${i};` : `type T${i} = Shared | ${i};`;
 		const barrelOptions = () => makeOptions({
 			declarationFiles: TestHelper.createDeclarationFilesMap([
-				[join(cwd, 'src/index.d.ts'), Array.from({ length: moduleCount }, (_, i) => `export * from "./m${i}";`).join('\n')],
-				[join(cwd, 'src/shared.d.ts'), 'export interface Shared { readonly id: string; }'],
+				[join(outDir, 'src/index.d.ts'), Array.from({ length: moduleCount }, (_, i) => `export * from "./m${i}";`).join('\n')],
+				[join(outDir, 'src/shared.d.ts'), 'export interface Shared { readonly id: string; }'],
 				...Array.from({ length: moduleCount }, (_, i): [string, string] => [
-					join(cwd, `src/m${i}.d.ts`),
+					join(outDir, `src/m${i}.d.ts`),
 					`import type { Shared } from "./shared";\n${i % 10 === 0 && i > 0 ? `import type { T${i - 1} } from "./m${i - 1}";\nexport type T${i} = T${i - 1} | ${i};` : `export type T${i} = Shared | ${i};`}\nexport declare const v${i}: T${i};`
 				]),
 			]),
-			entryPoints: { index: join(cwd, 'src/index.d.ts') as AbsolutePath, m20: join(cwd, 'src/m20.d.ts') as AbsolutePath },
+			entryPoints: { index: join(outDir, 'src/index.d.ts') as AbsolutePath, m20: join(outDir, 'src/m20.d.ts') as AbsolutePath },
 		});
 		let batch: MockInstance;
 		/** Index of the batch call that created each batched source file */
@@ -200,13 +236,15 @@ export { token, tokenB, branded };` ]
 			await bundleDeclarations(barrelOptions());
 
 			const index = TestHelper.readFile(join(outDir, 'index.d.ts'));
-			expect(index).toContain(`import type { Shared } from "./__tsbuild_shared/2.js"`);
-			expect(index).toContain(`export * from "./__tsbuild_shared/0.js"`);
-			expect(index).toContain(`export * from "./__tsbuild_shared/1.js"`);
-			expect(TestHelper.readFile(join(outDir, 'm20.d.ts'))).toBe(`export * from "./__tsbuild_shared/1.js";`);
-			expect(TestHelper.readFile(join(outDir, '__tsbuild_shared/0.d.ts'))).toContain('type T19 = Shared | 19;');
-			expect(TestHelper.readFile(join(outDir, '__tsbuild_shared/1.d.ts'))).toContain('type T20 = T19 | 20;');
-			expect(TestHelper.readFile(join(outDir, '__tsbuild_shared/2.d.ts'))).toContain('interface Shared { readonly id: string; }');
+			const m20 = TestHelper.readFile(join(outDir, 'm20.d.ts'));
+			expect(index).toContain(`import type { Shared } from "./src/shared.js"`);
+			expect(index).toContain(`export * from "./src/m19.js"`);
+			expect(index).toContain(`export * from "./m20.js"`);
+			expect(index).not.toContain('type T20');
+			expect(m20).toContain('type T20 = T19 | 20;');
+			expect(m20).toContain(`import type { T19 } from "./src/m19.js"`);
+			expect(TestHelper.readFile(join(outDir, 'src/m19.d.ts'))).toContain('type T19 = Shared | 19;');
+			expect(TestHelper.readFile(join(outDir, 'src/shared.d.ts'))).toContain('interface Shared { readonly id: string; }');
 			// The barrel's modules are discovered together and parsed once across both entry points, in batches of at most 32;
 			// the entry point and the shared module are each discovered alone and parsed with direct requests
 			expect(releases).toHaveLength(moduleCount);
@@ -223,7 +261,7 @@ export { token, tokenB, branded };` ]
 		});
 
 		describe('event-loop yielding within an entry point', () => {
-			const indexPath = join(cwd, 'src/index.d.ts') as AbsolutePath;
+			const indexPath = join(outDir, 'src/index.d.ts') as AbsolutePath;
 			/** Records `observe()` on every event-loop turn; a turn can only run while bundling has yielded */
 			const probeTurns = <T>(observe: () => T) => {
 				const observed: T[] = [];
@@ -311,7 +349,7 @@ export { token, tokenB, branded };` ]
 				mkdirSync(join(outDir, 'index.d.ts'), { recursive: true });
 
 				await expect(bundleDeclarations({ ...barrelOptions(), parallelTranspile: true, yieldIntervalMs: 0 })).rejects.toThrow(/EISDIR|illegal operation on a directory/);
-				expect(TestHelper.readFile(join(outDir, 'm20.d.ts'))).toContain('export * from "./__tsbuild_shared/1.js";');
+				expect(TestHelper.readFile(join(outDir, 'm20.d.ts'))).toContain('type T20 = T19 | 20;');
 			});
 
 			it('waits for every output write to settle before rejecting a failed entry', async () => {
@@ -342,7 +380,7 @@ export { token, tokenB, branded };` ]
 
 					writeReleased.resolve();
 					await expect(bundling).rejects.toThrow(/EISDIR|illegal operation on a directory/);
-					expect(TestHelper.readFile(join(outDir, 'm20.d.ts'))).toContain('export * from "./__tsbuild_shared/1.js";');
+					expect(TestHelper.readFile(join(outDir, 'm20.d.ts'))).toContain('type T20 = T19 | 20;');
 				} finally {
 					writeReleased.resolve();
 					await bundling.catch(() => undefined);
@@ -707,7 +745,7 @@ export declare const esm2: Esm2;`],
 		});
 
 		it('reuses parsed declarations and resolves the same dependency across entries', async () => {
-			const fixtureDir = join(cwd, 'dts-shared-entry-cache');
+			const fixtureDir = join(outDir, 'dts-shared-entry-cache');
 			const options = makeOptions({
 				declarationFiles: TestHelper.createDeclarationFilesMap([
 					[join(fixtureDir, 'first.d.ts'), `import './left'; import './right'; export declare const first: number;`],
@@ -721,9 +759,58 @@ export declare const esm2: Esm2;`],
 
 			const result = await bundleDeclarations(options);
 			expect(result).toHaveLength(3);
-			expect(TestHelper.readFile(join(outDir, 'first.d.ts'))).toContain(`import './__tsbuild_shared/0.js'`);
-			expect(TestHelper.readFile(join(outDir, 'second.d.ts'))).toContain(`import './__tsbuild_shared/0.js'`);
-			expect(TestHelper.readFile(join(outDir, '__tsbuild_shared/0.d.ts'))).toContain('namespace Outer');
+			expect(TestHelper.readFile(join(outDir, 'first.d.ts'))).toContain(`import './dts-shared-entry-cache/shared.js'`);
+			expect(TestHelper.readFile(join(outDir, 'second.d.ts'))).toContain(`import './dts-shared-entry-cache/shared.js'`);
+			expect(TestHelper.readFile(join(fixtureDir, 'shared.d.ts'))).toContain('namespace Outer');
+		});
+
+		it('keeps reference directives in shared declarations at their mirrored paths', async () => {
+			const fixtureDir = join(outDir, 'src');
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(fixtureDir, 'a.d.ts'), `export type { Item } from './types/shared';`],
+					[join(fixtureDir, 'b.d.ts'), `export type { Item } from './types/shared';`],
+					[join(fixtureDir, 'types/shared.d.ts'), `/// <reference path="../globals.d.ts" />\n/// <reference path="./ambient.d.ts" />\n/// <reference types="node" />\nimport type { Base } from '../base';\nexport interface Item extends Base { value: string; }`],
+					[join(fixtureDir, 'base.d.ts'), `/// <reference path="./globals.d.ts" />\nexport interface Base { id: string; }`],
+					[join(fixtureDir, 'globals.d.ts'), 'declare var marker: string;'],
+				]),
+				entryPoints: { a: join(fixtureDir, 'a.d.ts') as AbsolutePath, b: join(fixtureDir, 'b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+
+			const shared = TestHelper.readFile(join(fixtureDir, 'types/shared.d.ts'));
+			expect(TestHelper.readFile(join(outDir, 'a.d.ts'))).toContain(`from './src/types/shared.js'`);
+			expect(shared).toContain('/// <reference path="./ambient.d.ts" />');
+			expect(shared).toContain('/// <reference types="node" />');
+			expect(shared).toContain(`from '../base.js'`);
+			expect(TestHelper.fileExists(join(outDir, '__tsbuild_shared'))).toBe(false);
+		});
+
+		it('rejects a shared declaration outside outDir', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), `export type { Item } from './shared';`],
+					[join(cwd, 'src/b.d.ts'), `export type { Item } from './shared';`],
+					[join(cwd, 'src/shared.d.ts'), 'export interface Item { value: string; }'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await expect(bundleDeclarations(options)).rejects.toThrow(`Shared declaration is outside outDir: ${join(cwd, 'src/shared.d.ts')}`);
+		});
+
+		it('rejects a shared declaration whose path conflicts with an entry output', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(outDir, 'src/a.d.ts'), `export type { Item } from '../shared';`],
+					[join(outDir, 'src/b.d.ts'), `export type { Item } from '../shared';`],
+					[join(outDir, 'shared.d.ts'), 'export interface Item { value: string; }'],
+				]),
+				entryPoints: { a: join(outDir, 'src/a.d.ts') as AbsolutePath, shared: join(outDir, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await expect(bundleDeclarations(options)).rejects.toThrow(`Shared declaration output conflicts with a bundled entry point: ${join(outDir, 'shared.d.ts')}`);
 		});
 	});
 
@@ -1237,10 +1324,10 @@ export { Original as PublicOriginal };`],
 
 			const results = await bundleDeclarations(options);
 			expect(results).toHaveLength(3);
-			expect(results.map(({ path }) => path)).toContain('dts-resolution-cache/dist/__tsbuild_shared/0.d.ts');
-			expect(TestHelper.readFile(join(fixtureDir, 'dist/first.d.ts'))).toContain(`from "./__tsbuild_shared/0.js"`);
-			expect(TestHelper.readFile(join(fixtureDir, 'dist/second.d.ts'))).toContain(`from "./__tsbuild_shared/0.js"`);
-			expect(TestHelper.readFile(join(fixtureDir, 'dist/__tsbuild_shared/0.d.ts'))).toContain('type Mapped = string;');
+			expect(results.map(({ path }) => path)).toContain('dts-resolution-cache/dist/mapped.d.ts');
+			expect(TestHelper.readFile(join(fixtureDir, 'dist/first.d.ts'))).toContain(`from "./mapped.js"`);
+			expect(TestHelper.readFile(join(fixtureDir, 'dist/second.d.ts'))).toContain(`from "./mapped.js"`);
+			expect(TestHelper.readFile(join(fixtureDir, 'dist/mapped.d.ts'))).toContain('type Mapped = string;');
 		});
 	});
 
