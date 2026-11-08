@@ -986,6 +986,8 @@ class DeclarationBundler implements Disposable {
 	 * Combine modules into a single output string
 	 * @param sortedModules - Modules in dependency order
 	 * @param bundledSpecifiers - Map of module paths to their bundled import specifiers
+	 * @param sharedModules - Map of shared module paths to their absolute paths, used for resolving imports
+	 * @param bundleOutputPath - Output directory for the bundled declarations
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
 	async #combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>, sharedModules: ReadonlyMap<string, AbsolutePath> = new Map(), bundleOutputPath: AbsolutePath = this.#options.compilerOptions.outDir) {

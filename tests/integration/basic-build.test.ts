@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import { pathToFileURL } from 'node:url';
 import { TypeScriptProject } from '../../src/type-script-project';
 import { Paths } from '../../src/paths';
 import { processManager } from '../../src/process-manager';
@@ -69,6 +70,62 @@ describe('TypeScriptProject - Integration Builds', () => {
 
 		const output = await TestHelper.importOutput<{ app: { name: string } }>(join(dir, 'dist/index.js'));
 		expect(output.app.name).toBe('test');
+	});
+
+	it('fails unbundled builds when a relative runtime import has no output entry', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'import { helper } from "./utils.js"; export const value = helper();',
+				'src/utils.ts': 'export const helper = (): number => 1;'
+			},
+			tsconfig: { tsbuild: { bundle: false, clean: false, entryPoints: { index: './src/index.ts' } } }
+		});
+		cleanup = c;
+
+		const project = new TypeScriptProject(dir);
+		await project.build();
+		project.close();
+
+		expect(process.exitCode).toBe(2);
+		await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
+	});
+
+	it('accepts unbundled relative runtime imports with a matching output entry', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'import { helper } from "./utils.js"; export const value = helper();',
+				'src/utils.ts': 'export const helper = (): number => 1;'
+			},
+			tsconfig: { tsbuild: { bundle: false, clean: false, entryPoints: { index: './src/index.ts', utils: './src/utils.ts' } } }
+		});
+		cleanup = c;
+
+		const project = new TypeScriptProject(dir);
+		await project.build();
+		project.close();
+
+		expect(process.exitCode).toBeUndefined();
+		await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
+		await expect(access(join(dir, 'dist/utils.js'))).resolves.toBeUndefined();
+	});
+
+	it('copies relative JSON imports into unbundled output', async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: {
+				'src/index.ts': 'import config from "./data/config.json" with { type: "json" }; export const value = config.value;',
+				'src/data/config.json': '{ "value": 1 }'
+			},
+			tsconfig: { compilerOptions: { resolveJsonModule: true }, tsbuild: { bundle: false, clean: false, entryPoints: { index: './src/index.ts' } } }
+		});
+		cleanup = c;
+
+		const project = new TypeScriptProject(dir);
+		await project.build();
+		project.close();
+
+		expect(process.exitCode).toBeUndefined();
+		const { value } = await import(pathToFileURL(join(dir, 'dist/index.js')).href) as { value: number };
+		expect(value).toBe(1);
 	});
 
 	it('supports code splitting with multiple entry points', async () => {

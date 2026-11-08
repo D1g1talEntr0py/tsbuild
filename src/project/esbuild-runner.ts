@@ -99,7 +99,7 @@ export class EsbuildRunner implements AsyncDisposable {
 			} else {
 				writtenFiles.push(...files);
 			}
-		}, iifeFiles));
+		}, { iifeFiles, resolveImports: !this.#buildOptions.bundle }));
 
 		if (canReuseContext) { this.#files = [] }
 

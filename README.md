@@ -405,15 +405,17 @@ If your editor still doesn't pick this up for `tsconfig.json`, add a per-workspa
 }
 ```
 
-If a directory is provided, every file within it is used as an entry point, including files in subdirectories (symbolic links are not followed). Output names preserve the relative directory structure, so `./src/internal/helper.ts` from a `./src` entry is emitted as `internal/helper.js`. This is how `bundle: false` builds (whose default entry point is `./src`) emit a transpiled file for every source module.
+If a directory is provided, every file within it (recursively, excluding `.d.ts` files) is used as an entry point; symbolic links are not followed. Output names preserve the relative directory structure, so `./src/internal/helper.ts` from a `./src` entry is emitted as `internal/helper.js`. This is how `bundle: false` builds (whose default entry point is `./src`) emit a transpiled file for every source module.
 
-When `entryPoints` is omitted entirely, tsbuild automatically infers entry points from `package.json` by reverse-mapping output paths back to their source files. Resolution order:
+When `entryPoints` is omitted entirely, tsbuild automatically infers entry points from `package.json` by reverse-mapping output paths back to their source files. This applies to both bundled and unbundled (`"bundle": false`) builds. Resolution order:
 
-1. **`exports`** - Subpath export map (wildcard patterns are skipped; `import`, `node`, `module`, and `default` conditions are tried in order)
+1. **`exports`** - Subpath export map (`import`, `node`, `module`, and `default` conditions are tried in order). Wildcard patterns whose `*` covers the whole file path, such as `"./ciphers/*": "./dist/ciphers/*.js"`, map to every file under the matching source directory (`./src/ciphers`), emitted as `ciphers/<name>.js`
 2. **`bin`** - Binary entry points
 3. **`main`** / **`module`** - Legacy fallback (only used when `exports` and `bin` produce no results)
 
-> **Note:** Auto-inference requires that your `package.json` output paths fall inside the `outDir` declared in `tsconfig.json` and that the corresponding source files exist under `src/`.
+If nothing can be inferred, bundled builds fall back to `./src/index.ts` and unbundled builds fall back to every file under `./src`.
+
+> **Note:** Auto-inference requires that your `package.json` output paths fall inside the `outDir` declared in `tsconfig.json` and that the corresponding source files exist under `src/`. With `"bundle": false`, esbuild does not follow imports. tsbuild checks emitted JavaScript for relative imports without a matching output and fails the build with guidance to add the imported file to `entryPoints`. Relative non-JavaScript imports (for example `./data.json` or `./styles.css`) are copied from beside the importing source file to the matching location in the output; the build fails if the file does not exist.
 
 ### Declaration Bundling
 
