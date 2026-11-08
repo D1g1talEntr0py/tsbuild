@@ -1,3 +1,16 @@
+# [3.1.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.3...v3.1.0) (2026-11-08)
+
+
+### Bug Fixes
+
+* **tests:** update ES target mappings in constants test ([236de6e](https://github.com/D1g1talEntr0py/tsbuild/commit/236de6e43ac21509852db4dfb62f145e8f851920))
+* **watch:** migrate watcher lifecycle to Watchr 6 ([0eb6e9c](https://github.com/D1g1talEntr0py/tsbuild/commit/0eb6e9c55219cb91c0a25efb4702987ef77367d5))
+
+
+### Features
+
+* **build:** resolve nested entries and unbundled imports ([9c630b7](https://github.com/D1g1talEntr0py/tsbuild/commit/9c630b7329ba9705c5c7291abc5a4853488728b1))
+
 ## [3.0.3](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.2...v3.0.3) (2026-09-26)
 
 
