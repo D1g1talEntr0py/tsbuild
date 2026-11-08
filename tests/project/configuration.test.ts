@@ -95,14 +95,20 @@ describe('resolveConfiguration', () => {
 		expect(config.compilerOptions.lib).toEqual([ 'lib.dom.d.ts', 'lib.esnext.d.ts' ]);
 	});
 
-	it('preserves non-bundled defaults and skips package inference', () => {
+	it('preserves non-bundled defaults when package inference fails', () => {
 		writeConfig({ compilerOptions: { incremental: false }, tsbuild: { bundle: false } });
 		vol.writeFileSync('/project/package.json', '{');
 		const warn = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
 		const config = resolveConfiguration(projectDirectory, {}, defaultCommandLineOptions);
 		expect(config.tsbuild).toMatchObject({ bundle: false, splitting: false, entryPoints: { src: defaultSourceDirectory }, dts: { entryPoints: [] } });
-		expect(warn).not.toHaveBeenCalled();
-		expect(sys.readFile).not.toHaveBeenCalledWith('/project/package.json');
+		expect(warn).toHaveBeenCalledOnce();
+	});
+
+	it('infers package entry points for non-bundled builds', () => {
+		writeConfig({ compilerOptions: { incremental: false }, tsbuild: { bundle: false } });
+		vol.writeFileSync('/project/package.json', JSON.stringify({ exports: { '.': './dist/index.js', './ciphers/*': './dist/ciphers/*.js' } }));
+		const config = resolveConfiguration(projectDirectory, {}, defaultCommandLineOptions);
+		expect(config.tsbuild).toMatchObject({ bundle: false, entryPoints: { index: './src/index.ts', 'ciphers/*': './src/ciphers' } });
 	});
 
 	it('infers package entry points using the API output directory', () => {

@@ -36,9 +36,25 @@ describe('resolveEntryPoints', () => {
 
 	it('overwrites collisions in configured iteration order without moving the key', async () => {
 		const result = await resolveEntryPoints(directory, { expanded: './src', index: './other.ts' });
-		expect(result).toEqual({ data: '/project/src/data.json', index: '/project/other.ts' });
-		expect(Object.keys(result)).toEqual([ 'data', 'index' ]);
-		expect(await resolveEntryPoints(directory, { index: './other.ts', expanded: './src' })).toEqual({ index: '/project/src/index.ts', data: '/project/src/data.json' });
+		expect(result).toEqual({ data: '/project/src/data.json', index: '/project/other.ts', 'nested/child': '/project/src/nested/child.ts' });
+		expect(Object.keys(result)).toEqual([ 'data', 'index', 'nested/child' ]);
+		expect(await resolveEntryPoints(directory, { index: './other.ts', expanded: './src' })).toEqual({ index: '/project/src/index.ts', data: '/project/src/data.json', 'nested/child': '/project/src/nested/child.ts' });
+	});
+
+	it('recursively expands nested directories into path-relative entry names and skips declaration files', async () => {
+		vol.fromJSON({ '/project/src/nested/deep/leaf.ts': '', '/project/src/nested/types.d.ts': '', '/project/src/ambient.d.ts': '' });
+		expect(await resolveEntryPoints(directory, { expanded: './src' })).toEqual({
+			data: '/project/src/data.json',
+			index: '/project/src/index.ts',
+			'nested/child': '/project/src/nested/child.ts',
+			'nested/deep/leaf': '/project/src/nested/deep/leaf.ts'
+		});
+		expect(await resolveEntryPoints(directory, { expanded: './src/nested' })).toEqual({ child: '/project/src/nested/child.ts', 'deep/leaf': '/project/src/nested/deep/leaf.ts' });
+	});
+
+	it('prefixes expanded names with the wildcard entry directory', async () => {
+		expect(await resolveEntryPoints(directory, { 'nested/*': './src/nested' })).toEqual({ 'nested/child': '/project/src/nested/child.ts' });
+		expect(await resolveEntryPoints(directory, { '*': './src/nested' })).toEqual({ child: '/project/src/nested/child.ts' });
 	});
 
 	it('rejects asynchronously with the first missing configured path', async () => {
@@ -221,12 +237,29 @@ describe('inferEntryPoints', () => {
 		expect(inferEntryPoints(pkg, 'dist')).toEqual({ index: './src/index.ts' });
 	});
 
-	it('skips wildcard subpath patterns', () => {
+	it('maps wildcard subpath patterns to source directory entries', () => {
 		const pkg: PackageJson = {
-			exports: { '.': './dist/index.js', './*': './dist/*.js' },
+			exports: {
+				'.': './dist/index.js',
+				'./*': './dist/*.js',
+				'./ciphers/*': { types: './dist/ciphers/*.d.ts', import: './dist/ciphers/*.js' },
+				'./internal/*': null
+			}
 		};
-		const result = inferEntryPoints(pkg, 'dist');
-		expect(result).toEqual({ index: './src/index.ts' });
+		expect(inferEntryPoints(pkg, 'dist')).toEqual({ index: './src/index.ts', '*': './src', 'ciphers/*': './src/ciphers' });
+	});
+
+	it('skips wildcard patterns that cannot be reverse-mapped to a source directory', () => {
+		const pkg: PackageJson = {
+			exports: {
+				'.': './dist/index.js',
+				'./a/*': './dist/a/*.css',
+				'./b/*': './dist/b/prefix-*.js',
+				'./c/*': './dist/*/*.js',
+				'./d/*': './lib/d/*.js'
+			}
+		};
+		expect(inferEntryPoints(pkg, 'dist')).toEqual({ index: './src/index.ts' });
 	});
 
 	it('infers from bin string', () => {

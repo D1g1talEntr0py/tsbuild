@@ -98,6 +98,28 @@ function outputToSourcePath(outputPath: string, outDir: string, sourceDir: strin
 }
 
 /**
+ * Maps a wildcard export target (e.g., `./dist/ciphers/*.js`) to the source directory it is built from (e.g., `./src/ciphers`).
+ * The `*` must be the entire file path below a directory and be followed only by a supported output extension.
+ * @param outputPath The wildcard output path
+ * @param outDir The output directory (e.g., `dist`)
+ * @param sourceDir The source directory (e.g., `src`)
+ * @returns A wildcard entry name (e.g., `ciphers/*`) and its source directory, or undefined if the pattern cannot be reverse-mapped
+ */
+function wildcardToSourceDirectory(outputPath: string, outDir: string, sourceDir: string): { name: string, directory: RelativePath } | undefined {
+	const starIndex = outputPath.indexOf('*');
+	if (starIndex === -1 || outputPath.indexOf('*', starIndex + 1) !== -1 || !outputToSourceExtension.has(outputPath.slice(starIndex + 1))) { return undefined }
+
+	// Reuse the file mapping on a placeholder file to validate and reverse-map the directory portion
+	const sourcePath = outputToSourcePath(`${outputPath.slice(0, starIndex)}index.js`, outDir, sourceDir);
+	if (sourcePath === undefined || (starIndex > 0 && outputPath[starIndex - 1] !== '/')) { return undefined }
+
+	const directory = sourcePath.slice(0, -'/index.ts'.length) as RelativePath;
+	const prefix = directory.slice(`./${sourceDir}`.length + 1);
+
+	return { name: prefix ? `${prefix}/*` : '*', directory };
+}
+
+/**
  * Extracts the output path string from a conditional export value. Tries `import`, `node`, `module`,
  * then `default` conditions, recursing into nested condition objects.
  * @param exportValue String shorthand or conditional export object
@@ -168,10 +190,18 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 			const exportEntries = Object.keys(packageJson.exports).some((key) => key === '.' || key.startsWith('./')) ? Object.entries(packageJson.exports) : [[ '.', packageJson.exports ] as const];
 
 			for (const [ subpath, exportValue ] of exportEntries) {
-				if (subpath.includes('*') || exportValue === undefined) { continue }
+				if (exportValue === undefined) { continue }
 
 				const outputPath = resolveConditionalExport(exportValue);
 				if (outputPath === undefined) { continue }
+
+				if (subpath.includes('*')) {
+					const wildcardEntry = wildcardToSourceDirectory(outputPath, outDir, sourceDir);
+
+					if (wildcardEntry) { entryPoints[wildcardEntry.name] = wildcardEntry.directory }
+
+					continue;
+				}
 
 				const sourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
 				if (sourcePath) { entryPoints[subpath === '.' ? stemOf(sourcePath) : subpathToEntryName(subpath, packageJson.name)] = sourcePath }
@@ -222,7 +252,7 @@ function updateEntryPoints(entryPoints: EntryPoints<AbsolutePath> | undefined, p
 }
 
 /**
- * Resolves configured entry points sequentially, expanding directories into file-stem entries.
+ * Resolves configured entry points sequentially, recursively expanding directories into path-relative entries.
  * @param directory - Project directory
  * @param entries - Configured entry point paths keyed by output name
  * @returns Absolute entry points with later collisions overwriting earlier entries
@@ -249,7 +279,7 @@ async function resolveEntryPoints(directory: AbsolutePath, entries: Record<strin
 async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoint: string) {
 	const resolvedPath = Paths.absolute(directory, entryPoint);
 
-	if (await Paths.isDirectory(resolvedPath)) { return expandDirectoryEntryPoints(resolvedPath) }
+	if (await Paths.isDirectory(resolvedPath)) { return expandDirectoryEntryPoints(resolvedPath, name.endsWith('*') ? name.slice(0, -1) : '') }
 
 	if (await Paths.isFile(resolvedPath)) { return { [name]: resolvedPath } }
 
@@ -257,16 +287,21 @@ async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoi
 }
 
 /**
- * Expands a directory entry into per-file entries using file stem names.
+ * Recursively expands a directory entry into per-file entries named by their extension-less path relative to the directory,
+ * so nested files keep their subdirectory in the output path (e.g. `ciphers/aes.ts` → `ciphers/aes`).
  * @param directory - Absolute directory path
- * @returns Entry mapping with one key per file in the directory
+ * @param prefix - Entry name prefix for nested directories
+ * @param entries - Accumulated entry mapping
+ * @returns Entry mapping with one key per file in the directory tree
  */
-async function expandDirectoryEntryPoints(directory: AbsolutePath) {
-	const entries: EntryPoints<AbsolutePath> = {};
-
+async function expandDirectoryEntryPoints(directory: AbsolutePath, prefix = '', entries: EntryPoints<AbsolutePath> = {}) {
 	for (const file of (await Files.readDirectory(directory)).sort()) {
 		const filePath = Paths.join(directory, file);
-		if (await Paths.isFile(filePath)) { entries[Paths.parse(file).name] = filePath }
+		if (await Paths.isDirectory(filePath)) {
+			await expandDirectoryEntryPoints(filePath, `${prefix}${file}/`, entries);
+		} else if (!file.endsWith(FileExtension.DTS) && await Paths.isFile(filePath)) {
+			entries[`${prefix}${Paths.parse(file).name}`] = filePath;
+		}
 	}
 
 	return entries;

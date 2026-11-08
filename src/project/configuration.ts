@@ -90,9 +90,9 @@ export function resolveConfiguration(directory: AbsolutePath, typeScriptOptions:
 	const noExternal = typeScriptOptions.tsbuild?.noExternal ?? configResult.config.tsbuild?.noExternal ?? [];
 	const hasExplicitEntryPoints = typeScriptOptions.tsbuild?.entryPoints !== undefined || configResult.config.tsbuild?.entryPoints !== undefined;
 
-	// When no entry points are explicitly configured, try to infer them from package.json
+	// When no entry points are explicitly configured, infer them from package.json (bundled or not)
 	let inferredEntryPoints: EntryPoints<RelativePath> | undefined;
-	if (!hasExplicitEntryPoints && bundle) {
+	if (!hasExplicitEntryPoints) {
 		const packageJsonPath = Paths.join(directory, 'package.json');
 		const packageJsonContent = sys.readFile(packageJsonPath) as JsonString<PackageJson>;
 		if (packageJsonContent) {

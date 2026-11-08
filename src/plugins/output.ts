@@ -1,26 +1,102 @@
+import { readFile } from 'node:fs/promises';
 import { Files } from '../files';
 import { Paths } from '../paths';
 import { FileExtension } from '../constants';
 import type { Metafile, OutputFile, Plugin } from 'esbuild';
 import type { AbsolutePath, WrittenFile, Mutable, SourceFile } from '../@types';
 
-const relativeSpecifierPredicate = ({ path: importPath }: { path: string }) =>
-	(importPath.startsWith('./') || importPath.startsWith('../')) && !importPath.endsWith('/') && !hasExtension(importPath);
+type WriteOutputOptions = { iifeFiles?: OutputFile[], resolveImports?: boolean };
 
-const hasExtension = (specifier: string) => {
+const relativeSpecifierPredicate = ({ path: importPath }: { path: string }) =>
+	(importPath.startsWith('./') || importPath.startsWith('../')) && !pathWithoutQueryOrFragment(importPath).endsWith('/') && !hasExtension(importPath);
+
+/**
+ * Removes any query string or fragment from the import specifier.
+ * @param specifier Import specifier string
+ * @returns Path without any query or fragment
+ */
+function pathWithoutQueryOrFragment(specifier: string) {
+	let suffixStart = specifier.length;
 	const hashIndex = specifier.indexOf('#');
 	const queryIndex = specifier.indexOf('?');
-	let suffixStart = specifier.length;
 
 	if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
 	if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
 
-	const path = specifier.slice(0, suffixStart);
+	return specifier.slice(0, suffixStart);
+}
+
+/**
+ * Resolves the output path used by tsbuild's extension rewrite for a relative import.
+ * @param importPath - Import specifier from esbuild's metafile
+ * @returns Relative output path without any query or fragment
+ */
+function importOutputPath(importPath: string) {
+	const path = pathWithoutQueryOrFragment(importPath);
+
+	return hasExtension(path) ? path : `${path}${FileExtension.JS}`;
+}
+
+const hasExtension = (specifier: string) => {
+	const path = pathWithoutQueryOrFragment(specifier);
 	const lastSlashIndex = path.lastIndexOf('/');
 
 	// Determines if the last segment of the path contains a dot, indicating a file extension.
 	return (lastSlashIndex === -1 ? path : path.slice(lastSlashIndex + 1)).includes('.');
 };
+
+type RelativeImportResolution = { errors: string[]; assets: SourceFile[] };
+
+/**
+ * Resolves relative imports in unbundled output. JavaScript imports must match an emitted output, and any other
+ * relative import (JSON, CSS, etc.) is copied from beside its source file to the matching location in the output.
+ * @param outputs - Metafile outputs from esbuild
+ * @param directory - Project directory used to resolve output paths
+ * @returns Build diagnostics for unresolvable imports and the assets to write alongside the output
+ */
+async function resolveRelativeImports(outputs: Metafile['outputs'], directory: AbsolutePath): Promise<RelativeImportResolution> {
+	const outputPaths = new Set(Object.keys(outputs).map((outputPath) => Paths.absolute(directory, outputPath)));
+	const assetSources = new Map<AbsolutePath, AbsolutePath>();
+	const errors: string[] = [];
+
+	for (const [ outputPath, metadata ] of Object.entries(outputs)) {
+		const absoluteOutputPath = Paths.absolute(directory, outputPath);
+
+		if (!absoluteOutputPath.endsWith(FileExtension.JS)) { continue }
+
+		for (const { path: importPath } of metadata.imports) {
+			if (!importPath.startsWith('./') && !importPath.startsWith('../')) { continue }
+			if (pathWithoutQueryOrFragment(importPath).endsWith('/')) { continue }
+
+			const relativeImportPath = importOutputPath(importPath);
+			const importedOutputPath = Paths.absolute(Paths.directoryName(absoluteOutputPath), relativeImportPath);
+
+			if (outputPaths.has(importedOutputPath) || assetSources.has(importedOutputPath)) { continue }
+
+			if (relativeImportPath.endsWith(FileExtension.JS) || metadata.entryPoint === undefined) {
+				errors.push(`Unbundled output "${Paths.relative(directory, absoluteOutputPath)}" imports "${importPath}", but no matching output was generated. Add it to tsbuild.entryPoints alongside the other required entries.`);
+
+				continue;
+			}
+
+			assetSources.set(importedOutputPath, Paths.absolute(Paths.directoryName(Paths.absolute(directory, metadata.entryPoint)), relativeImportPath));
+		}
+	}
+
+	const assets = await Promise.all(Array.from(assetSources, async ([ path, sourcePath ]): Promise<SourceFile | undefined> => {
+		try {
+			const data = await readFile(sourcePath);
+
+			return { path, data, size: data.byteLength };
+		} catch (error) {
+			errors.push(`Unbundled output imports "${Paths.relative(directory, sourcePath)}", but the file could not be read: ${error instanceof Error ? error.message : String(error)}`);
+
+			return undefined;
+		}
+	}));
+
+	return { errors, assets: assets.filter((asset): asset is SourceFile => asset !== undefined) };
+}
 
 /**
  * Writes output files to disk, rewriting relative specifiers in JS files and setting executable permissions for entry points with shebangs.
@@ -28,9 +104,10 @@ const hasExtension = (specifier: string) => {
  * @param outputs - Metafile outputs mapping from esbuild.
  * @param directory - The base directory for resolving output paths.
  * @param iifeFiles - Array of IIFE output files, if any.
+ * @param assets - Non-JavaScript files imported by unbundled output, written as-is.
  * @returns Array of written files with their relative paths and sizes.
  */
-async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs'], directory: AbsolutePath, iifeFiles: OutputFile[] = []): Promise<WrittenFile[]> {
+async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs'], directory: AbsolutePath, iifeFiles: OutputFile[] = [], assets: SourceFile[] = []): Promise<WrittenFile[]> {
 	const outputMetadata = new Map<AbsolutePath, Metafile['outputs'][string]>();
 	const entryPoints = new Set<string>();
 
@@ -66,10 +143,18 @@ async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs
 
 	for (const file of iifeFiles) { writeEntries.push(processOutput(file)) }
 
+	writeEntries.push(...assets);
+
 	return Files.writeFiles(directory, writeEntries);
 }
 
-export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (writtenFiles: WrittenFile[]) => void, iifeFiles?: OutputFile[]): Plugin => ({
+/**
+ * Creates the esbuild plugin that writes emitted output files.
+ * @param directory - Project directory used to resolve output paths
+ * @param onWritten - Callback invoked with the files written by the plugin
+ * @param options - Optional IIFE outputs and unbundled import resolution
+ */
+export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (writtenFiles: WrittenFile[]) => void, { iifeFiles, resolveImports = false }: WriteOutputOptions = {}): Plugin => ({
 	name: 'tsbuild:write-output',
 	/**
 	 * Sets up the plugin to write output files to disk after the build process completes.
@@ -79,7 +164,15 @@ export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (wri
 		build.onEnd(async ({ outputFiles, metafile: { outputs } = {}, errors }) => {
 			if (errors.length > 0 || outputs === undefined) { return }
 
-			onWritten(await writeOutput(outputFiles ?? [], outputs, directory, iifeFiles));
+			let assets: SourceFile[] = [];
+			if (resolveImports) {
+				const resolution = await resolveRelativeImports(outputs, directory);
+				if (resolution.errors.length > 0) { return { errors: resolution.errors.map((text) => ({ text })) } }
+				assets = resolution.assets;
+			}
+
+			onWritten(await writeOutput(outputFiles ?? [], outputs, directory, iifeFiles, assets));
+			return;
 		});
 	}
 });
