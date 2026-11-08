@@ -7,6 +7,7 @@ import type { AbsolutePath, Closable, PendingFileChange } from '../@types';
 
 type ContentChangeSnapshot = { size: number; modifiedTimeMs: number };
 type ContentChangeState = { digest: string; stats?: ContentChangeSnapshot };
+
 interface QueuedPendingChange extends PendingFileChange {
 	version: number;
 }
@@ -16,6 +17,8 @@ export type RebuildQueueOptions = {
 	renameTimeoutMs: number;
 	sourceText: (path: AbsolutePath) => string | undefined;
 	rebuild: (changes: ReadonlyArray<PendingFileChange>) => Promise<void>;
+	/** Reports a failed rebuild attempt (change collection or the rebuild callback); the queue stays usable and keeps scheduling later changes. */
+	onError: (error: unknown) => void;
 };
 
 const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string => `${event}:${path}`;
@@ -320,6 +323,9 @@ export class RebuildQueue implements Closable, Disposable {
 			}
 
 			await this.#options.rebuild(pendingFileChanges);
+		} catch (error) {
+			// Dispatched with `void`, so a rejection here would be unhandled; report it and let the finally block keep the queue running
+			this.#options.onError(error);
 		} finally {
 			this.#rebuildInFlight = false;
 

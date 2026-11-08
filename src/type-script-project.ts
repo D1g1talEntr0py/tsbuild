@@ -101,7 +101,8 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 			this.#rebuildQueue = this.#resources.use(new RebuildQueue({
 				renameTimeoutMs: this.#buildConfiguration.watch.renameTimeout ?? 50,
 				sourceText: (path) => this.#compilationContext.sourceText(path),
-				rebuild: (changes) => this.#triggerRebuild(changes)
+				rebuild: (changes) => this.#triggerRebuild(changes),
+				onError: (error) => this.#handleBuildError(error)
 			}));
 			this.#projectWatcher = this.#resources.use(new ProjectWatcher({ directory: this.#directory, include: this.#configuration.include, exclude: this.#configuration.exclude, watch: this.#buildConfiguration.watch, onChange: this.#onChangeHandler }));
 		} catch (error) {

@@ -21,6 +21,7 @@ const settle = async (): Promise<void> => {
 };
 const rebuild = vi.fn<RebuildQueueOptions['rebuild']>();
 const sourceText = vi.fn<RebuildQueueOptions['sourceText']>();
+const onError = vi.fn<RebuildQueueOptions['onError']>();
 let queue: RebuildQueue;
 
 beforeEach(() => {
@@ -28,7 +29,7 @@ beforeEach(() => {
 	vol.fromJSON({ [path]: 'new' });
 	rebuild.mockResolvedValue(undefined);
 	sourceText.mockReturnValue('old');
-	queue = new RebuildQueue({ renameTimeoutMs: 3, sourceText, rebuild });
+	queue = new RebuildQueue({ renameTimeoutMs: 3, sourceText, rebuild, onError });
 });
 
 afterEach(async () => {
@@ -40,7 +41,7 @@ afterEach(async () => {
 
 describe('RebuildQueue', () => {
 	it('stops and clears the queue when a using scope exits exceptionally', async () => {
-		const scopedQueue = new RebuildQueue({ renameTimeoutMs: 3, sourceText, rebuild });
+		const scopedQueue = new RebuildQueue({ renameTimeoutMs: 3, sourceText, rebuild, onError });
 
 		expect(() => {
 			using resource = scopedQueue;
@@ -61,6 +62,19 @@ describe('RebuildQueue', () => {
 		expect(readFile).toHaveBeenCalledTimes(1);
 		await settle();
 		expect(rebuild).toHaveBeenCalledTimes(1);
+	});
+
+	it('reports a rejected rebuild through onError and keeps dispatching later changes', async () => {
+		const failure = new Error('rebuild failed');
+		rebuild.mockRejectedValueOnce(failure);
+
+		queue.enqueue('change', stats(3, 1), path);
+		await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
+
+		queue.enqueue('add', undefined, otherPath);
+		await vi.waitFor(() => expect(rebuild).toHaveBeenCalledTimes(2));
+		expect(rebuild.mock.calls[1]![0]).toMatchObject([ { event: 'add', path: otherPath } ]);
+		expect(onError).toHaveBeenCalledTimes(1);
 	});
 
 	it('rebuilds for a zero-size add without hashing', async () => {

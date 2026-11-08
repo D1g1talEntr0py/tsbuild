@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, afterEach } from 'vitest';
+import { vi, describe, it, expect, afterEach, onTestFinished } from 'vitest';
 import { writeFile, readFile, stat, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TypeScriptProject } from '../../src/type-script-project';
@@ -133,6 +133,31 @@ describe('TypeScriptProject - Watch Mode', () => {
 			expect(process.exitCode).toBeUndefined();
 		}, { timeout: 7_500, interval: 100 });
 
+		expect(process.exitCode).toBeUndefined();
+	});
+
+	it('reports a rejected rebuild dispatch as a build failure and keeps rebuilding later changes', { timeout: 15_000 }, async () => {
+		const { dir, cleanup: c } = await TestHelper.createTempProject({
+			files: { 'src/index.ts': 'export const version = 1;' },
+			tsconfig: { tsbuild: { clean: false } }
+		});
+		cleanup = c;
+
+		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		await project.build();
+		await new Promise<void>(resolve => setImmediate(resolve));
+		const failure = new Error('console unavailable');
+		// Logger.clear runs before the project's own error handling, so its failure rejects the queue's rebuild callback
+		const clear = vi.spyOn(Logger, 'clear').mockImplementationOnce(() => { throw failure });
+		const errorSpy = vi.spyOn(Logger, 'error').mockImplementation(() => undefined);
+		onTestFinished(() => { clear.mockRestore(); errorSpy.mockRestore() });
+
+		await writeFile(join(dir, 'src/index.ts'), 'export const version = 2;');
+		await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith('Build failed', failure), { timeout: 7_500, interval: 100 });
+
+		await writeFile(join(dir, 'src/index.ts'), 'export const version = 3;');
+		await vi.waitFor(async () => expect(await readUtf8(join(dir, 'dist/index.js'))).toMatch(/version\s*=\s*3/), { timeout: 7_500, interval: 100 });
+		expect(errorSpy).toHaveBeenCalledTimes(1);
 		expect(process.exitCode).toBeUndefined();
 	});
 
