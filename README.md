@@ -424,6 +424,8 @@ If nothing can be inferred, bundled builds fall back to `./src/index.ts` and unb
 }
 ```
 
+Each entry point gets its own `.d.ts`. When one entry imports or re-exports another entry that also gets a `.d.ts` (through a relative path or a `paths` alias), the declaration bundle imports it from that entry's output (for example `import { Client } from "./client.js"`) instead of inlining a copy. Classes therefore keep one identity across entry points, which matters for classes with private members. Modules that are not entry points are still inlined into every bundle that uses them.
+
 The `resolve` option controls whether to bundle external types from `node_modules` into your declaration files. When `false` (default for Node.js), external imports remain as import statements. When `true`, the bundler attempts to inline external types. This defaults to:
 - `false` for `platform: "node"` (recommended for Node.js projects - keeps external types as imports)
 - `true` for `platform: "browser"` and `platform: "neutral"` (bundles everything for standalone distribution)
@@ -632,7 +634,7 @@ The declaration bundling system (`src/dts/declaration-bundler.ts`) is a custom i
 
 1. **Module Graph Building** - Traverses import/export statements to build dependency graph using TypeScript's module resolution
 2. **Dependency Sorting** - Topologically sorts modules to ensure correct declaration order
-3. **Code Combination** - Strips imports/exports while preserving external references
+3. **Code Combination** - Strips imports/exports while preserving external references and imports of other entry points' bundled output
 4. **Pre/Post Processing** (`declaration-processor.ts`) - Cleans up directives, splits declarations, fixes modifiers, normalizes exports
 
 This custom bundler works entirely with in-memory declaration files, avoiding the overhead of duplicate TypeScript Program creation with some other bundlers.

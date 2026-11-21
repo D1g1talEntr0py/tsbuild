@@ -88,6 +88,34 @@ type DeclarationCode = {
 type ModuleDependencyGraph = {
 	readonly modules: ReadonlyMap<string, ModuleInfo>;
 	readonly bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>;
+	/** Per module: specifiers resolving to another entry point, mapped to the relative specifier of that entry's bundled output */
+	readonly entrySpecifiers: ReadonlyMap<string, ReadonlyMap<string, string>>;
 };
 
-export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, ExportedName, DeclarationCode, ExternalImport, ModuleDependencyGraph };
+/** How an import binds another entry's export: as a value, through `import type`, or through an inline `type` marker */
+type EntryImportMode = 'value' | 'type' | 'inline-type';
+
+/** An export of another entry point bound by a bundled module instead of being inlined */
+type EntryImportBinding = {
+	/** Relative specifier of the referenced entry's bundled output (e.g. `./other.js`) */
+	readonly specifier: string;
+	/** Export name in the referenced entry (`*` for namespace imports) */
+	readonly importedName: string;
+	/** Name bound in the bundle (renamed when it conflicts with another binding) */
+	localName: string;
+	mode: EntryImportMode;
+};
+
+/** Other entry points referenced by a single bundled module */
+type EntryReferences = {
+	/** Source specifiers resolving to another entry, mapped to the relative specifier of that entry's bundled output */
+	readonly specifiers: ReadonlyMap<string, string>;
+	/** Bindings keyed by their local name in the module */
+	readonly bindings: ReadonlyMap<string, EntryImportBinding>;
+	/** Named re-exports of a non-entry module, keyed by exported name. They are imported as bindings and exported to importing modules. */
+	readonly reexports: ReadonlyMap<string, EntryImportBinding>;
+	/** Whether the module is the entry being bundled, whose re-exports form the public API */
+	readonly isEntryModule: boolean;
+};
+
+export type { NameRange, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, ExportedName, DeclarationCode, ExternalImport, ModuleDependencyGraph, EntryImportMode, EntryImportBinding, EntryReferences };

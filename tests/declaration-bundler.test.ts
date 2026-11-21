@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { join } from 'node:path';
+import { vol } from 'memfs';
+import { createProgram, getPreEmitDiagnostics, ModuleKind, ModuleResolutionKind, ScriptTarget } from 'typescript';
 import { TestHelper } from './scripts/test-helper';
 import { Logger } from 'src/logger';
 import type { AbsolutePath } from 'src/@types';
@@ -561,6 +563,237 @@ export declare const Theme: { color: string; };`],
 			expect(content).toContain('type Status');
 			expect(content).toContain('Status$1');
 			expect(content).toContain('Status$2');
+		});
+	});
+
+	describe('cross-entry imports', () => {
+		const entryA = 'export declare class A { #private; name: string; }\nexport type T = string;';
+
+		it('imports another entry from its bundled output instead of inlining it', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import { A } from "./a.js";\nexport declare class B extends A { extra: number; }'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			expect(TestHelper.readFile(join(outDir, 'a.d.ts'))).toBe('declare class A { #private; name: string; }\ntype T = string;\n\nexport { A };\nexport type { T };');
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toBe('import { A } from "./a.js";\n\ndeclare class B extends A { extra: number; }\n\nexport { B };');
+			expect(content).not.toContain('declare class A');
+		});
+
+		it('makes the specifier relative to a nested entry output', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import { A } from "./a";\nexport declare function make(): A;'],
+					[join(cwd, 'src/c.d.ts'), 'import { make } from "./b";\nexport declare const c: ReturnType<typeof make>;'],
+				]),
+				entryPoints: { 'lib/a': join(cwd, 'src/a.d.ts') as AbsolutePath, 'sub/b': join(cwd, 'src/b.d.ts') as AbsolutePath, c: join(cwd, 'src/c.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			expect(TestHelper.readFile(join(outDir, 'sub/b.d.ts'))).toContain('import { A } from "../lib/a.js";');
+			expect(TestHelper.readFile(join(outDir, 'c.d.ts'))).toContain('import { make } from "./sub/b.js";');
+		});
+
+		it('preserves re-exports of another entry in the public API', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'export { A } from "./a";\nexport { T as Alias } from "./a";\nexport * as ns from "./a";\nexport declare const b: number;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toContain('export { A } from "./a.js";');
+			expect(content).toContain('export { T as Alias } from "./a.js";');
+			expect(content).toContain('export * as ns from "./a.js";');
+			expect(content).toContain('export { b };');
+			expect(content).not.toContain('declare class A');
+		});
+
+		it('preserves type-only imports, inline type markers, aliases, and namespace imports', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import type { A } from "./a";\nimport { type T as Text } from "./a";\nimport type * as NS from "./a";\nimport * as Values from "./a";\nexport declare function b(a: A, t: Text, n: NS.T): typeof Values.A;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toContain('import type { A } from "./a.js";');
+			expect(content).toContain('import { type T as Text } from "./a.js";');
+			expect(content).toContain('import type * as NS from "./a.js";');
+			expect(content).toContain('import * as Values from "./a.js";');
+			expect(content).toContain('declare function b(a: A, t: Text, n: NS.T): typeof Values.A;');
+		});
+
+		it('merges imports of the same entry from several bundled modules', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import { m1 } from "./m1";\nimport { m2 } from "./m2";\nexport { m1, m2 };'],
+					[join(cwd, 'src/m1.d.ts'), 'import type { A } from "./a";\nexport declare const m1: A;'],
+					[join(cwd, 'src/m2.d.ts'), 'import { A, type T } from "./a.js";\nexport declare const m2: A | T;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			// The value import also provides the type imported by m1
+			expect(content.match(/from "\.\/a\.js"/g)).toHaveLength(1);
+			expect(content).toContain('import { A, type T } from "./a.js";');
+			expect(content).not.toContain('declare class A');
+		});
+
+		it('resolves names imported from another entry through a non-entry module', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import { A, Other, T, local } from "./barrel";\nexport declare const b: A | Other | T | typeof local;\nexport { A, T };'],
+					[join(cwd, 'src/barrel.d.ts'), 'export { A } from "./a";\nexport { A as Other, type T } from "./a";\nexport { local } from "./local";'],
+					[join(cwd, 'src/local.d.ts'), 'export declare const local: number;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			expect(TestHelper.readFile(join(outDir, 'b.d.ts'))).toBe('import { A, A as Other } from "./a.js";\nimport type { T } from "./a.js";\n\ndeclare const local: number;\n\ndeclare const b: A | Other | T | typeof local;\n\nexport { A, b, T };');
+		});
+
+		it('renames local declarations that conflict with names imported from another entry', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/x.d.ts'), 'export declare class A { x: true; }'],
+					[join(cwd, 'src/b.d.ts'), 'import { A } from "./a";\nimport { m } from "./m";\nimport { fromX } from "./n";\nexport declare const b: A;\nexport { m, fromX };'],
+					[join(cwd, 'src/m.d.ts'), 'export declare class A { local: true; }\nexport declare const m: A;'],
+					[join(cwd, 'src/n.d.ts'), 'import { A } from "./x";\nexport declare const fromX: A;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath, x: join(cwd, 'src/x.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toContain('import { A as A$2 } from "./a.js";');
+			expect(content).toContain('import { A } from "./x.js";');
+			expect(content).toContain('declare class A$1 { local: true; }');
+			expect(content).toContain('declare const m: A$1;');
+			expect(content).toContain('declare const fromX: A;');
+			expect(content).toContain('declare const b: A$2;');
+		});
+
+		it('keeps default and side-effect imports of another entry', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), 'declare class A { #private; }\nexport default A;'],
+					[join(cwd, 'src/b.d.ts'), 'import Base from "./a";\nimport "./a";\nexport declare const b: Base;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toContain('import { default as Base } from "./a.js";');
+			expect(content).toContain('import "./a.js";');
+			expect(content).not.toContain('declare class A');
+		});
+
+		it('rewrites tsconfig path aliases that resolve to another entry', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import type { A } from "@src/a";\nexport declare const b: A;\nexport { A };'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+				compilerOptions: { outDir, paths: { '@src/*': ['./src/*'] } },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toBe('import type { A } from "./a.js";\n\ndeclare const b: A;\n\nexport { b };\nexport type { A };');
+		});
+
+		it('still inlines the entry being bundled and modules that are not entries', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), 'import { Shared } from "./shared";\nimport type { Opts } from "./types";\nexport declare class A extends Shared { opts: Opts; }'],
+					[join(cwd, 'src/b.d.ts'), 'import { Shared, helper } from "./shared.js";\nexport declare function b(): typeof helper;\nexport { Shared };'],
+					[join(cwd, 'src/shared.d.ts'), 'export declare class Shared { #private; }\nexport declare const helper: () => void;'],
+					[join(cwd, 'src/types.d.ts'), 'export type Opts = { a: string; };'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath, 'sub/c': join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			expect(TestHelper.readFile(join(outDir, 'a.d.ts'))).toBe('declare class Shared { #private; }\ndeclare const helper: () => void;\n\ntype Opts = { a: string; };\n\ndeclare class A extends Shared { opts: Opts; }\n\nexport { A };');
+			// Entries sharing one declaration file bundle it rather than importing each other
+			for (const entryName of [ 'b', 'sub/c' ]) {
+				expect(TestHelper.readFile(join(outDir, `${entryName}.d.ts`))).toBe('declare class Shared { #private; }\ndeclare const helper: () => void;\n\ndeclare function b(): typeof helper;\n\nexport { b, Shared };');
+			}
+		});
+
+		it('imports an entry through a chain of `export *` barrels instead of inlining it', async () => {
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import { A } from "./barrel";\nexport declare class B extends A { extra: number; }'],
+					[join(cwd, 'src/barrel.d.ts'), 'export * from "./nested";'],
+					[join(cwd, 'src/nested.d.ts'), 'export * from "./a";'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).toContain('import { A } from "./a.js";');
+			expect(content).toContain('declare class B extends A { extra: number; }');
+			expect(content).not.toContain('declare class A');
+
+			const consumerPath = join(cwd, 'src/consumer.ts');
+			const globalsPath = join(cwd, 'src/globals.d.ts');
+			vol.mkdirSync(join(cwd, 'src'), { recursive: true });
+			vol.writeFileSync(consumerPath, 'import type { A } from "../dist/a.js";\nimport type { B } from "../dist/b.js";\ndeclare const b: B;\nconst a: A = b;');
+			vol.writeFileSync(globalsPath, 'interface Object {} interface Function {} interface CallableFunction {} interface NewableFunction {} interface IArguments {} interface String {} interface Number {} interface Boolean {} interface RegExp {} interface Array<T> { length: number; [index: number]: T; }');
+			const program = createProgram([ consumerPath, globalsPath ], {
+				noEmit: true,
+				noLib: true,
+				strict: true,
+				target: ScriptTarget.ESNext,
+				module: ModuleKind.ESNext,
+				moduleResolution: ModuleResolutionKind.Bundler,
+				types: [],
+			});
+			expect(getPreEmitDiagnostics(program)).toEqual([]);
+		});
+
+		it('never imports the entry being bundled from itself', async () => {
+			const warnSpy = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
+			const options = makeOptions({
+				declarationFiles: TestHelper.createDeclarationFilesMap([
+					[join(cwd, 'src/a.d.ts'), entryA],
+					[join(cwd, 'src/b.d.ts'), 'import { m } from "./m";\nexport declare class B { #private; }\nexport { m };'],
+					[join(cwd, 'src/m.d.ts'), 'import type { B } from "./b";\nexport declare const m: B;'],
+				]),
+				entryPoints: { a: join(cwd, 'src/a.d.ts') as AbsolutePath, b: join(cwd, 'src/b.d.ts') as AbsolutePath },
+			});
+
+			await bundleDeclarations(options);
+			warnSpy.mockRestore();
+
+			const content = TestHelper.readFile(join(outDir, 'b.d.ts'));
+			expect(content).not.toContain('import');
+			expect(content).toContain('declare class B { #private; }');
+			expect(content).toContain('declare const m: B;');
 		});
 	});
 });
