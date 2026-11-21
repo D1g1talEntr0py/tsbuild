@@ -1,3 +1,13 @@
+# [3.2.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.1.0...v3.2.0) (2026-11-21)
+
+### Bug Fixes
+
+* **build:** include external patterns in config fingerprint ([a2ee52b](https://github.com/D1g1talEntr0py/tsbuild/commit/a2ee52b1b15b8a9057b36ce8374806d001f96036))
+
+### Features
+
+* **dts:** reference other entries in declaration bundles ([15268e4](https://github.com/D1g1talEntr0py/tsbuild/commit/15268e417962d075b42f0a5256aad2fb5790c18e))
+
 # [3.1.0](https://github.com/D1g1talEntr0py/tsbuild/compare/v3.0.3...v3.1.0) (2026-11-08)
 
 
