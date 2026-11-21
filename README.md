@@ -312,7 +312,7 @@ With incremental enabled, each build maintains two caches inside a `.tsbuild/` d
 
 On each build, TypeScript reads `.tsbuildinfo` to determine what changed and only re-emits those files. Changed `.d.ts` files overwrite their entries in the DTS cache; unchanged entries remain valid. If nothing changed, TypeScript skips emission entirely and the output phase is skipped too — this is why incremental rebuilds with no changes take ~5ms.
 
-**Config change detection** — tsbuild stores a fingerprint of the current build configuration (minify, platform, source maps, iife, splitting, banner/footer, env, noExternal, dts options, etc.) alongside the DTS cache. If any of these settings change between builds, the output phase is forced even when TypeScript reports no source changes. The fingerprint is updated at the end of each build so subsequent runs do not repeatedly trigger a forced rebuild.
+**Config change detection** — tsbuild stores a fingerprint of the current build configuration (minify, platform, source maps, iife, splitting, banner/footer, env, external, noExternal, dts options, etc.) alongside the DTS cache. If any of these settings change between builds, the output phase is forced even when TypeScript reports no source changes. The fingerprint is updated at the end of each build so subsequent runs do not repeatedly trigger a forced rebuild.
 
 ### Ignoring the cache directory
 
