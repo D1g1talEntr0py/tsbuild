@@ -3,6 +3,7 @@ import { access, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { pathToFileURL } from 'node:url';
 import { TypeScriptProject } from '../../src/type-script-project';
