@@ -32,12 +32,14 @@ import { createFileSystemLayer } from 'typescript/fs';
 import type { SourceFile, Node, StringLiteral } from 'typescript/ast';
 import type { ModuleResolver, Snapshot } from 'typescript/sync';
 import type { AbsolutePath, CachedDeclaration, EntryPoints, RelativePath, WrittenFile } from '../@types';
-import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, ExternalImport, ExportedName, NamespaceExport } from './@types';
+import type { ModuleInfo, DtsBundleOptions, DtsCompilerOptions, IdentifierMap, DeclarationCode, ModuleDependencyGraph, ExternalImport, ExportedName, NamespaceExport, EntryImportBinding, EntryImportMode, EntryReferences } from './@types';
 
 /** Default main-thread budget, in milliseconds, between event-loop turns while declarations are bundled alongside transpilation */
 const defaultYieldIntervalMs = 10;
 const nodeModules = '/node_modules/';
 const emptySet: ReadonlySet<string> = new Set();
+const noEntryReferences: EntryReferences = { specifiers: new Map(), bindings: new Map(), reexports: new Map(), isEntryModule: false };
+const entryImportModeRank: Readonly<Record<EntryImportMode, number>> = { value: 0, type: 1, 'inline-type': 2 };
 
 /**
  * Resolves a promise on the next event-loop turn, after pending I/O callbacks
@@ -129,6 +131,77 @@ function mergeImports(imports: ExternalImport[]) {
 }
 
 /**
+ * Computes the specifier one entry's declarations use to import another entry's output.
+ * @param fromEntryName - Output name of the importing entry
+ * @param toEntryName - Output name of the referenced entry
+ * @returns A relative `.js` specifier
+ */
+function entryOutputSpecifier(fromEntryName: string, toEntryName: string) {
+	const fromDirectory = Paths.Posix.directoryName(`/${fromEntryName}`);
+	const specifier = Paths.Posix.relative(fromDirectory, `/${toEntryName}`) + FileExtension.JS;
+
+	return specifier.startsWith('../') ? specifier : `./${specifier}`;
+}
+
+/**
+ * Collects imports and non-entry re-exports that bind another entry's exports.
+ * @param sourceFile - The module's parsed declarations
+ * @param specifiers - Source specifiers mapped to bundled entry output specifiers
+ * @param isEntryModule - Whether this module is the entry being bundled
+ * @returns Import and re-export bindings in statement order
+ */
+function collectEntryImportBindings(sourceFile: SourceFile, specifiers: ReadonlyMap<string, string>, isEntryModule: boolean) {
+	const imports: EntryImportBinding[] = [];
+	const reexports: EntryImportBinding[] = [];
+
+	for (const statement of sourceFile.statements) {
+		if (isImportDeclaration(statement)) {
+			const specifier = specifiers.get(moduleSpecifierText(statement.moduleSpecifier));
+			const importClause = statement.importClause;
+
+			if (specifier === undefined || importClause === undefined) { continue }
+
+			const mode: EntryImportMode = importClause.phaseModifier === SyntaxKind.TypeKeyword ? 'type' : 'value';
+
+			if (importClause.name) { imports.push({ specifier, importedName: 'default', localName: importClause.name.text, mode }) }
+
+			const namedBindings = importClause.namedBindings;
+
+			if (namedBindings && isNamespaceImport(namedBindings)) {
+				imports.push({ specifier, importedName: '*', localName: namedBindings.name.text, mode });
+			} else if (namedBindings) {
+				for (const { name, propertyName, isTypeOnly } of namedBindings.elements) {
+					imports.push({ specifier, importedName: propertyName?.text ?? name.text, localName: name.text, mode: isTypeOnly ? 'inline-type' : mode });
+				}
+			}
+		} else if (!isEntryModule && isExportDeclaration(statement) && statement.moduleSpecifier && statement.exportClause && isNamedExports(statement.exportClause)) {
+			const specifier = specifiers.get(moduleSpecifierText(statement.moduleSpecifier));
+
+			if (specifier === undefined) { continue }
+
+			for (const { name, propertyName, isTypeOnly } of statement.exportClause.elements) {
+				reexports.push({ specifier, importedName: propertyName?.text ?? name.text, localName: name.text, mode: statement.isTypeOnly || isTypeOnly ? 'type' : 'value' });
+			}
+		}
+	}
+
+	return { imports, reexports };
+}
+
+/**
+ * Converts a binding to another entry's export into a structured import.
+ * @param binding - The binding to import
+ * @returns The structured import
+ */
+function toEntryImport({ specifier, importedName, localName, mode }: EntryImportBinding): ExternalImport {
+	if (importedName === '*') { return { kind: 'raw', text: `import ${mode === 'value' ? '' : 'type '}* as ${localName} from "${specifier}";` } }
+
+	const name = importedName === localName ? localName : `${importedName} as ${localName}`;
+
+	return { kind: 'named', specifier, isType: mode === 'type', names: [ mode === 'inline-type' ? `type ${name}` : name ] };
+}
+
+/**
  * A minimal DTS bundler that combines TypeScript declaration files.
  * This replaces the Rollup-based approach with a simpler, more direct implementation
  * that leverages the declarations we already have in memory.
@@ -162,6 +235,8 @@ class DeclarationBundler implements Disposable {
 	readonly #moduleResolutionCache = new Map<string, AbsolutePath | undefined>();
 	/** Source-to-declaration path mapping cache to avoid redundant lookups during bundling */
 	readonly #sourceToDeclarationCache = new Map<AbsolutePath, AbsolutePath>();
+	/** Declaration file of each entry point mapped to its output name */
+	readonly #entryDeclarations = new Map<AbsolutePath, string>();
 	/** Owns the resolution snapshot and module resolver; both are created on first use */
 	readonly #resources = new DisposableStack();
 	/** Main-thread budget between event-loop turns; undefined when bundling must not yield (no parallel transpile) */
@@ -199,6 +274,12 @@ class DeclarationBundler implements Disposable {
 
 		this.#matchExternal = createPatternMatcher(dtsBundleOptions.external);
 		this.#matchNoExternal = createPatternMatcher(dtsBundleOptions.noExternal);
+
+		for (const [ entryName, entryPoint ] of Object.entries(dtsBundleOptions.entryPoints)) {
+			const declarationPath = this.#resolveEntryPoint(entryPoint, dtsBundleOptions.compilerOptions);
+
+			if (declarationPath !== undefined && !this.#entryDeclarations.has(declarationPath)) { this.#entryDeclarations.set(declarationPath, entryName) }
+		}
 	}
 
 	/**
@@ -217,7 +298,7 @@ class DeclarationBundler implements Disposable {
 			if (dtsEntryPoint === undefined) { continue }
 
 			const outputPath = Paths.join(this.#options.compilerOptions.outDir, `${entryName}${FileExtension.DTS}`);
-			graphs.set(entryName, { entryPoint: dtsEntryPoint, outputPath, graph: await this.#buildModuleGraph(dtsEntryPoint) });
+			graphs.set(entryName, { entryPoint: dtsEntryPoint, outputPath, graph: await this.#buildModuleGraph(dtsEntryPoint, entryName) });
 		}
 
 		const graphCounts = new Map<AbsolutePath, number>();
@@ -522,6 +603,44 @@ class DeclarationBundler implements Disposable {
 	}
 
 	/**
+	 * Resolves a pure `export *` barrel to the entry point it forwards.
+	 * @param path - Declaration file to inspect
+	 * @param visited - Paths already inspected while following a barrel chain
+	 * @returns The entry declaration path and output name, if the barrel resolves unambiguously
+	 */
+	#resolveEntryBarrel(path: AbsolutePath, visited: Set<AbsolutePath> = new Set()): { path: AbsolutePath; name: string } | undefined {
+		if (visited.has(path)) { return }
+
+		visited.add(path);
+
+		const cached = this.#declarationFiles.get(path);
+
+		if (cached === undefined) { return }
+
+		const sourceFile = this.#sourceFileCache.get(path) ?? this.#parse(path, cached.code);
+
+		if (sourceFile.statements.length !== 1) { return }
+
+		const [ statement ] = sourceFile.statements;
+
+		if (!isExportDeclaration(statement) || !statement.moduleSpecifier || statement.exportClause) { return }
+
+		const specifier = moduleSpecifierText(statement.moduleSpecifier);
+
+		if (this.#matchExternal(specifier)) { return }
+
+		const resolvedPath = this.#resolveModules([ specifier ], path)[0];
+
+		if (resolvedPath === undefined || resolvedPath.includes(nodeModules) && !this.#matchNoExternal(specifier)) { return }
+
+		const entryName = this.#entryDeclarations.get(resolvedPath);
+
+		if (entryName !== undefined) { return { path: resolvedPath, name: entryName } }
+
+		return this.#resolveEntryBarrel(resolvedPath, visited);
+	}
+
+	/**
 	 * Topological sort of modules to ensure dependencies come before dependents
 	 * @param modules - Map of all modules
 	 * @param entryPoint - Starting point for sorting
@@ -650,7 +769,7 @@ class DeclarationBundler implements Disposable {
 	 * @param dependencyExports - Export bindings collected from dependencies already processed
 	 * @returns Object with processed code, collected external imports, and exported names (separated by type/value)
 	 */
-	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string, dependencyExports: ReadonlyMap<string, ReadonlyMap<string, ExportedName>>, sharedModules: ReadonlyMap<string, AbsolutePath>, bundleOutputPath: AbsolutePath): DeclarationCode {
+	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string, dependencyExports: ReadonlyMap<string, ReadonlyMap<string, ExportedName>>, sharedModules: ReadonlyMap<string, AbsolutePath>, bundleOutputPath: AbsolutePath, entryReferences: EntryReferences): DeclarationCode {
 		const externalImports: ExternalImport[] = [];
 		const typeExports: ExportedName[] = [];
 		const valueExports: ExportedName[] = [];
@@ -678,6 +797,10 @@ class DeclarationBundler implements Disposable {
 			if (renamed) { moduleRenames.set(name, renamed) }
 		}
 
+		for (const [ name, { localName } ] of entryReferences.bindings) {
+			if (localName !== name && !typeIdentifiers.has(name) && !valueIdentifiers.has(name)) { moduleRenames.set(name, localName) }
+		}
+
 		// Namespace aliases from bundled `import * as Alias` statements.
 		// When a namespace import is bundled (inlined), all `Alias.Name` qualified references must be flattened to plain `Name` since the alias is removed.
 		const bundledNamespaceAliases = new Set<string>();
@@ -686,6 +809,16 @@ class DeclarationBundler implements Disposable {
 		for (const statement of sourceFile.statements) {
 			if (isImportDeclaration(statement)) {
 				const moduleSpecifier = moduleSpecifierText(statement.moduleSpecifier);
+				const entrySpecifier = entryReferences.specifiers.get(moduleSpecifier);
+
+				if (entrySpecifier !== undefined) {
+					if (statement.importClause === undefined) { externalImports.push({ kind: 'raw', text: `import "${entrySpecifier}";` }) }
+
+					magic.remove(statement.pos, statement.end);
+
+					continue;
+				}
+
 				const resolvedPath = this.#resolveModules([ moduleSpecifier ], modulePath)[0];
 				const sharedOutputPath = resolvedPath === undefined ? undefined : sharedModules.get(Paths.absolute(resolvedPath));
 				const outputSpecifier = sharedOutputPath === undefined ? moduleSpecifier : relativeModuleSpecifier(bundleOutputPath, sharedOutputPath);
@@ -756,6 +889,18 @@ class DeclarationBundler implements Disposable {
 				// Export from another module: export { X } from './module'
 				if (statement.moduleSpecifier) {
 					const exportModuleSpecifier = moduleSpecifierText(statement.moduleSpecifier);
+					const entrySpecifier = entryReferences.specifiers.get(exportModuleSpecifier);
+
+					if (entrySpecifier !== undefined) {
+						if (entryReferences.isEntryModule) {
+							magic.overwrite(statement.moduleSpecifier.getStart() + 1, statement.moduleSpecifier.getEnd() - 1, entrySpecifier);
+						} else {
+							magic.remove(statement.pos, statement.end);
+						}
+
+						continue;
+					}
+
 					const resolvedTarget = this.#resolveModules([ exportModuleSpecifier ], modulePath)[0];
 					const sharedOutputPath = resolvedTarget === undefined ? undefined : sharedModules.get(Paths.absolute(resolvedTarget));
 					const outputSpecifier = sharedOutputPath === undefined ? exportModuleSpecifier : relativeModuleSpecifier(bundleOutputPath, sharedOutputPath);
@@ -800,11 +945,12 @@ class DeclarationBundler implements Disposable {
 					for (const { name, propertyName } of statement.exportClause.elements) {
 						const localName = propertyName?.text ?? name.text;
 						const exported = { localName: exportsMapper(localName), exportedName: name.text, isType: statement.isTypeOnly };
+						const entryImportMode = entryReferences.bindings.get(localName)?.mode;
 
 						// Categorize as type or value. Values take precedence (classes/enums are both)
 						if (valueIdentifiers.has(localName) || localBindings.has(localName) && !statement.isTypeOnly) {
 							valueExports.push(exported);
-						} else if (typeIdentifiers.has(localName) || localBindings.has(localName)) {
+						} else if (typeIdentifiers.has(localName) || localBindings.has(localName) || entryImportMode !== undefined && entryImportMode !== 'value') {
 							typeExports.push(exported);
 						} else {
 							// Unknown, assume value (safer default)
@@ -823,6 +969,14 @@ class DeclarationBundler implements Disposable {
 
 				magic.remove(statement.pos, statement.end);
 			}
+		}
+
+		for (const binding of entryReferences.bindings.values()) { externalImports.push(toEntryImport(binding)) }
+
+		for (const [ exportedName, { localName, mode } ] of entryReferences.reexports) {
+			const exported = { localName, exportedName, isType: mode !== 'value' };
+
+			if (exported.isType) { typeExports.push(exported) } else { valueExports.push(exported) }
 		}
 
 		// Apply renaming to all identifier occurrences and flatten qualified names from bundled namespaces.
@@ -927,13 +1081,15 @@ class DeclarationBundler implements Disposable {
 	 * @param entryPoint - The entry point file path
 	 * @returns Map of file paths to module information with bundled specifiers tracked
 	 */
-	async #buildModuleGraph(entryPoint: AbsolutePath): Promise<ModuleDependencyGraph> {
+	async #buildModuleGraph(entryPoint: AbsolutePath, entryName: string): Promise<ModuleDependencyGraph> {
 		// Normalized paths, so the same file is never visited twice with different path representations
 		let frontier: AbsolutePath[] = [ Paths.absolute(entryPoint) ];
 		const visited = new Set<string>(frontier);
 		const modules = new Map<AbsolutePath, ModuleInfo>();
 		// Maps module path to bundled import specifiers
 		const bundledSpecifiers = new Map<string, Set<string>>();
+		// Maps each module's source specifiers to other entry outputs
+		const entrySpecifiers = new Map<string, Map<string, string>>();
 
 		while (frontier.length > 0) {
 			await this.#parseDeclarations(frontier);
@@ -962,7 +1118,9 @@ class DeclarationBundler implements Disposable {
 				};
 
 				const specifiers: string[] = [];
+				const statements: Node[] = [];
 				const bundledSpecs = new Set<string>();
+				const entrySpecs = new Map<string, string>();
 
 				// Extract import specifiers, then resolve them in one batch
 				for (const statement of sourceFile.statements) {
@@ -970,7 +1128,10 @@ class DeclarationBundler implements Disposable {
 						const specifier = moduleSpecifierText(statement.moduleSpecifier);
 
 						// Skip explicit external modules
-						if (!this.#matchExternal(specifier)) { specifiers.push(specifier) }
+						if (!this.#matchExternal(specifier)) {
+							specifiers.push(specifier);
+							statements.push(statement);
+						}
 					}
 				}
 
@@ -979,11 +1140,28 @@ class DeclarationBundler implements Disposable {
 				for (let i = 0, length = specifiers.length; i < length; i++) {
 					const specifier = specifiers[i];
 					const resolvedPath = resolvedPaths[i];
+					const statement = statements[i];
 
 					// Skip node_modules packages unless they're in noExternal list
 					if (resolvedPath?.includes(nodeModules) && !this.#matchNoExternal(specifier)) { continue }
 
 					if (resolvedPath !== undefined && this.#hasDeclaration(resolvedPath)) {
+						const referencedEntryName = resolvedPath === entryPoint ? undefined : this.#entryDeclarations.get(resolvedPath);
+						const importClause = isImportDeclaration(statement) ? statement.importClause : undefined;
+						const barrelEntry = referencedEntryName === undefined && importClause?.name === undefined && importClause?.namedBindings !== undefined && isNamedImports(importClause.namedBindings) ? this.#resolveEntryBarrel(resolvedPath) : undefined;
+						const referencedEntry = referencedEntryName === undefined && barrelEntry?.path !== entryPoint ? barrelEntry : undefined;
+						const isNamedReExport = isExportDeclaration(statement) && statement.exportClause !== undefined && isNamedExports(statement.exportClause);
+
+						if (referencedEntryName !== undefined && (path === entryPoint || isImportDeclaration(statement) || isNamedReExport)) {
+							entrySpecs.set(specifier, entryOutputSpecifier(entryName, referencedEntryName));
+							continue;
+						}
+
+						if (referencedEntry !== undefined) {
+							entrySpecs.set(specifier, entryOutputSpecifier(entryName, referencedEntry.name));
+							continue;
+						}
+
 						module.imports.add(resolvedPath);
 						// Track the original specifier
 						bundledSpecs.add(specifier);
@@ -998,14 +1176,17 @@ class DeclarationBundler implements Disposable {
 					}
 				}
 
+				for (const specifier of bundledSpecs) { entrySpecs.delete(specifier) }
+
 				modules.set(path, module);
 				bundledSpecifiers.set(path, bundledSpecs);
+				if (entrySpecs.size > 0) { entrySpecifiers.set(path, entrySpecs) }
 			}
 
 			frontier = next;
 		}
 
-		return { modules, bundledSpecifiers };
+		return { modules, bundledSpecifiers, entrySpecifiers };
 	}
 
 	/**
@@ -1014,7 +1195,7 @@ class DeclarationBundler implements Disposable {
 	 * @param bundledSpecifiers - Map of module paths to their bundled import specifiers
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
-	async #combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>, sharedModules: ReadonlyMap<string, AbsolutePath> = new Map(), bundleOutputPath: AbsolutePath = this.#options.compilerOptions.outDir) {
+	async #combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>, sharedModules: ReadonlyMap<string, AbsolutePath>, bundleOutputPath: AbsolutePath, entrySpecifiers: ReadonlyMap<string, ReadonlyMap<string, string>>, entryModulePath: AbsolutePath) {
 		// Identifiers unavailable for synthesized namespaces; built only when a bundled `export * as` needs one
 		let reservedNames: Set<string> | undefined;
 		const separator  = newLine + newLine;
@@ -1030,6 +1211,48 @@ class DeclarationBundler implements Disposable {
 		const declarationSources = new Map<string, Set<string>>(); // identifier -> Set of module paths
 		const renameMap = new Map<string, string>(); // original name + module -> renamed identifier
 		const namespaceBlockPredicate = (block: string) => block.length > 0;
+		const entryBindings = new Map<string, Map<string, EntryImportBinding>>();
+		const moduleEntryReferences = new Map<string, EntryReferences>();
+
+		const shareBinding = (binding: EntryImportBinding) => {
+			let bindingsForName = entryBindings.get(binding.localName);
+
+			if (bindingsForName === undefined) { entryBindings.set(binding.localName, bindingsForName = new Map<string, EntryImportBinding>()) }
+
+			const key = `${binding.importedName}\0${binding.specifier}`;
+			const shared = bindingsForName.get(key);
+
+			if (shared === undefined) {
+				bindingsForName.set(key, binding);
+
+				return binding;
+			}
+
+			if (entryImportModeRank[binding.mode] < entryImportModeRank[shared.mode]) { shared.mode = binding.mode }
+
+			return shared;
+		};
+
+		for (const { path, sourceFile } of sortedModules) {
+			const specifiers = entrySpecifiers.get(path);
+
+			if (specifiers === undefined) { continue }
+
+			const isEntryModule = path === entryModulePath;
+			const bindings = new Map<string, EntryImportBinding>();
+			const reexports = new Map<string, EntryImportBinding>();
+			const { imports, reexports: reexported } = collectEntryImportBindings(sourceFile, specifiers, isEntryModule);
+
+			for (const binding of imports) { bindings.set(binding.localName, shareBinding(binding)) }
+
+			for (const binding of reexported) {
+				const shared = shareBinding(binding);
+				bindings.set(binding.localName, shared);
+				reexports.set(binding.localName, shared);
+			}
+
+			moduleEntryReferences.set(path, { specifiers, bindings, reexports, isEntryModule });
+		}
 
 		// First pass: collect all declarations and detect conflicts
 		for (const { path, identifiers: { types, values } } of sortedModules) {
@@ -1050,24 +1273,37 @@ class DeclarationBundler implements Disposable {
 			}
 		}
 
-		// Second pass: generate unique names for conflicting identifiers
+		const nextSuffixes = new Map<string, number>();
+		const uniqueName = (name: string) => {
+			let suffix = nextSuffixes.get(name) ?? 1;
+			let candidate = `${name}$${suffix}`;
+
+			while (declarationSources.has(candidate) || entryBindings.has(candidate)) { candidate = `${name}$${++suffix}` }
+
+			nextSuffixes.set(name, suffix + 1);
+
+			return candidate;
+		};
+
+		// Rename inlined declarations that collide with another entry's imported binding.
 		for (const [ name, sourcesSet ] of declarationSources) {
-			if (sourcesSet.size > 1) {
-				// First module keeps original name, subsequent modules get $1, $2, etc. Each candidate is verified against all known declarations to avoid collisions
-				let suffix = 1;
+			const isEntryImport = entryBindings.has(name);
+
+			if (sourcesSet.size > 1 || isEntryImport) {
 				const modulePaths = sourcesSet.values();
 
-				modulePaths.next();
+				if (!isEntryImport) { modulePaths.next() }
 
-				for (const modulePath of modulePaths) {
-					let candidate = `${name}$${suffix}`;
-
-					while (declarationSources.has(candidate)) { candidate = `${name}$${++suffix}` }
-
-					renameMap.set(`${name}:${modulePath}`, candidate);
-					suffix++;
-				}
+				for (const modulePath of modulePaths) { renameMap.set(`${name}:${modulePath}`, uniqueName(name)) }
 			}
+		}
+
+		// Different entry exports imported under one local name need distinct aliases.
+		for (const [ name, bindingsForName ] of entryBindings) {
+			const bindings = bindingsForName.values();
+			bindings.next();
+
+			for (const binding of bindings) { binding.localName = uniqueName(name) }
 		}
 
 		// Collect all references and code
@@ -1081,7 +1317,7 @@ class DeclarationBundler implements Disposable {
 			// Strip import/export statements, preserving external imports.
 			// Use cached identifiers and sourceFile (both always present after buildModuleGraph).
 			const bundledForThisModule = bundledSpecifiers.get(path) ?? emptySet;
-			const { code: strippedCode, externalImports, typeExports: moduleTypeExports, valueExports: moduleValueExports, namespaceExports } = this.#stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path, moduleExports, sharedModules, bundleOutputPath);
+			const { code: strippedCode, externalImports, typeExports: moduleTypeExports, valueExports: moduleValueExports, namespaceExports } = this.#stripImportsExports(code, sourceFile, { types, values }, bundledForThisModule, renameMap, path, moduleExports, sharedModules, bundleOutputPath, moduleEntryReferences.get(path) ?? noEntryReferences);
 
 			// Collect external imports from all modules (merged later by mergeImports)
 			for (const imp of externalImports) { allExternalImports.push(imp) }
@@ -1191,7 +1427,7 @@ class DeclarationBundler implements Disposable {
 	 * @returns The post-processed source file
 	 */
 	async #bundleGraph(graph: ModuleDependencyGraph, dtsEntryPoint: AbsolutePath, sharedModules: ReadonlyMap<string, AbsolutePath>, outputPath: AbsolutePath) {
-		const { modules, bundledSpecifiers } = graph;
+		const { modules, bundledSpecifiers, entrySpecifiers } = graph;
 		const bundledModules = new Map<AbsolutePath, ModuleInfo>();
 		const filteredSpecifiers = new Map<string, ReadonlySet<string>>();
 
@@ -1213,7 +1449,7 @@ class DeclarationBundler implements Disposable {
 
 		// Combine modules and collect exports
 		await this.yieldToEventLoop();
-		const code = await this.#combineModules(this.#sortModules(bundledModules, dtsEntryPoint), filteredSpecifiers, sharedModules, outputPath);
+		const code = await this.#combineModules(this.#sortModules(bundledModules, dtsEntryPoint), filteredSpecifiers, sharedModules, outputPath, entrySpecifiers, dtsEntryPoint);
 
 		// Post-process combined modules to fix any issues
 		// Tree-shaking is now done during combineModules

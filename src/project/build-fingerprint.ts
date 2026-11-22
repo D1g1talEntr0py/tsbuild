@@ -26,6 +26,7 @@ function buildFingerprint(buildConfig: ProjectBuildConfiguration, compilerOption
 		sourceMap: buildConfig.sourceMap,
 		banner: buildConfig.banner,
 		footer: buildConfig.footer,
+		external: (buildConfig.external ?? []).map(serializePattern),
 		noExternal: buildConfig.noExternal.map(serializePattern),
 		dtsResolve: buildConfig.dts.resolve,
 		dtsEntryPoints: buildConfig.dts.entryPoints,

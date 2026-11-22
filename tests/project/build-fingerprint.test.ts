@@ -23,18 +23,18 @@ function configuration(overrides: Partial<ProjectBuildConfiguration> = {}): Proj
 
 describe('buildFingerprint', () => {
 	it('preserves exact serialized bytes and field order', () => {
-		const config = configuration({ iife: { globalName: 'Library' }, sourceMap: 'external', banner: { js: 'banner', css: 'style' }, footer: { js: 'footer' }, noExternal: [ 'package', /^@scope\//gi ], dts: { resolve: true, entryPoints: [ 'second', 'first' ] }, env: { SECOND: '2', FIRST: '1' } });
-		expect(buildFingerprint(config, { declaration: true, emitDeclarationOnly: false })).toBe('{"minify":false,"iife":{"globalName":"Library"},"declaration":true,"emitDeclarationOnly":false,"bundle":true,"splitting":true,"format":"esm","target":"ES2022","platform":"node","sourceMap":"external","banner":{"js":"banner","css":"style"},"footer":{"js":"footer"},"noExternal":["package","/^@scope\\\\//gi"],"dtsResolve":true,"dtsEntryPoints":["second","first"],"env":{"SECOND":"2","FIRST":"1"}}');
+		const config = configuration({ iife: { globalName: 'Library' }, sourceMap: 'external', banner: { js: 'banner', css: 'style' }, footer: { js: 'footer' }, external: [ 'typescript', /^node:/ ], noExternal: [ 'package', /^@scope\//gi ], dts: { resolve: true, entryPoints: [ 'second', 'first' ] }, env: { SECOND: '2', FIRST: '1' } });
+		expect(buildFingerprint(config, { declaration: true, emitDeclarationOnly: false })).toBe('{"minify":false,"iife":{"globalName":"Library"},"declaration":true,"emitDeclarationOnly":false,"bundle":true,"splitting":true,"format":"esm","target":"ES2022","platform":"node","sourceMap":"external","banner":{"js":"banner","css":"style"},"footer":{"js":"footer"},"external":["typescript","/^node:/"],"noExternal":["package","/^@scope\\\\//gi"],"dtsResolve":true,"dtsEntryPoints":["second","first"],"env":{"SECOND":"2","FIRST":"1"}}');
 	});
 
 	it('omits undefined fields without changing the remaining order', () => {
-		expect(buildFingerprint(configuration(), {})).toBe('{"minify":false,"bundle":true,"splitting":true,"format":"esm","target":"ES2022","platform":"node","sourceMap":false,"noExternal":[],"dtsResolve":false}');
+		expect(buildFingerprint(configuration(), {})).toBe('{"minify":false,"bundle":true,"splitting":true,"format":"esm","target":"ES2022","platform":"node","sourceMap":false,"external":[],"noExternal":[],"dtsResolve":false}');
 	});
 
 	const changes: Partial<ProjectBuildConfiguration>[] = [
 		{ minify: true }, { iife: false }, { iife: { globalName: 'Library' } }, { bundle: false }, { splitting: false },
 		{ target: 'ESNext' }, { platform: 'browser' }, { sourceMap: 'inline' }, { banner: { js: 'banner' } },
-		{ footer: { css: 'footer' } }, { noExternal: [ /package/i ] }, { dts: { resolve: true } },
+		{ footer: { css: 'footer' } }, { external: [ 'package' ] }, { noExternal: [ /package/i ] }, { dts: { resolve: true } },
 		{ dts: { resolve: false, entryPoints: [] } }, { env: { VALUE: 'changed' } }
 	];
 
@@ -63,6 +63,13 @@ describe('buildFingerprint', () => {
 		expect(buildFingerprint(configuration({ noExternal: [ pattern ] }), {})).toBe(buildFingerprint(configuration({ noExternal: [ new RegExp('package', 'ig') ] }), {}));
 		expect(buildFingerprint(configuration({ noExternal: [ pattern ] }), {})).not.toBe(buildFingerprint(configuration({ noExternal: [ /package/g ] }), {}));
 		expect(buildFingerprint(configuration({ noExternal: [ pattern ] }), {})).not.toBe(buildFingerprint(configuration({ noExternal: [ /other/gi ] }), {}));
+	});
+
+	it('tracks external patterns, which change declaration output', () => {
+		expect(buildFingerprint(configuration({ external: [] }), {})).toBe(buildFingerprint(configuration(), {}));
+		expect(buildFingerprint(configuration({ external: [ 'typescript' ] }), {})).not.toBe(buildFingerprint(configuration({ external: [ 'esbuild' ] }), {}));
+		expect(buildFingerprint(configuration({ external: [ /^@scope\// ] }), {})).not.toBe(buildFingerprint(configuration({ external: [ /^@scope\//i ] }), {}));
+		expect(buildFingerprint(configuration({ external: [ 'package' ] }), {})).not.toBe(buildFingerprint(configuration({ noExternal: [ 'package' ] }), {}));
 	});
 
 	it('retains array and nested object insertion order', () => {
