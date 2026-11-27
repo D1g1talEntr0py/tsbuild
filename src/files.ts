@@ -8,6 +8,7 @@ import { LanguageVariant, SyntaxKind } from 'typescript/ast';
 import { createScanner } from 'typescript/ast/scanner';
 import type { WriteFileOptions } from 'node:fs';
 import type { AbsolutePath, Path, WrittenFile } from './@types';
+import { type TypeGuard, guard, TypeDefinition } from './type-definition';
 
 type ReplacementSpecifier = { start: number; end: number; content: string };
 type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView>;
@@ -42,6 +43,9 @@ export const isWrittenFiles = (data: unknown): data is WrittenFile[] => Array.is
  */
 export class Files {
 	private constructor() { throw new Error('Static class - no instantiation') }
+
+	/** Checks whether a value contains only valid written-file metadata. */
+	static isWrittenFiles: TypeGuard<WrittenFile[]> = TypeDefinition.typeGuardOfArray({ path: guard(Paths.isRelativePath), size: Number });
 
 	/**
 	 * Check if a file exists.

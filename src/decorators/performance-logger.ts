@@ -1,15 +1,15 @@
 import { TextFormat } from '../text-formatter';
 import { Logger } from '../logger';
-import { isWrittenFiles } from '../files';
+import { Files } from '../files';
 import { closeOnExit } from './close-on-exit';
 import { PerformanceObserver, performance, type PerformanceEntryList } from 'node:perf_hooks';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { BuildOutputStyle } from '../constants';
+import { BuildOutputStyle } from '../build-output-style';
 import { PerformancePhase } from '../performance-phase';
-import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction, BuildOutputStyle as BuildOutputStyleType, PerformanceSubStep } from '../@types';
+import type { PerformanceMeasureOptions, DetailedPerformanceEntry, Closable, WrittenFile, MethodFunction, PerformanceSubStep } from '../@types';
 
-type PhaseMeasurement = { duration: number; result?: WrittenFile[] };
-type BuildPerformanceContext = { measurements: Map<PerformancePhase, PhaseMeasurement>; outputStyle: BuildOutputStyleType; interactive: boolean };
+type PhaseMeasurement = { duration: number, result?: WrittenFile[] };
+type BuildPerformanceContext = { measurements: Map<PerformancePhase, PhaseMeasurement>, outputStyle: BuildOutputStyle, interactive: boolean };
 
 const type = 'measure';
 const groupedPhases = new Set<PerformancePhase>([ PerformancePhase.DECLARATIONS, PerformancePhase.TRANSPILE ]);
@@ -22,7 +22,7 @@ const buildPhaseMeasurements = new AsyncLocalStorage<BuildPerformanceContext>();
  * @param outputStyle - The configured build report style.
  * @param interactive - Whether the report may prompt for keyboard input (only while the process is kept alive, e.g. watch mode).
  */
-function setBuildOutputStyle(outputStyle: BuildOutputStyleType, interactive = false): void {
+function setBuildOutputStyle(outputStyle: BuildOutputStyle, interactive = false): void {
 	const buildContext = buildPhaseMeasurements.getStore();
 
 	if (buildContext !== undefined) {
@@ -61,35 +61,39 @@ class PerformanceLogger implements Closable {
 	 */
 	measure(phase: PerformancePhase, ...childPhases: PerformancePhase[]) {
 		const _measure = <R>(propertyKey: string, result: R, startTime: number, options: PerformanceMeasureOptions<R>, buildContext: BuildPerformanceContext | undefined): R => {
+			// Mark the start time of the performance measurement for the given property key
 			({ startTime: options.end } = performance.mark(propertyKey));
+
 			const duration = options.end - startTime;
 			const phaseMeasurements = buildContext?.measurements;
+
+			const phaseMapper = (phase: PerformancePhase): PerformanceSubStep[] => {
+				const measurement = phaseMeasurements?.get(phase);
+
+				return measurement === undefined ? [] : [{ name: phase, duration: PerformanceLogger.#formatDuration(measurement.duration), ms: Math.trunc(measurement.duration), result: measurement.result }];
+			}
 
 			if (phase === PerformancePhase.BUILD) {
 				if (phaseMeasurements !== undefined) {
 					options.detail.overheadMs = calculateOverhead(duration, phaseMeasurements);
 					options.detail.outputStyle = buildContext?.outputStyle ?? BuildOutputStyle.SUMMARY;
 					options.detail.interactive = buildContext?.interactive;
-					options.detail.phases = buildPhaseOrder.flatMap((phase): PerformanceSubStep[] => {
-						const measurement = phaseMeasurements.get(phase);
-
-						return measurement === undefined ? [] : [{ name: phase, duration: PerformanceLogger.#formatDuration(measurement.duration), ms: Math.trunc(measurement.duration), result: measurement.result }];
-					});
+					options.detail.phases = buildPhaseOrder.flatMap(phaseMapper);
 				}
 			} else {
-				const outputFiles = Array.isArray(result) && isWrittenFiles(result) ? result : undefined;
+				const outputFiles = Files.isWrittenFiles(result) ? result : undefined;
+
 				if (buildContext !== undefined && buildPhases.has(phase)) { options.detail.buildPhase = true }
+
 				phaseMeasurements?.set(phase, { duration, ...(outputFiles === undefined ? {} : { result: outputFiles }) });
 			}
 
 			if (childPhases.length > 0) {
-				options.detail.steps = childPhases.flatMap((phase) => {
-					const measurement = phaseMeasurements?.get(phase);
-					return measurement === undefined ? [] : [{ name: phase, duration: PerformanceLogger.#formatDuration(measurement.duration), ms: measurement.duration, result: measurement.result }];
-				});
+				options.detail.steps = childPhases.flatMap(phaseMapper);
 			} else {
 				options.detail.result = result;
 			}
+
 			performance.measure(propertyKey, options);
 
 			return result;
@@ -156,7 +160,7 @@ class PerformanceLogger implements Closable {
 				if (steps?.length) { Logger.subSteps(steps, phase === PerformancePhase.BUNDLE) }
 
 				// If there are result files, log them with tree formatting
-				if (Array.isArray(result) && isWrittenFiles(result) && result.length > 0) { Logger.success('', ...result) }
+				if (Files.isWrittenFiles(result) && result.length > 0) { Logger.success('', ...result) }
 			}
 
 			// Clear the marks and measures for this entry to avoid memory leaks

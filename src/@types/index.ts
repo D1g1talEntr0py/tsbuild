@@ -5,6 +5,7 @@ import type { CompilerOptions, Diagnostic, ProjectReference } from 'typescript/s
 import type { ScriptTarget } from 'typescript/ast';
 import type { PerformanceEntry, PerformanceMeasureOptions } from 'node:perf_hooks';
 import type { PerformancePhase } from '../performance-phase';
+import type { BuildOutputStyle } from '../build-output-style';
 declare global {
 	interface ImportMeta {
 		env?: { tsbuild_version?: string };
@@ -43,7 +44,6 @@ type Constructor<P extends unknown[] = unknown[], R = unknown> = new (...args: P
 interface Closable { close: () => void | Promise<void> };
 type ClosableConstructor = Constructor<any[], Closable>;
 
-type BuildOutputStyle = 'dashboard' | 'pipeline' | 'artifacts' | 'summary' | 'detailed';
 type PerformanceSubStep = { name: string; duration: string; ms: number; result?: WrittenFile[] };
 type PerformanceEntryDetail<T = unknown[]> = { phase: PerformancePhase, result?: T, steps?: PerformanceSubStep[], phases?: PerformanceSubStep[], outputStyle?: BuildOutputStyle, interactive?: boolean, buildPhase?: boolean, notes?: string[], overheadMs?: number };
 type DetailedPerformanceMeasureOptions<R> = Modify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
@@ -268,7 +268,6 @@ export type {
 	ClosableConstructor,
 	CompilerOptionOverrides,
 	PerformanceSubStep,
-	BuildOutputStyle,
 	PendingFileChange,
 	JsxRenderingMode,
 	FormatSupplier,

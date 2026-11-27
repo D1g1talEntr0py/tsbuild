@@ -7,8 +7,6 @@ import { PerformancePhase } from './performance-phase';
 const dataUnits = [ 'B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB' ] as const;
 const Package = { BUNDLE: 'bundle', EXTERNAL: 'external' } as const;
 const Platform = { NODE: 'node', BROWSER: 'browser', NEUTRAL: 'neutral' } as const;
-const BuildOutputStyle = { DASHBOARD: 'dashboard', PIPELINE: 'pipeline', ARTIFACTS: 'artifacts', SUMMARY: 'summary', DETAILED: 'detailed' } as const;
-type BuildOutputStyle = typeof BuildOutputStyle[keyof typeof BuildOutputStyle];
 const BuildMessageType = { ERROR: 'error', WARNING: 'warning' } as const;
 const DependencyEntryType = { DEPENDENCIES: 'dependencies', PEER_DEPENDENCIES: 'peerDependencies' } as const;
 const compilerOptionOverrides: CompilerOptionOverrides = {
@@ -112,7 +110,6 @@ export {
 	compilerOptionOverrides,
 	Package,
 	Platform,
-	BuildOutputStyle,
 	PerformancePhase,
 	BuildMessageType,
 	DependencyEntryType,

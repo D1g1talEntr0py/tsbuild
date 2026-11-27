@@ -1,8 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { isErrnoException } from './errors';
 import { lstat, realpath } from 'node:fs/promises';
-import { posix, dirname, basename, relative, resolve, join, type ParsedPath, parse } from 'node:path';
+import { posix, dirname, basename, relative, resolve, join, isAbsolute, type ParsedPath, parse } from 'node:path';
 import type { Path, AbsolutePath, RelativePath, ConditionalPath } from './@types';
+import type { TypeGuard } from './type-definition';
 
 type PathDescriptor = string | Path;
 
@@ -148,6 +149,9 @@ export class Paths {
 			throw error;
 		}
 	}
+
+	/** Determines if a value is a relative filesystem path. */
+	static isRelativePath: TypeGuard<RelativePath> = (value: unknown): value is RelativePath => typeof value === 'string' && !isAbsolute(value);
 
 	/**
 	 * Checks if a module specifier represents a local path (not a bare specifier).

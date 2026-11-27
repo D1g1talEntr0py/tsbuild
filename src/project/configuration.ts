@@ -6,8 +6,9 @@ import { Paths } from '../paths';
 import { Json } from '../json';
 import { Logger } from '../logger';
 import { ConfigurationError } from '../errors';
+import { BuildOutputStyle, buildOutputStyles, isBuildOutputStyle } from '../build-output-style';
 import { inferEntryPoints, normalizeEntryPoints, type PackageJson } from '../entry-points';
-import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, Platform, BuildOutputStyle } from '../constants';
+import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, Platform } from '../constants';
 import { diagnosticsHost } from './diagnostics';
 import type { API } from 'typescript/sync';
 import type { AbsolutePath, RelativePath, CommandLineOptions, TypeScriptOptions, TypeScriptConfiguration, ReadConfigResult, EntryPoints, JsonString, BuildConfiguration } from '../@types';
@@ -133,15 +134,13 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 	}
 
 	validateJsonTsbuildConfiguration(configResult.config.tsbuild);
-	const outputStyles = Object.values(BuildOutputStyle);
-	const isBuildOutputStyle = (value: unknown): value is BuildOutputStyle => outputStyles.some((style) => style === value);
 	if (outputStyle !== undefined && !isBuildOutputStyle(outputStyle)) {
-		throw new ConfigurationError(`Invalid value for "--outputStyle": ${String(outputStyle)}. Valid values: ${outputStyles.join(', ')}`);
+		throw new ConfigurationError(`Invalid value for "--outputStyle": ${String(outputStyle)}. Valid values: ${buildOutputStyles.join(', ')}`);
 	}
 
 	for (const outputStyle of [ configResult.config.tsbuild?.outputStyle, typeScriptOptions.tsbuild?.outputStyle ]) {
 		if (outputStyle !== undefined && !isBuildOutputStyle(outputStyle)) {
-			throw new ConfigurationError(`Invalid value for "tsbuild.outputStyle": ${String(outputStyle)}. Valid values: ${outputStyles.join(', ')}`);
+			throw new ConfigurationError(`Invalid value for "tsbuild.outputStyle": ${String(outputStyle)}. Valid values: ${buildOutputStyles.join(', ')}`);
 		}
 	}
 

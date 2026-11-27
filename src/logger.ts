@@ -1,12 +1,30 @@
 import { TextFormat } from './text-formatter';
 import { dataUnits, newLine, PerformancePhase } from './constants';
-import { isWrittenFiles } from './files';
-import type { BuildOutputStyle, LogEntryType, WrittenFile, PerformanceSubStep } from './@types';
+import { Files } from './files';
+import type { BuildOutputStyle } from './build-output-style';
+import type { LogEntryType, WrittenFile, PerformanceSubStep } from './@types';
 
 const LOG_1024 = Math.log(1024);
 const summaryOutputLimit = 15;
 // eslint-disable-next-line no-control-regex
 const ansiEscapePattern = /\x1b\[[0-9;]*m/g;
+
+/**
+ * Formats a phase name followed by its highlighted duration.
+ * @param item - The performance phase to format
+ */
+const formatPhaseTiming = (item: PerformanceSubStep) => `${item.name} ${TextFormat.cyan(item.duration)}`;
+
+type BuildReport = {
+	style: BuildOutputStyle;
+	duration: string;
+	durationMs: number;
+	overhead?: string;
+	overheadMs?: number;
+	phases: PerformanceSubStep[];
+	success: boolean;
+	interactive?: boolean;
+};
 
 /**
  * Colorizes a string based on the entry type.
@@ -157,7 +175,7 @@ export class Logger {
 	 * @param report - Build timings, generated files, status, and output style. `interactive` enables the "press M for more" prompt, which
 	 * never blocks and should only be requested when the process stays alive afterwards (watch mode).
 	 */
-	static buildReport(report: { style: BuildOutputStyle; duration: string; durationMs: number; overhead?: string; overheadMs?: number; phases: PerformanceSubStep[]; success: boolean; interactive?: boolean }): void {
+	static buildReport(report: BuildReport): void {
 		Logger.#outputsPrompt?.dismiss();
 		const { style, duration, overhead, phases, success } = report;
 		const phase = (name: string) => phases.find(item => item.name === name);
@@ -218,12 +236,12 @@ export class Logger {
 					}
 				}
 				console.log(`\n${TextFormat.bold('TIMING')}`);
-				console.log(`  ${topLevelPhases.map(item => `${item.name} ${TextFormat.cyan(item.duration)}`).join(TextFormat.dim('  ·  '))}`);
+				console.log(`  ${topLevelPhases.map(formatPhaseTiming).join(TextFormat.dim('  ·  '))}`);
 				break;
 			}
 			case 'summary': {
 				console.log(summaryLine);
-				console.log(`\n  ${topLevelPhases.map(item => `${item.name} ${TextFormat.cyan(item.duration)}`).join(` ${TextFormat.dim('→')} `)}`);
+				console.log(`\n  ${topLevelPhases.map(formatPhaseTiming).join(` ${TextFormat.dim('→')} `)}`);
 				const hiddenCount = outputFiles.length - summaryOutputLimit;
 				if (outputFiles.length) {
 					console.log(`\n${TextFormat.bold('Outputs')}`);
@@ -301,7 +319,7 @@ export class Logger {
 
 			console.log(`${TextFormat.dim(isLast ? '  └─' : '  ├─')} ${TextFormat.bold(name.padEnd(maxNameLength))} ${grouped ? TextFormat.dim(formattedDuration) : TextFormat.cyan(formattedDuration)}`);
 
-			if (Array.isArray(result) && isWrittenFiles(result) && result.length > 0) { Logger.#displayFileStatistics(result, isLast ? '     ' : '  │  ') }
+			if (Files.isWrittenFiles(result) && result.length > 0) { Logger.#displayFileStatistics(result, isLast ? '     ' : '  │  ') }
 		}
 	}
 
@@ -358,7 +376,7 @@ export class Logger {
 			Logger.#outputsPrompt.dismiss();
 		}
 		if (data.length) {
-			if (isWrittenFiles(data)) {
+			if (Files.isWrittenFiles(data)) {
 				// Only log the message if it's not empty
 				if (message) { console.log(colorize(type, message, true)) }
 				Logger.#displayFileStatistics(data);

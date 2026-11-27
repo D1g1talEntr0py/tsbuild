@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { colorize, prettyBytes, Logger } from 'src/logger';
-import { isWrittenFiles } from 'src/files';
+import { Files } from 'src/files';
 import { PerformancePhase } from 'src/constants';
 import type { WrittenFile, PerformanceSubStep, RelativePath } from 'src/@types';
 
@@ -18,14 +18,16 @@ describe('isWrittenFiles', () => {
 		['object missing path', [{ size: 100 }], false],
 		['object missing size', [{ path: 'a.js' }], false],
 		['object with wrong path type', [{ path: 42, size: 100 }], false],
+		['object with absolute path', [{ path: '/dist/a.js', size: 100 }], false],
 		['object with wrong size type', [{ path: 'a.js', size: '100' }], false],
+		['object with extra property', [{ path: 'a.js', size: 100, extra: true }], false],
 		['number', 42, false],
 		['object', { path: 'a.js', size: 100 }, false],
 		['null', null, false],
 	];
 
 	it.each(matrix)('returns correct result for %s', (_desc, data, expected) => {
-		expect(isWrittenFiles(data)).toBe(expected);
+		expect(Files.isWrittenFiles(data)).toBe(expected);
 	});
 });
 

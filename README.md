@@ -214,6 +214,9 @@ tsbuild --minify  # or -m
 # Build with watch mode
 tsbuild --watch  # or -w
 
+# Choose a build report layout
+tsbuild --outputStyle detailed
+
 # Type-check only (no bundling)
 tsbuild --noEmit  # or -n
 
@@ -227,7 +230,7 @@ tsbuild --help  # or -h
 tsbuild --version  # or -v
 ```
 
-> **Note**: `--watch` and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. Programmatic callers pass runtime options as the explicit options argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default. `--force`/`-f` and `--clearCache`/`-c` have been removed; non-watch builds always compile.
+> **Note**: `--watch` and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. `--outputStyle` accepts `dashboard`, `pipeline`, `artifacts`, `summary` (default), or `detailed`; it overrides `tsbuild.outputStyle` from `tsconfig.json`. Programmatic callers pass runtime options as the explicit options argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default. `--force`/`-f` and `--clearCache`/`-c` have been removed; non-watch builds always compile.
 
 ### Exit Codes
 
@@ -379,6 +382,7 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
   "tsbuild": {
     "platform": "node",          // Target platform: 'node' | 'browser' | 'neutral'
     "clean": true,               // Remove output directory contents before building (default: true)
+    "outputStyle": "summary",    // Build report: dashboard | pipeline | artifacts | summary | detailed
     "sourceMap": true,           // Generate source maps (boolean | 'inline' | 'external' | 'both')
     "splitting": true,           // Enable code splitting
     "bundle": true,              // Enable/disable bundling
@@ -397,7 +401,9 @@ By default, bare specifiers (e.g., `lodash`) are treated as external when `platf
 }
 ```
 
-**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--force`, `--watch`, and `--minify` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape. Putting them in `tsconfig.json` produces a configuration error with the matching CLI flag guidance.
+**Note:** All `compilerOptions` (including `target`, `outDir`, `module`, `strict`, `paths`, etc.) come from `tsconfig.json` and are not duplicated in the `tsbuild` section. `--watch` and `--minify` are runtime-only CLI/programmatic options and are not part of the `tsbuild` config shape. Putting them in `tsconfig.json` produces a configuration error with the matching CLI flag guidance.
+
+`outputStyle` controls the terminal build report and defaults to `"summary"` (design 4). Choose `"dashboard"` (1), `"pipeline"` (2), `"artifacts"` (3), or `"detailed"` (5) to use another layout. Summary output lists up to five files and notes how many were omitted; builds never wait for input. In watch mode in an interactive terminal, the note becomes a `Press M for more` prompt: press `M` to show the remaining files and repeat the build summary below them; any other key, or the next rebuild, dismisses it. Use `"detailed"` to list every output. The blue TypeScript header is shared by every style.
 
 ### Environment Variables
 
