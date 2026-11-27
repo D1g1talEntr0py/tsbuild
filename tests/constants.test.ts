@@ -6,7 +6,7 @@ import {
 	DependencyEntryType, sourceScriptExtensionExpression, typeScriptExtensionExpression,
 	processEnvExpansionPattern, inlineTypePattern, Encoding, defaultDirOptions,
 	defaultCleanOptions, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint,
-	defaultEntryFile, cacheDirectory, dtsCacheFile, dtsCacheVersion,
+	defaultEntryFile,
 	format, newLine, typeMatcher, FileExtension, toEsTarget, toJsxRenderingMode
 } from 'src/constants';
 
@@ -163,8 +163,6 @@ describe('constants', () => {
 			expect(defaultEntryPoint).toBe('index');
 			expect(defaultSourceDirectory).toBe('./src');
 			expect(defaultEntryFile).toBe('src/index.ts');
-			expect(cacheDirectory).toBe('.tsbuild');
-			expect(dtsCacheFile).toBe(`dts_cache.v${dtsCacheVersion}.br`);
 			expect(format).toBe('esm');
 			expect(newLine).toBe('\n');
 		});

@@ -9,7 +9,11 @@ measurement. Timings are single-host evidence, not service-level targets.
 Synthetic workloads and exact raw samples are retained in the local session
 evidence directory for the sprint.
 
-## Current architecture
+This is a historical cache-enabled baseline. tsbuild no longer keeps a
+cross-process input manifest or declaration cache; the no-op CLI timings below
+do not describe current non-watch builds.
+
+## Architecture during the measured sprint
 
 1. **Configuration and compilation.** The TypeScript API configures the
    project, checks inputs, and emits declarations to the in-memory

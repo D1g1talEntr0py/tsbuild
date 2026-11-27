@@ -1049,13 +1049,13 @@ describe('TypeScriptProject', () => {
 		});
 
 		it.each([
-			[ 'clearCache', true ],
-			[ 'force', true ]
-		])('rejects removed cache option %s as an unknown configuration key', async (option, value) => {
+			[ 'minify', true ],
+			[ 'watch', true ]
+		])('rejects tsconfig %s with CLI guidance', async (option, value) => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({ tsconfig: { tsbuild: { [option]: value } } });
 			cleanup = c;
 
-			expect(() => new TypeScriptProject(dir)).toThrow(`Unknown configuration key "tsbuild.${option}"`);
+			expect(() => new TypeScriptProject(dir)).toThrow(`Configuration option "tsbuild.${option}" is CLI-only; use the "--${option}" command-line option.`);
 		});
 
 		it('validates only the JSON source and preserves programmatic plugin objects', async () => {
