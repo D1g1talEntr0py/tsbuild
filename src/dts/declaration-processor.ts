@@ -36,12 +36,44 @@ import type { NameRange, PreProcessOutput } from './@types';
 
 const commaCharacter = 44;
 
-/**
- * Checks whether a node is a `declare global { }` augmentation, which declares no bundle-level name.
+/** Checks whether a node is a `declare global { }` augmentation, which declares no bundle-level name.
  * @param node The node to check.
  */
-function isGlobalAugmentation(node: Node): boolean {
-	return isModuleDeclaration(node) && node.keyword !== SyntaxKind.NamespaceKeyword && isIdentifier(node.name) && node.name.text === 'global';
+const isGlobalAugmentation = (node: Node) => isModuleDeclaration(node) && node.keyword !== SyntaxKind.NamespaceKeyword && isIdentifier(node.name) && node.name.text === 'global';
+
+/** Checks if there is a newline at the given position.
+ * @param node The node to check.
+ * @param position The position to check.
+ * @returns True if there is a newline at the given position, false otherwise.
+ */
+const newlineAt = (node: Node, position: number) => node.getSourceFile().getFullText()[position] === newLine;
+
+/** Gets the start position of a node.
+ * @param node The node to get the start position for.
+ * @returns The start position of the node.
+ */
+function getStart(node: Node) {
+	const start = node.getFullStart();
+	return start + (newlineAt(node, start) ? 1 : 0);
+}
+
+/** Gets the end position of a node.
+ * @param node The node to get the end position for.
+ * @returns The end position of the node.
+ */
+function getEnd(node: Node) {
+	const end = node.getEnd();
+	return end + (newlineAt(node, end) ? 1 : 0);
+}
+
+/** Creates a NameRange spanning the given statement.
+ * @param node The node to create the NameRange for.
+ * @param start The start position of the range. Defaults to the node's start.
+ * @param end The end position of the range. Defaults to the node's end.
+ * @returns The created NameRange.
+ */
+function createNameRange(node: Statement | VariableDeclaration, start: number = getStart(node), end: number = getEnd(node)) {
+	return [ start, end ] as NameRange;
 }
 
 /** Error thrown when encountering unsupported syntax during DTS processing */
@@ -52,8 +84,7 @@ export class UnsupportedSyntaxError extends BundleError {
 	}
 }
 
-/**
- * Processes TypeScript declaration files before and after bundling.
+/** Processes TypeScript declaration files before and after bundling.
  *
  * Pre-processing prepares individual declaration files for bundling by:
  * - Removing export/default modifiers and adding declare modifiers
@@ -71,8 +102,7 @@ export class UnsupportedSyntaxError extends BundleError {
 export class DeclarationProcessor {
 	private constructor() { throw new Error('DeclarationProcessor is a static class and cannot be instantiated.') }
 
-	/**
-	 * Pre-processes a declaration file before bundling.
+	/** Pre-processes a declaration file before bundling.
 	 *
 	 * The pre-process step has the following goals:
 	 * - Fixes the "modifiers", removing any `export` modifier and adding any missing `declare` modifier
@@ -103,36 +133,6 @@ export class DeclarationProcessor {
 		const nameRanges = new Map<string, NameRange[]>();
 
 		/**
-		 * Checks if there is a newline at the given position.
-		 * @param node The node to check.
-		 * @param pos The position to check.
-		 * @returns True if there is a newline at the given position, false otherwise.
-		 */
-		function newlineAt(node: Node, pos: number) {
-			return node.getSourceFile().getFullText()[pos] === newLine;
-		}
-
-		/**
-		 * Gets the start position of a node.
-		 * @param node The node to get the start position for.
-		 * @returns The start position of the node.
-		 */
-		function getStart(node: Node) {
-			const start = node.getFullStart();
-			return start + (newlineAt(node, start) ? 1 : 0);
-		}
-
-		/**
-		 * Gets the end position of a node.
-		 * @param node The node to get the end position for.
-		 * @returns The end position of the node.
-		 */
-		function getEnd(node: Node) {
-			const end = node.getEnd();
-			return end + (newlineAt(node, end) ? 1 : 0);
-		}
-
-		/**
 		 * Parses the reference directives from the source file and returns a Set of file names.
 		 * @param fileReferences The file references to parse.
 		 * @returns A Set of file names.
@@ -145,24 +145,15 @@ export class DeclarationProcessor {
 				referenceDirectives.add(fileName);
 
 				let end = fullText.indexOf(newLine, pos);
+
 				if (end === -1) { end = fullText.length }
+
 				if (code.slice(end, end + 1) === newLine) { end += 1 }
 
 				code.remove(lineStarts[sourceFile.getLineAndCharacterOfPosition(pos).line], end);
 			}
 
 			return referenceDirectives;
-		}
-
-		/**
-		 * Creates a NameRange spanning the given statement.
-		 * @param node The node to create the NameRange for.
-		 * @param start The start position of the range. Defaults to the node's start.
-		 * @param end The end position of the range. Defaults to the node's end.
-		 * @returns The created NameRange.
-		 */
-		function createNameRange(node: Statement | VariableDeclaration, start: number = getStart(node), end: number = getEnd(node)) {
-			return [ start, end ] as NameRange;
 		}
 
 		/**
@@ -173,9 +164,7 @@ export class DeclarationProcessor {
 			node.forEachChild(checkInlineImport);
 
 			if (isImportTypeNode(node)) {
-				if (!isLiteralTypeNode(node.argument) || !isStringLiteral(node.argument.literal)) {
-					throw new UnsupportedSyntaxError(node, 'inline imports should have a literal argument');
-				}
+				if (!isLiteralTypeNode(node.argument) || !isStringLiteral(node.argument.literal)) { throw new UnsupportedSyntaxError(node, 'inline imports should have a literal argument') }
 
 				const children = node.getChildren();
 				const token = children.find(({ kind }) => kind === SyntaxKind.DotToken || kind === SyntaxKind.LessThanToken);
@@ -195,12 +184,13 @@ export class DeclarationProcessor {
 			if (importName === undefined) {
 				// Replace non-identifier characters with underscores (faster than regex)
 				const chars: string[] = [];
-				for (let i = 0; i < fileId.length; i++) {
+				for (let i = 0, length = fileId.length; i < length; i++) {
 					const char = fileId[i];
 					const code = char.charCodeAt(0);
 					// a-z: 97-122, A-Z: 65-90, 0-9: 48-57, _: 95, $: 36
 					chars.push((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36 ? char : '_');
 				}
+
 				importName = generateUniqueName(chars.join(''));
 				inlineImports.set(fileId, importName);
 			}
@@ -259,13 +249,10 @@ export class DeclarationProcessor {
 
 			const needsDeclare = isEnumDeclaration(node) || isClassDeclaration(node) || isFunctionDeclaration(node) || isModuleDeclaration(node) || isVariableStatement(node);
 
-			if (needsDeclare && !hasDeclare) {
-				code.appendRight(node.getStart(), 'declare ');
-			}
+			if (needsDeclare && !hasDeclare) { code.appendRight(node.getStart(), 'declare ') }
 		}
 
-		/**
-		 * Duplicates the exports of a namespace module declaration.
+		/** Duplicates the exports of a namespace module declaration.
 		 * @param module The module declaration to process.
 		 */
 		function duplicateExports(module: ModuleDeclaration) {
@@ -274,16 +261,13 @@ export class DeclarationProcessor {
 			for (const node of module.body.statements) {
 				if (isExportDeclaration(node) && node.exportClause && !isNamespaceExport(node.exportClause)) {
 					for (const { name, propertyName } of node.exportClause.elements) {
-						if (propertyName === undefined) {
-							code.appendLeft(name.getEnd(), ` as ${name.getText()}`);
-						}
+						if (propertyName === undefined) { code.appendLeft(name.getEnd(), ` as ${name.getText()}`) }
 					}
 				}
 			}
 		}
 
-		/**
-		 * Gets the length of the whitespace starting at the given position.
+		/** Gets the length of the whitespace starting at the given position.
 		 * @param start The start position to check for whitespace.
 		 * @param end The maximum end position.
 		 * @returns The length of the whitespace.
@@ -298,6 +282,7 @@ export class DeclarationProcessor {
 					break;
 				}
 			}
+
 			return length;
 		}
 
@@ -338,9 +323,7 @@ export class DeclarationProcessor {
 						exportedNames.add(name);
 					}
 
-					if (!isGlobalAugmentation(node)) {
-						pushNamedNode(name, createNameRange(node));
-					}
+					if (!isGlobalAugmentation(node)) { pushNamedNode(name, createNameRange(node)) }
 				}
 
 				// duplicate exports of namespaces
@@ -372,15 +355,15 @@ export class DeclarationProcessor {
 				// collect the ranges for re-ordering
 				if (declarations.length === 1) {
 					const [{ name }] = declarations;
-					if (isIdentifier(name)) {
-						pushNamedNode(name.getText(), createNameRange(node));
-					}
+					if (isIdentifier(name)) { pushNamedNode(name.getText(), createNameRange(node)) }
 				} else {
 					// we do reordering after splitting
-					const decls = declarations.slice();
-					const first = decls.shift()!;
+					const copiedDeclarations = declarations.slice();
+					const first = copiedDeclarations.shift()!;
 					pushNamedNode(first.name.getText(), createNameRange(first, first.getFullStart(), first.getEnd()));
-					for (const declaration of decls) {
+
+					// process the remaining declarations after the first one
+					for (const declaration of copiedDeclarations) {
 						if (isIdentifier(declaration.name)) {
 							pushNamedNode(declaration.name.getText(), createNameRange(declaration, declaration.getFullStart(), declaration.getEnd()));
 						}
@@ -394,23 +377,25 @@ export class DeclarationProcessor {
 				// Walk declarations directly via AST instead of token-level getChildren() (~2x faster).
 				// Find each comma between consecutive declarations by scanning source text.
 				const sourceText = sourceFile.text;
-				for (let i = 1; i < declarations.length; i++) {
-					const prev = declarations[i - 1];
-					const curr = declarations[i];
+				for (let i = 1, length = declarations.length; i < length; i++) {
+					const currentDeclaration = declarations[i];
 
 					// Find comma token between prev.end and curr.getStart()
 					let commaPos = -1;
-					const limit = curr.getStart();
-					for (let p = prev.end; p < limit; p++) {
-						if (sourceText.charCodeAt(p) === commaCharacter /* , */) { commaPos = p; break }
+					for (let p = declarations[i - 1].end, limit = currentDeclaration.getStart(); p < limit; p++) {
+						if (sourceText.charCodeAt(p) === commaCharacter) {
+							commaPos = p;
+							break;
+						}
 					}
+
 					if (commaPos === -1) { continue }
 
 					code.remove(commaPos, commaPos + 1);
 					code.appendLeft(commaPos, `;${newLine}`);
 
-					const start = curr.getFullStart();
-					const slice = sourceText.substring(start, curr.getStart());
+					const start = currentDeclaration.getFullStart();
+					const slice = sourceText.substring(start, currentDeclaration.getStart());
 					const whitespace = slice.length - slice.trimStart().length;
 
 					if (whitespace) {
@@ -463,15 +448,13 @@ export class DeclarationProcessor {
 		// render all the inline imports, and all the exports
 		if (defaultExport !== '') { code.append(`${newLine}export default ${defaultExport};${newLine}`) }
 
+		// remove all explicitly exported names from the set of exported names to avoid duplicate exports
 		for (const name of explicitExports) { exportedNames.delete(name) }
 
-		if (exportedNames.size) {
-			code.append(`${newLine}export { ${[...exportedNames].join(', ')} };${newLine}`);
-		}
+		if (exportedNames.size) { code.append(`${newLine}export { ${[...exportedNames].join(', ')} };${newLine}`) }
 
-		for (const [ fileId, importName ] of inlineImports.entries()) {
-			code.prepend(`import * as ${importName} from "${fileId}";${newLine}`);
-		}
+		// prepend all inline imports at the top of the file
+		for (const [ fileId, importName ] of inlineImports.entries()) { code.prepend(`import * as ${importName} from "${fileId}";${newLine}`) }
 
 		// and collect/remove all the typeReferenceDirectives
 		const typeReferences = parseReferenceDirectives(sourceFile.typeReferenceDirectives);
@@ -482,25 +465,21 @@ export class DeclarationProcessor {
 		return { code: code.toString(), typeReferences, fileReferences };
 	}
 
-	/**
-	 * Check if a TypeScript declaration has specific modifier flags
+	/** Check if a TypeScript declaration has specific modifier flags
 	 * @param node - The TypeScript declaration node
 	 * @param flags - The modifier flags to check for
 	 * @returns True if the node has all the specified flags
 	 */
 	static #matchesModifier = (node: Declaration, flags: ModifierFlags): boolean => (getCombinedModifierFlags(node) & flags) === flags;
 
-	/**
-	 * Post-processes a bundled declaration file to clean up bundling artifacts.
-	 *
+	/** Post-processes a bundled declaration file to clean up bundling artifacts.
 	 * @param sourceFile The source file to process
 	 * @returns The processed source code
 	 */
 	static postProcess(sourceFile: SourceFile): string {
 		const magic = new MagicString(sourceFile.getFullText());
 
-		/**
-		 * Visit a node and apply code transformations using MagicString for O(1) edits.
+		/** Visit a node and apply code transformations using MagicString for O(1) edits.
 		 * Handles empty statements, import/export path fixes, and redundant namespace export elements.
 		 * @param node The AST node to visit
 		 */

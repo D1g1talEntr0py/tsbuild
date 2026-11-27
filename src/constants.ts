@@ -1,7 +1,7 @@
 import { JsxEmit } from 'typescript/sync';
 import { ScriptTarget } from 'typescript/ast';
-import type { CompilerOptionOverrides, EsTarget, JsxRenderingMode, RelativePath } from './@types';
 import { PerformancePhase } from './performance-phase';
+import type { CompilerOptionOverrides, EsTarget, JsxRenderingMode, RelativePath } from './@types';
 
 /** Build system constants and configurations */
 const dataUnits = [ 'B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB' ] as const;
@@ -60,7 +60,6 @@ const toEsTarget: (target?: ScriptTarget) => EsTarget = (target: ScriptTarget = 
 
 /** Returns undefined for any input, useful for defaulting optional values. */
 const alwaysUndefined = () => undefined;
-
 
 /**
  * Converts TypeScript's JsxEmit enum to an esbuild-compatible jsx string.

@@ -6,6 +6,7 @@ import type { ScriptTarget } from 'typescript/ast';
 import type { PerformanceEntry, PerformanceMeasureOptions } from 'node:perf_hooks';
 import type { PerformancePhase } from '../performance-phase';
 import type { BuildOutputStyle } from '../build-output-style';
+
 declare global {
 	interface ImportMeta {
 		env?: { tsbuild_version?: string };
@@ -45,6 +46,7 @@ type ClosableConstructor = Constructor<any[], Closable>;
 type PerformanceSubStep = { name: string; duration: string; ms: number; result?: WrittenFile[] };
 type PerformanceEntryDetail<T = unknown[]> = { phase: PerformancePhase, result?: T, steps?: PerformanceSubStep[], phases?: PerformanceSubStep[], outputStyle?: BuildOutputStyle, interactive?: boolean, buildPhase?: boolean, notes?: string[], overheadMs?: number };
 type DetailedPerformanceMeasureOptions<R> = Modify<PerformanceMeasureOptions, { detail: PerformanceEntryDetail<R> }>;
+
 interface DetailedPerformanceEntry<D> extends PerformanceEntry {
 	detail: PerformanceEntryDetail<D>
 };
@@ -80,6 +82,7 @@ interface Branded<Tag> {
 type Brand<BaseType, Tag> = BaseType & Branded<Tag>;
 
 // Branded path types for type safety without runtime overhead
+
 /** An absolute file system path (e.g., `/home/user/project`) */
 type AbsolutePath = Brand<string, 'AbsolutePath'>;
 

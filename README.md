@@ -355,9 +355,11 @@ If nothing can be inferred, bundled builds fall back to `./src/index.ts` and unb
 }
 ```
 
-Each entry point gets its own `.d.ts`. When one entry imports or re-exports another entry that also gets a `.d.ts` (through a relative path or a `paths` alias), the declaration bundle imports it from that entry's output (for example `import { Client } from "./client.js"`) instead of inlining a copy. Classes therefore keep one identity across entry points, which matters for classes with private members. Modules that are not entry points are still inlined into every bundle that uses them.
+The `resolve` option controls whether to bundle external types from `node_modules` into your declaration files. When `false` (default for Node.js), external imports remain as import statements. When `true`, the bundler attempts to inline external types. External imports keep their import attributes (e.g. `with { "resolution-mode": "import" }`), and imports of the same module with different attributes are not merged.
 
-The `resolve` option controls whether to bundle external types from `node_modules` into your declaration files. When `false` (default for Node.js), external imports remain as import statements. When `true`, the bundler attempts to inline external types. This defaults to:
+Re-exports of bundled modules keep the exports tsc generated. `export * from` re-exports every binding except `default`. Explicit exports take precedence. A name that several star exports bind differently is ambiguous and is left out. `export type *` keeps those bindings type-only. `export * as ns from` becomes a `declare namespace` that includes `default`, and is exported under its original name.
+
+This defaults to:
 - `false` for `platform: "node"` (recommended for Node.js projects - keeps external types as imports)
 - `true` for `platform: "browser"` and `platform: "neutral"` (bundles everything for standalone distribution)
 
@@ -567,7 +569,7 @@ The declaration bundling system (`src/dts/declaration-bundler.ts`) is a custom i
 
 1. **Module Graph Building** - Traverses import/export statements to build dependency graph using TypeScript's module resolution
 2. **Dependency Sorting** - Topologically sorts modules to ensure correct declaration order
-3. **Code Combination** - Strips imports/exports while preserving external references and imports of other entry points' bundled output
+3. **Code Combination** - Strips imports/exports while preserving external references
 4. **Pre/Post Processing** (`declaration-processor.ts`) - Cleans up directives, splits declarations, fixes modifiers, normalizes exports
 5. **Shared Modules** - A module used by several entry points is emitted once: an entry point stays in its own `.d.ts` and other entries import from it, while any other shared module is written at its mirrored source path (e.g. `src/@types/index.ts` → `dist/@types/index.d.ts`)
 
@@ -662,6 +664,10 @@ pnpm bench:dts
 # Runtime/build profiling, including 200 high-complexity type-checking modules
 pnpm perf:profile
 ```
+
+The declaration benchmark reports missing types, structural/type inconsistencies,
+duplicate declarations, broken references, and shared type identity across entry
+points. See [declaration comparison methodology](docs/performance-baseline.md#bundler-declaration-comparison).
 
 ### Self-hosting
 

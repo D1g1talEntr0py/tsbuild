@@ -48,12 +48,23 @@ const entryImportModeRank: Readonly<Record<EntryImportMode, number>> = { value: 
 const queueImmediateTask = (resolve: (value: void | PromiseLike<void>) => void) => void setImmediate(resolve);
 
 /**
+ * Returns whether a code block has any content
+ * @param block - The code block to check
+ */
+const isNonEmptyString = (block: string) => block.length > 0;
+
+/**
+ * Maps a type reference to a triple-slash directive.
+ * @param reference - The type reference to map
+ * @returns Triple-slash directive string for the type reference
+ */
+const typeReferenceMapper = (reference: string) => `/// <reference types="${reference}" />`;
+
+/**
  * Import/export module specifiers are always string literals in parsed declaration files.
  * @param moduleSpecifier - The module specifier expression node from an import/export declaration
  */
-function moduleSpecifierText(moduleSpecifier: Node) {
-	return (moduleSpecifier as StringLiteral).text;
-}
+const moduleSpecifierText = (moduleSpecifier: Node) => (moduleSpecifier as StringLiteral).text;
 
 /**
  * Computes the relative module specifier from one path to another.
@@ -61,7 +72,7 @@ function moduleSpecifierText(moduleSpecifier: Node) {
  * @param fromPath - The path of the importing module
  * @param toPath - The path of the target module
  */
-function relativeModuleSpecifier(fromPath: string, toPath: string) {
+function relativeModuleSpecifier(fromPath: AbsolutePath, toPath: AbsolutePath) {
 	// Posix is used to ensure consistent path separators across platforms for module specifiers.
 	const specifier = Paths.Posix.relative(Paths.Posix.directoryName(fromPath), toPath);
 
@@ -88,6 +99,7 @@ function mergeImports(imports: ExternalImport[]) {
 
 		const key = `${imp.isType ? 'type:' : ''}${imp.specifier}${imp.attributes === undefined ? '' : ` ${imp.attributes}`}`;
 		let entry = merged.get(key);
+
 		if (entry === undefined) {
 			entry = { specifier: imp.specifier, isType: imp.isType, names: new Set(), attributes: imp.attributes };
 			merged.set(key, entry);
@@ -97,6 +109,7 @@ function mergeImports(imports: ExternalImport[]) {
 	}
 
 	const result: string[] = [];
+
 	for (const { specifier, isType, names, attributes } of merged.values()) {
 		result.push(`${isType ? 'import type' : 'import'} { ${Array.from(names).sort().join(', ')} } from "${specifier}"${attributes === undefined ? '' : ` ${attributes}`};`);
 	}
@@ -311,15 +324,9 @@ class DeclarationBundler implements Disposable {
 		const entries = new Map<string, string>();
 
 		for (const [ entryName, { entryPoint, outputPath, graph } ] of graphs) {
-			let externalModules: ReadonlyMap<AbsolutePath, AbsolutePath> = sharedModules;
+			const entrySharedModules: ReadonlyMap<AbsolutePath, AbsolutePath> = sharedModules.has(entryPoint) ? new Map(Array.from(sharedModules).filter(([ path ]) => path !== entryPoint)) : sharedModules;
 
-			if (sharedModules.has(entryPoint)) {
-				const withoutEntry = new Map(sharedModules);
-				withoutEntry.delete(entryPoint);
-				externalModules = withoutEntry;
-			}
-
-			entries.set(entryName, await this.#bundleGraph(graph, entryPoint, externalModules, outputPath));
+			entries.set(entryName, await this.#bundleGraph(graph, entryPoint, entrySharedModules, outputPath));
 		}
 
 		const sharedFiles = new Map<AbsolutePath, string>();
@@ -341,7 +348,7 @@ class DeclarationBundler implements Disposable {
 
 					return `/// <reference path="${sharedOutputPath === undefined ? reference : relativeModuleSpecifier(outputPath, sharedOutputPath)}" />`;
 				}),
-				...[ ...declaration.typeReferences ].map((reference) => `/// <reference types="${reference}" />`)
+				...[ ...declaration.typeReferences ].map(typeReferenceMapper)
 			];
 
 			const code = new MagicString(declaration.code);
@@ -448,7 +455,7 @@ class DeclarationBundler implements Disposable {
 	 * @param fileName - Declaration file path
 	 * @param text - Declaration source text
 	 */
-	#parse(fileName: string, text: string): SourceFile {
+	#parse(fileName: AbsolutePath, text: string): SourceFile {
 		using retained = this.#options.api.createSourceFile(fileName, text);
 
 		return retained.sourceFile;
@@ -551,7 +558,7 @@ class DeclarationBundler implements Disposable {
 	 * @param containingFile - The file containing the imports
 	 * @returns Resolved file paths (or undefined) in specifier order
 	 */
-	#resolveModules(specifiers: readonly string[], containingFile: string) {
+	#resolveModules(specifiers: readonly string[], containingFile: AbsolutePath) {
 		const containingDirectory = Paths.directoryName(containingFile);
 		const cacheKey = (specifier: string) => `${specifier}|${containingDirectory}`;
 		const unresolved = specifiers.filter((specifier) => !this.#moduleResolutionCache.has(cacheKey(specifier)));
@@ -743,7 +750,7 @@ class DeclarationBundler implements Disposable {
 	 * @param dependencyExports - Export bindings collected from dependencies already processed
 	 * @returns Object with processed code, collected external imports, and exported names (separated by type/value)
 	 */
-	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: string, dependencyExports: ReadonlyMap<string, ReadonlyMap<string, ExportedName>>, sharedModules: ReadonlyMap<string, AbsolutePath>, bundleOutputPath: AbsolutePath, entryReferences: EntryReferences): DeclarationCode {
+	#stripImportsExports(code: string, sourceFile: SourceFile, identifiers: IdentifierMap, bundledImportPaths: ReadonlySet<string>, renameMap: Map<string, string>, modulePath: AbsolutePath, dependencyExports: ReadonlyMap<AbsolutePath, ReadonlyMap<string, ExportedName>>, sharedModules: ReadonlyMap<AbsolutePath, AbsolutePath>, bundleOutputPath: AbsolutePath, entryReferences: EntryReferences): DeclarationCode {
 		const externalImports: ExternalImport[] = [];
 		const typeExports: ExportedName[] = [];
 		const valueExports: ExportedName[] = [];
@@ -1058,12 +1065,12 @@ class DeclarationBundler implements Disposable {
 	async #buildModuleGraph(entryPoint: AbsolutePath, entryName: string): Promise<ModuleDependencyGraph> {
 		// Normalized paths, so the same file is never visited twice with different path representations
 		let frontier: AbsolutePath[] = [ Paths.absolute(entryPoint) ];
-		const visited = new Set<string>(frontier);
+		const visited = new Set<AbsolutePath>(frontier);
 		const modules = new Map<AbsolutePath, ModuleInfo>();
 		// Maps module path to bundled import specifiers
-		const bundledSpecifiers = new Map<string, Set<string>>();
+		const bundledSpecifiers = new Map<AbsolutePath, Set<string>>();
 		// Maps each module's source specifiers to other entry outputs
-		const entrySpecifiers = new Map<string, Map<string, string>>();
+		const entrySpecifiers = new Map<AbsolutePath, Map<string, string>>();
 
 		while (frontier.length > 0) {
 			await this.#parseDeclarations(frontier);
@@ -1171,7 +1178,7 @@ class DeclarationBundler implements Disposable {
 	 * @param bundleOutputPath - Output directory for the bundled declarations
 	 * @returns Object containing combined code, all exported identifiers, and all declarations from bundled modules
 	 */
-	async #combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>, sharedModules: ReadonlyMap<string, AbsolutePath>, bundleOutputPath: AbsolutePath, entrySpecifiers: ReadonlyMap<string, ReadonlyMap<string, string>>, entryModulePath: AbsolutePath) {
+	async #combineModules(sortedModules: ModuleInfo[], bundledSpecifiers: ReadonlyMap<AbsolutePath, ReadonlySet<string>>, sharedModules: ReadonlyMap<AbsolutePath, AbsolutePath>, bundleOutputPath: AbsolutePath, entrySpecifiers: ReadonlyMap<AbsolutePath, ReadonlyMap<string, string>>, entryModulePath: AbsolutePath) {
 		// Identifiers unavailable for synthesized namespaces; built only when a bundled `export * as` needs one
 		let reservedNames: Set<string> | undefined;
 		const separator  = newLine + newLine;
@@ -1181,14 +1188,13 @@ class DeclarationBundler implements Disposable {
 		const allExternalImports: ExternalImport[] = [];
 		const valueExports = new Map<string, ExportedName>();
 		const typeExports = new Map<string, ExportedName>();
-		const moduleExports = new Map<string, Map<string, ExportedName>>();
+		const moduleExports = new Map<AbsolutePath, Map<string, ExportedName>>();
 		const codeBlocks: string[] = [];
 		// Track declarations per module to detect conflicts and rename
-		const declarationSources = new Map<string, Set<string>>(); // identifier -> Set of module paths
+		const declarationSources = new Map<string, Set<AbsolutePath>>(); // identifier -> Set of module paths
 		const renameMap = new Map<string, string>(); // original name + module -> renamed identifier
-		const namespaceBlockPredicate = (block: string) => block.length > 0;
 		const entryBindings = new Map<string, Map<string, EntryImportBinding>>();
-		const moduleEntryReferences = new Map<string, EntryReferences>();
+		const moduleEntryReferences = new Map<AbsolutePath, EntryReferences>();
 
 		const shareBinding = (binding: EntryImportBinding) => {
 			let bindingsForName = entryBindings.get(binding.localName);
@@ -1330,7 +1336,7 @@ class DeclarationBundler implements Disposable {
 			}
 
 			// Skip modules that only contain imports/exports (pure re-export files)
-			const moduleCode = [ strippedCode.trim(), ...namespaceBlocks ].filter(namespaceBlockPredicate).join(separator);
+			const moduleCode = [ strippedCode.trim(), ...namespaceBlocks ].filter(isNonEmptyString).join(separator);
 
 			if (moduleCode.length > 0) { codeBlocks.push(moduleCode) }
 		}
@@ -1345,7 +1351,10 @@ class DeclarationBundler implements Disposable {
 
 		// Value exports take precedence — strip any types that are also values
 		const finalValueExports = Array.from(valueExports.values());
-		const finalTypeExports = Array.from(typeExports.values()).filter(({ exportedName }) => !valueExports.has(exportedName));
+		const finalTypeExports: ExportedName[] = [];
+		for (const typeExport of typeExports.values()) {
+			if (!valueExports.has(typeExport.exportedName)) { finalTypeExports.push(typeExport) }
+		}
 
 		// Build output using array for better performance than string concatenation
 		const outputParts: string[] = [];
@@ -1402,10 +1411,10 @@ class DeclarationBundler implements Disposable {
 	 * @param outputPath The output path for the bundled declaration file
 	 * @returns The post-processed source file
 	 */
-	async #bundleGraph(graph: ModuleDependencyGraph, dtsEntryPoint: AbsolutePath, sharedModules: ReadonlyMap<string, AbsolutePath>, outputPath: AbsolutePath) {
+	async #bundleGraph(graph: ModuleDependencyGraph, dtsEntryPoint: AbsolutePath, sharedModules: ReadonlyMap<AbsolutePath, AbsolutePath>, outputPath: AbsolutePath) {
 		const { modules, bundledSpecifiers, entrySpecifiers } = graph;
 		const bundledModules = new Map<AbsolutePath, ModuleInfo>();
-		const filteredSpecifiers = new Map<string, ReadonlySet<string>>();
+		const filteredSpecifiers = new Map<AbsolutePath, ReadonlySet<string>>();
 
 		for (const [ path, module ] of modules) {
 			if (sharedModules.has(path)) { continue }

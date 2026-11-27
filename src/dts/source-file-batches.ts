@@ -1,11 +1,9 @@
 import type { SourceFile } from 'typescript/ast';
 import type { API, RetainedSourceFile } from 'typescript/sync';
+import type { SourceText } from './@types';
 
 /** Maximum number of source files created, or released, per batched TypeScript API round trip. */
 export const sourceFileBatchSize = 32;
-
-/** A source file name paired with the text to parse. */
-export type SourceText = readonly [ fileName: string, text: string ];
 
 /** Outcome of one request generator executed inside a batch. */
 type Settled<T> = { readonly ok: true, readonly value: T } | { readonly ok: false, readonly error: unknown };
@@ -16,9 +14,7 @@ type Settled<T> = { readonly ok: true, readonly value: T } | { readonly ok: fals
  * @param request - The request generator to settle
  */
 function* settle<T, Yield, Next>(request: Generator<Yield, T, Next>): Generator<Yield, Settled<T>, Next> {
-	try { return { ok: true, value: yield* request } } catch (error) {
-		return { ok: false, error };
-	}
+	try { return { ok: true, value: yield* request } } catch (error) { return { ok: false, error } }
 }
 
 /**

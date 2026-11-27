@@ -4,8 +4,10 @@ import { DeclarationProcessor } from './dts/declaration-processor';
 import { ConfigurationError } from './errors';
 import { parseSourceFiles } from './dts/source-file-batches';
 import type { API } from 'typescript/sync';
-import type { SourceText } from './dts/source-file-batches';
+import type { SourceText } from './dts/@types';
 import type { AbsolutePath, CachedDeclaration, Closable, WrittenFile } from './@types';
+
+type WriteEntry = { path: AbsolutePath; data: string; size: number };
 
 const localFileIdentifier = /\.[a-z]+$/i;
 const relativeSpecifierPattern = /((?:from|import)\s*['"])(\.\.?\/[^'"]*?)(['"])/g;
@@ -21,21 +23,17 @@ function rewriteRelativeSpecifiers(code: string): string {
 }
 
 /**
- * Manages in-memory storage and preprocessing of TypeScript declaration output.
+ * Manages in-memory storage and caching of TypeScript declaration output.
  *
  * This class provides a clean separation of concerns:
  * - In-memory storage of pre-processed declaration files
+ * - In-memory reuse of pre-processed declarations across watch rebuilds
  * - Disk I/O for writing declaration files
  * - Entry point resolution for declaration bundling
  *
  * Emitted declarations arrive as plain text from {@link CompilationContext.compile} and are pre-processed in {@link FileManager.ingest}.
  * Declarations whose text is unchanged since the previous ingest reuse their pre-processed result.
  *
- * @example
- * ```typescript
- * const manager = new FileManager(api);
- * manager.ingest(context.compile().declarations);
- * ```
  */
 export class FileManager implements Closable {
 	readonly #declarationFiles = new Map<AbsolutePath, CachedDeclaration>();
@@ -61,8 +59,10 @@ export class FileManager implements Closable {
 		const reused = new Map<AbsolutePath, CachedDeclaration>();
 		const changed: SourceText[] = [];
 
+		// Determine which declarations can be reused and which have changed
 		for (const [ path, text ] of declarations) {
 			const cached = this.#declarationFiles.get(path);
+
 			if (cached !== undefined && this.#emittedText.get(path) === text) {
 				reused.set(path, cached);
 			} else {
@@ -71,13 +71,16 @@ export class FileManager implements Closable {
 		}
 
 		// Parse changed declarations in bounded batches; stored state is only replaced once every declaration was processed
-		const processed = parseSourceFiles(this.#api, changed, (sourceFile) => DeclarationProcessor.preProcess(sourceFile));
+		const processed = parseSourceFiles(this.#api, changed, DeclarationProcessor.preProcess);
 
 		this.#declarationFiles.clear();
 
 		let index = 0;
+
+		// Iterate over all declarations, reusing cached ones and storing newly processed results
 		for (const [ path, text ] of declarations) {
 			const cached = reused.get(path);
+
 			if (cached !== undefined) {
 				this.#declarationFiles.set(path, cached);
 				continue;
@@ -86,6 +89,7 @@ export class FileManager implements Closable {
 			this.#emittedText.set(path, text);
 
 			const result = processed[index++];
+
 			// Skip declarations with no meaningful content (e.g. CLI entry points with no exports)
 			if (result.code.length > 0) { this.#declarationFiles.set(path, result) }
 		}
@@ -116,12 +120,13 @@ export class FileManager implements Closable {
 	async writeFiles(projectDirectory: AbsolutePath): Promise<WrittenFile[]> {
 		if (this.#declarationFiles.size === 0) { return [] }
 
-		const writeEntries: Array<{ path: AbsolutePath; data: string; size: number }> = [];
-		for (const [ filePath, { code } ] of this.#declarationFiles) {
+		const writeEntries: WriteEntry[] = [];
+
+		for (const [ path, { code } ] of this.#declarationFiles) {
 			// Skip writing empty declaration files
 			if (code.length > 0) {
-				const rewritten = rewriteRelativeSpecifiers(code);
-				writeEntries.push({ path: filePath, data: rewritten, size: rewritten.length });
+				const data = rewriteRelativeSpecifiers(code);
+				writeEntries.push({ path, data, size: data.length });
 			}
 		}
 
@@ -169,7 +174,6 @@ export class FileManager implements Closable {
 		this.#declarationFiles.clear();
 		this.#emittedText.clear();
 	}
-
 
 	/**
 	 * Custom inspection method for better type representation.

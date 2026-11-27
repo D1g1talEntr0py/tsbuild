@@ -6,6 +6,8 @@ declare const NameRangeBrand: unique symbol;
 type NameRange = Brand<[start: number, end: number], typeof NameRangeBrand>;
 
 type SourceDeclaration = { text: string; sourceFile: SourceFile };
+/** A source file name paired with the text to parse. */
+type SourceText = readonly [ fileName: AbsolutePath, text: string ];
 
 /** Minimal compiler options needed for DTS bundling - only what's required for module resolution and path remapping */
 type DtsCompilerOptions = {
@@ -17,14 +19,14 @@ type DtsCompilerOptions = {
 	outDir: AbsolutePath;
 	moduleResolution?: ModuleResolutionKind;
 	/** Path of the tsconfig, used to anchor relative `paths` when no `baseUrl` is set */
-	configFilePath?: string;
+	configFilePath?: AbsolutePath;
 };
 
 type DtsBundleOptions = {
 	/** TypeScript API used for parsing and module resolution (owned by the caller) */
 	api: API;
 	currentDirectory: AbsolutePath;
-	declarationFiles: ReadonlyMap<string, CachedDeclaration>;
+	declarationFiles: ReadonlyMap<AbsolutePath, CachedDeclaration>;
 	/** Project-owned syntax cache for unchanged, preprocessed declaration text */
 	sourceFileCache?: Map<AbsolutePath, SourceDeclaration>;
 	entryPoints: EntryPoints<AbsolutePath>;
@@ -106,9 +108,9 @@ type DeclarationCode = {
 /** Module dependency graph with bundled specifier tracking */
 type ModuleDependencyGraph = {
 	readonly modules: ReadonlyMap<AbsolutePath, ModuleInfo>;
-	readonly bundledSpecifiers: ReadonlyMap<string, ReadonlySet<string>>;
+	readonly bundledSpecifiers: ReadonlyMap<AbsolutePath, ReadonlySet<string>>;
 	/** Per module: specifiers resolving to another entry point, mapped to the relative specifier of that entry's bundled output */
-	readonly entrySpecifiers: ReadonlyMap<string, ReadonlyMap<string, string>>;
+	readonly entrySpecifiers: ReadonlyMap<AbsolutePath, ReadonlyMap<string, string>>;
 };
 
 /** How an import binds another entry's export: as a value, through `import type`, or through an inline `type` marker */
@@ -137,4 +139,4 @@ type EntryReferences = {
 	readonly isEntryModule: boolean;
 };
 
-export type { NameRange, SourceDeclaration, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, ExportedName, NamespaceExport, DeclarationCode, ExternalImport, ModuleDependencyGraph, EntryImportMode, EntryImportBinding, EntryReferences };
+export type { NameRange, SourceDeclaration, SourceText, DtsBundleOptions, DtsCompilerOptions, ModuleInfo, PreProcessOutput, CodeTransformation, IdentifierMap, ExportedName, NamespaceExport, DeclarationCode, ExternalImport, ModuleDependencyGraph, EntryImportMode, EntryImportBinding, EntryReferences };

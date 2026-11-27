@@ -5,11 +5,22 @@ import { pathToFileURL } from 'node:url';
 import type { Loader, Plugin } from 'esbuild';
 import { API } from 'typescript/sync';
 import { serverFS, type FileSystemCallbacks } from 'typescript/fs';
-import type { CachedDeclaration } from '../../src/@types';
+import type { AbsolutePath, CachedDeclaration } from '../../src/@types';
 import { DeclarationProcessor } from '../../src/dts/declaration-processor';
 
 // Re-export vol for convenience
 export { vol };
+
+type TestProjectOptions = {
+	tsconfig?: Record<string, unknown> & {
+		compilerOptions?: Record<string, unknown>;
+		tsbuild?: Record<string, unknown>;
+		include?: string[];
+		exclude?: string[];
+	};
+	files?: Record<string, string>;
+	packageJson?: Record<string, unknown>;
+};
 
 /**
  * Test helper for setting up memfs-based tests.
@@ -125,11 +136,7 @@ export class TestHelper {
 	 * Creates a standard test project structure in memfs.
 	 * @returns The project root path (cwd).
 	 */
-	static createTestProject(options: {
-		tsconfig?: Record<string, any>;
-		files?: Record<string, string>;
-		packageJson?: Record<string, any>;
-	}) {
+	static createTestProject(options: TestProjectOptions) {
 		const cwd = process.cwd();
 
 		const defaultTsConfig = {
@@ -196,10 +203,10 @@ export class TestHelper {
 	 * Creates a Map of CachedDeclaration objects from raw string content.
 	 * Useful for testing bundleDeclarations with the new cache format.
 	 */
-	static createDeclarationFilesMap(entries: [string, string][]): Map<string, CachedDeclaration> {
-		const map = new Map<string, CachedDeclaration>();
+	static createDeclarationFilesMap(entries: [string, string][]): Map<AbsolutePath, CachedDeclaration> {
+		const map = new Map<AbsolutePath, CachedDeclaration>();
 		for (const [path, code] of entries) {
-			map.set(path, this.createCachedDeclaration(code));
+			map.set(resolve(path) as AbsolutePath, this.createCachedDeclaration(code));
 		}
 		return map;
 	}
@@ -314,7 +321,7 @@ export class TestHelper {
 	 */
 	static async createTempProject(options: {
 		files?: Record<string, string>;
-		tsconfig?: Record<string, unknown>;
+		tsconfig?: TestProjectOptions['tsconfig'];
 		packageJson?: Record<string, unknown>;
 	} = {}): Promise<{ dir: string; cleanup: () => Promise<void> }> {
 		const { mkdtemp, mkdir, writeFile, rm, symlink } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
@@ -334,14 +341,14 @@ export class TestHelper {
 				strict: true,
 				outDir: './dist',
 				declaration: true,
-				...(options.tsconfig?.['compilerOptions'] as Record<string, unknown> ?? {})
+				...(options.tsconfig?.['compilerOptions'] ?? {})
 			},
 			tsbuild: {
 				entryPoints: { index: './src/index.ts' },
 				clean: false,
-				...(options.tsconfig?.['tsbuild'] as Record<string, unknown> ?? {})
+				...(options.tsconfig?.['tsbuild'] ?? {})
 			},
-			include: (options.tsconfig?.['include'] as string[]) ?? ['src/**/*']
+			include: options.tsconfig?.['include'] ?? ['src/**/*']
 		};
 
 		const defaultPackageJson = {
@@ -365,168 +372,6 @@ export class TestHelper {
 		}
 
 		return { dir, cleanup: () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
-	}
-
-	/**
-	 * Mocks fs and fs/promises globally with fallback to real fs.
-	 * Use for integration tests that need full fs mocking.
-	 */
-	static async mockFs() {
-		const setupFsMock = async (moduleName: string) => {
-			vi.doMock(moduleName, async (importOriginal) => {
-				const realFs = await importOriginal<any>();
-				const { fs: memfs } = await import('memfs');
-
-				const isPromises = moduleName.includes('promises');
-
-				const shouldFallback = (path: string) => {
-					if (memfs.existsSync(path)) return false;
-					const relativePath = path.startsWith(process.cwd()) ? path.slice(process.cwd().length + 1) : path;
-					if (!isAbsolute(path) && !path.startsWith('.')) {
-						if (path.startsWith('node_modules')) return true;
-						return false;
-					}
-					if (path.startsWith(process.cwd())) {
-						if (relativePath.startsWith('node_modules')) return true;
-						return false;
-					}
-					return true;
-				};
-
-				if (isPromises) {
-					return {
-						...realFs,
-						default: { ...realFs },
-						readFile: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.readFile as Function)(path, ...args);
-							return (realFs.readFile as Function)(path, ...args);
-						},
-						writeFile: async (path: any, ...args: any[]) => (memfs.promises.writeFile as Function)(path, ...args),
-						readdir: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.readdir as Function)(path, ...args);
-							return (realFs.readdir as Function)(path, ...args);
-						},
-						stat: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.stat as Function)(path, ...args);
-							return (realFs.stat as Function)(path, ...args);
-						},
-						lstat: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.lstat as Function)(path, ...args);
-							return (realFs.lstat as Function)(path, ...args);
-						},
-						mkdir: async (path: any, ...args: any[]) => (memfs.promises.mkdir as Function)(path, ...args),
-						rm: async (path: any, ...args: any[]) => (memfs.promises.rm as Function)(path, ...args),
-						access: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.access as Function)(path, ...args);
-							return (realFs.access as Function)(path, ...args);
-						},
-						open: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.open as Function)(path, ...args);
-							return (realFs.open as Function)(path, ...args);
-						},
-						chmod: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.chmod as Function)(path, ...args);
-							return (realFs.chmod as Function)(path, ...args);
-						},
-					};
-				}
-
-				return {
-					...realFs,
-					default: { ...realFs },
-					readFileSync: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.readFileSync as Function)(path, ...args);
-						return (realFs.readFileSync as Function)(path, ...args);
-					},
-					readFile: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.readFile as Function)(path, ...args);
-						return (realFs.readFile as Function)(path, ...args);
-					},
-					writeFileSync: (path: any, ...args: any[]) => (memfs.writeFileSync as Function)(path, ...args),
-					writeFile: (path: any, ...args: any[]) => (memfs.writeFile as Function)(path, ...args),
-					readdir: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.readdir as Function)(path, ...args);
-						return (realFs.readdir as Function)(path, ...args);
-					},
-					readdirSync: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.readdirSync as Function)(path, ...args);
-						return (realFs.readdirSync as Function)(path, ...args);
-					},
-					stat: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.stat as Function)(path, ...args);
-						return (realFs.stat as Function)(path, ...args);
-					},
-					statSync: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.statSync as Function)(path, ...args);
-						return (realFs.statSync as Function)(path, ...args);
-					},
-					lstat: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.lstat as Function)(path, ...args);
-						return (realFs.lstat as Function)(path, ...args);
-					},
-					lstatSync: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.lstatSync as Function)(path, ...args);
-						return (realFs.lstatSync as Function)(path, ...args);
-					},
-					existsSync: (path: any) => {
-						if (!shouldFallback(path.toString())) return (memfs.existsSync as Function)(path);
-						return realFs.existsSync(path);
-					},
-					mkdir: (path: any, ...args: any[]) => (memfs.mkdir as Function)(path, ...args),
-					mkdirSync: (path: any, ...args: any[]) => (memfs.mkdirSync as Function)(path, ...args),
-					rm: (path: any, ...args: any[]) => (memfs.rm as Function)(path, ...args),
-					rmSync: (path: any, ...args: any[]) => (memfs.rmSync as Function)(path, ...args),
-					watch: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.watch as Function)(path, ...args);
-						return (realFs.watch as Function)(path, ...args);
-					},
-					createReadStream: (path: any, ...args: any[]) => {
-						if (!shouldFallback(path.toString())) return (memfs.createReadStream as Function)(path, ...args);
-						return (realFs.createReadStream as Function)(path, ...args);
-					},
-					createWriteStream: (path: any, ...args: any[]) => (memfs.createWriteStream as Function)(path, ...args),
-					promises: {
-						...realFs.promises,
-						readFile: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.readFile as Function)(path, ...args);
-							return (realFs.promises.readFile as Function)(path, ...args);
-						},
-						writeFile: async (path: any, ...args: any[]) => (memfs.promises.writeFile as Function)(path, ...args),
-						readdir: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.readdir as Function)(path, ...args);
-							return (realFs.promises.readdir as Function)(path, ...args);
-						},
-						stat: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.stat as Function)(path, ...args);
-							return (realFs.promises.stat as Function)(path, ...args);
-						},
-						lstat: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.lstat as Function)(path, ...args);
-							return (realFs.promises.lstat as Function)(path, ...args);
-						},
-						mkdir: async (path: any, ...args: any[]) => (memfs.promises.mkdir as Function)(path, ...args),
-						rm: async (path: any, ...args: any[]) => (memfs.promises.rm as Function)(path, ...args),
-						access: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.access as Function)(path, ...args);
-							return (realFs.promises.access as Function)(path, ...args);
-						},
-						open: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.open as Function)(path, ...args);
-							return (realFs.promises.open as Function)(path, ...args);
-						},
-						chmod: async (path: any, ...args: any[]) => {
-							if (!shouldFallback(path.toString())) return (memfs.promises.chmod as Function)(path, ...args);
-							return (realFs.promises.chmod as Function)(path, ...args);
-						},
-					}
-				};
-			});
-		};
-
-		await setupFsMock('node:fs');
-		await setupFsMock('fs');
-		await setupFsMock('node:fs/promises');
-		await setupFsMock('fs/promises');
 	}
 
 	/**
