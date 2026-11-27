@@ -266,6 +266,7 @@ In watch mode, build failures are reported but do not set a non-zero exit code â
 
 Every non-watch build runs a full type-check and, unless `noEmit` is enabled, emits outputs. tsbuild does not keep a cross-process build cache, regardless of the TypeScript `incremental` option. Use `--watch` to keep a compiler snapshot alive across rebuilds; watch mode also reuses unchanged pre-processed declarations in memory.
 
+The CLI enables Node's [module compile cache](https://nodejs.org/api/module.html#module-compile-cache), which stores V8 bytecode for tsbuild and its dependencies (never project inputs or build output) to shorten startup. Set `NODE_DISABLE_COMPILE_CACHE=1` to opt out.
 
 ## Configuration Options
 

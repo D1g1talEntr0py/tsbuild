@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util';
 import { BuildError } from './errors';
+import { parseArgs } from 'node:util';
+import { enableCompileCache } from 'node:module';
 
 const options = {
 	help: { type: 'boolean', default: undefined, short: 'h', description: 'Show this help message' },
@@ -31,6 +32,9 @@ if (help) {
 	process.exitCode = 0;
 } else {
 	try {
+		// Caches V8 bytecode for tsbuild and its dependencies (not build output), cutting module load time on later runs. NODE_DISABLE_COMPILE_CACHE=1 opts out.
+		enableCompileCache();
+
 		const { TypeScriptProject } = await import('./type-script-project');
 
 		// Use the project as a resource that will be automatically cleaned up when the process exits, unless in watch mode.
