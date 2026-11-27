@@ -160,14 +160,12 @@ type PluginDescriptor = PluginSpecifier | [PluginSpecifier, Record<string, unkno
 type PluginFactory = (options: Record<string, unknown> | undefined) => unknown;
 
 type CommandLineOptions = {
-	clearCache: boolean;
-	force: boolean;
 	watch: boolean;
 	minify: boolean;
 	outputStyle?: string;
 };
 
-type BuildConfiguration = ExpandedModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { force: boolean, minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
+type BuildConfiguration = ExpandedModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
 
 type EntryPoints<out T extends Path> = Record<string, T>;
 
@@ -197,42 +195,6 @@ type CachedDeclaration = {
 	fileReferences: ReadonlySet<string>;
 };
 
-/** Stat signature of one compiler input: absolute path, modification time and size */
-type BuildInputStat = readonly [ path: string, mtimeMs: number, size: number ];
-
-/** Inputs of a successful type-check, persisted so an unchanged project can skip the compiler entirely */
-type BuildInputManifest = {
-	/** Deterministic key of the root names, compiler options and TypeScript version */
-	key: string;
-	/** Stat signatures of every source file in the program (project sources, libs and dependency declarations) */
-	files: ReadonlyArray<BuildInputStat>;
-};
-
-/** Persistent cache payload stored in the version-stamped .tsbuild/dts_cache.v{N}.br */
-type BuildCache = {
-	/** Cache format version for compatibility checking */
-	version: number;
-	/** Cached declaration files: path -> pre-processed code with extracted references */
-	files: Map<string, CachedDeclaration>;
-	/** Build configuration fingerprint: hash of output-affecting options (minify, iife, declaration, platform, etc.) */
-	fingerprint?: string;
-	/** Compiler inputs of the build that produced this cache */
-	manifest?: BuildInputManifest;
-};
-
-interface BuildCacheManager {
-	invalidate(): void;
-	restore(target: Map<string, CachedDeclaration>): Promise<void>;
-	save(source: ReadonlyMap<string, CachedDeclaration>, fingerprint: string, manifest?: BuildInputManifest): Promise<void>;
-	setExpectedOutputArtifacts(outputArtifacts: ReadonlyArray<AbsolutePath>): void;
-	expectedOutputsExist(): Promise<boolean>;
-	isValid(): boolean;
-	/** Returns the persisted input manifest when it matches the given key and every recorded input is unchanged on disk. */
-	upToDateManifest(key: string): Promise<BuildInputManifest | undefined>;
-	/** Checks whether the build configuration has changed since the cache was last saved. */
-	fingerprintMatches(currentFingerprint: string): Promise<boolean>;
-};
-
 type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	clean: boolean;
 	compilerOptions: CompilerOptions;
@@ -243,7 +205,6 @@ type TypeScriptConfiguration = Readonly<Modify<TypeScriptOptions, {
 	/** Absolute paths of root names used to create the TypeScript program */
 	rootNames: string[];
 	configFileParsingDiagnostics: Diagnostic[];
-	buildCache: BuildCacheManager | undefined;
 	include?: string[];
 	exclude?: string[];
 	files?: string[];
@@ -300,10 +261,6 @@ export type {
 	TypeScriptConfiguration,
 	ProjectBuildConfiguration,
 	BuildConfiguration,
-	BuildCache,
-	BuildInputStat,
-	BuildInputManifest,
-	BuildCacheManager,
 	WrittenFile,
 	SourceFile,
 	Pattern,

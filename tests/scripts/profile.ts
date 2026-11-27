@@ -5,9 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { brotliCompressSync, brotliDecompressSync, constants as brotliConstants } from 'node:zlib';
-import { deserialize, serialize } from 'node:v8';
-import { dtsCacheFile } from 'src/constants';
 
 type Timing = { name: string; milliseconds: number };
 
@@ -53,20 +50,6 @@ async function measureRuntimePrimitives(): Promise<void> {
 		using retained = api.createSourceFile(join(root, 'src/logger.ts'), readFileSync(join(root, 'src/logger.ts'), 'utf8'));
 		return retained.sourceFile;
 	});
-}
-
-function measureCachePrimitives(): void {
-	const cachePath = join(root, '.tsbuild', dtsCacheFile);
-	if (!existsSync(cachePath)) {
-		console.log('cache restore: unavailable (run pnpm build first)');
-		return;
-	}
-
-	const compressed = readFileSync(cachePath);
-	const decompressed = measure('Brotli decompress', () => brotliDecompressSync(compressed));
-	const deserialized = measure('V8 deserialize', () => deserialize(decompressed));
-	const serialized = serialize(deserialized);
-	measure('V8 serialize + Brotli compress', () => brotliCompressSync(serialized, { params: { [brotliConstants.BROTLI_PARAM_QUALITY]: 5 } }));
 }
 
 async function measureCheckHeavy(): Promise<void> {
@@ -125,15 +108,14 @@ async function measureEndToEnd(): Promise<void> {
 		const bootstrap = spawnSync('pnpm', [ 'build' ], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, NO_COLOR: '1' } });
 		if (bootstrap.status !== 0) { throw new Error(bootstrap.stderr) }
 	}
-	rmSync(join(root, '.tsbuild'), { recursive: true, force: true });
 	rmSync(join(root, 'dist'), { recursive: true, force: true });
 	const coldStart = performance.now();
 	const coldStatus = runBuild();
 	report(`cold build (exit ${coldStatus})`, performance.now() - coldStart);
 
-	const noOpStart = performance.now();
-	const noOpStatus = runBuild();
-	report(`no-op build (exit ${noOpStatus})`, performance.now() - noOpStart);
+	const secondBuildStart = performance.now();
+	const secondBuildStatus = runBuild();
+	report(`second full build (exit ${secondBuildStatus})`, performance.now() - secondBuildStart);
 
 	const probePath = join(root, 'src', '.profile-change.ts');
 	mkdirSync(join(root, 'src'), { recursive: true });
@@ -148,7 +130,6 @@ async function measureEndToEnd(): Promise<void> {
 }
 
 await measureRuntimePrimitives();
-measureCachePrimitives();
 await measureEndToEnd();
 await measureCheckHeavy();
 console.log('\nPrimitive timings:');

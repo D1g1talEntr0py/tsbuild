@@ -556,7 +556,7 @@ export function resetForTool(dir: string, tool: Tool, scenario: BenchmarkScenari
 	setSyntheticDeclarationOption(dir, tool.dtsEnabled !== false);
 	tool.configure?.(dir, scenario);
 	rmrf(join(dir, tool.outDir));
-	if (tool.id.startsWith('tsbuild')) rmrf(join(dir, '.tsbuild'));
+
 }
 
 // ─── Pre-warm pnpm dlx cache ───────────────────────────────────────────────────
@@ -590,7 +590,7 @@ function prewarm(dir: string, scenario: BenchmarkScenario): void {
 export function ensureTsbuildBuilt(force = false): void {
 	if (!force && existsSync(tsbuildBin)) return;
 	console.log(`${c.dim}Building tsbuild…${c.reset}`);
-	execSync(force ? 'pnpm build --force' : 'pnpm build', { cwd: root, stdio: 'inherit' });
+	execSync('pnpm build', { cwd: root, stdio: 'inherit' });
 }
 
 // ─── tsbuild phase parsing ─────────────────────────────────────────────────────

@@ -65,7 +65,6 @@ const toEsTarget: (target?: ScriptTarget) => EsTarget = (target: ScriptTarget = 
 /** Returns undefined for any input, useful for defaulting optional values. */
 const alwaysUndefined = () => undefined;
 
-const isString = (value: unknown): value is string => typeof value === 'string';
 
 /**
  * Converts TypeScript's JsxEmit enum to an esbuild-compatible jsx string.
@@ -97,11 +96,6 @@ const defaultOutDirectory = 'dist';
 const defaultEntryPoint = 'index';
 const defaultSourceDirectory = './src' as RelativePath;
 const defaultEntryFile = 'src/index.ts' as RelativePath;
-const cacheDirectory = '.tsbuild' as RelativePath;
-/** Cache version - increment when structure or declaration preprocessing changes (v7: deduplicate explicit exports) */
-const dtsCacheVersion = 7;
-// Version-stamped so stale structures and preprocessed declarations have a different filename and are never read.
-const dtsCacheFile: string = `dts_cache.v${dtsCacheVersion}.br`;
 const format = 'esm';
 const newLine = '\n';
 const typeMatcher: RegExp = /\btype\b/;
@@ -133,9 +127,6 @@ export {
 	defaultOutDirectory,
 	defaultEntryPoint,
 	defaultEntryFile,
-	cacheDirectory,
-	dtsCacheFile,
-	dtsCacheVersion,
 	format,
 	newLine,
 	typeMatcher,
@@ -143,6 +134,5 @@ export {
 	FileExtension,
 	toEsTarget,
 	alwaysUndefined,
-	isString,
 	toJsxRenderingMode
 };

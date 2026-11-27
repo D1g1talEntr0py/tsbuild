@@ -22,7 +22,7 @@ describe('TypeScriptProject - Integration Builds', () => {
 		process.exitCode = undefined;
 	});
 
-	it('removes stale outputs from prior builds via manifest on incremental rebuild', async () => {
+	it('removes stale outputs from prior builds when entry points change', async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: {
 				'src/keep.ts': 'export const k = 1;',

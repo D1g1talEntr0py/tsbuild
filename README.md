@@ -19,7 +19,7 @@ TC39 standard decorators are supported natively — no additional dependencies n
 - 🚀 **Blazing Fast** - Leverages esbuild for rapid bundling and transpilation
 - 🔍 **Full Type Safety** - Uses TypeScript API for comprehensive type checking
 - 📦 **Declaration Bundling** - Automatically bundles `.d.ts` files into single entry points
-- ⚡ **Incremental Builds** - Intelligent caching with `.tsbuildinfo` for fast rebuilds
+- ⚡ **Fast Watch Rebuilds** - Reuse TypeScript snapshots and pre-processed declarations in memory
 - 👁️ **Watch Mode** - File watching with automatic rebuilds on changes
 - 🎨 **TC39 Decorators** - Native support for standard decorators, no extra dependencies required
 - 🔌 **Plugin System** - Extensible architecture with custom esbuild plugins
@@ -113,43 +113,16 @@ By default, bare specifiers (e.g. `lodash-es`) are kept as external imports. Use
 }
 ```
 
-### Preferred `tsconfig.json` setup — incremental (recommended)
-
-`incremental` defaults to `true` in tsbuild unless you explicitly set it to `false` in your `tsconfig.json`. With incremental enabled, TypeScript only re-emits changed files on each build and the declaration cache is preserved across runs, making repeated builds significantly faster.
+### Preferred `tsconfig.json` setup
 
 ```jsonc
 {
   "compilerOptions": {
     "outDir": "./dist",
     "declaration": true,
-    "incremental": true,           // redundant — tsbuild enables this by default, but explicit is clear
     "isolatedModules": true,       // required — flags constructs esbuild can't safely transpile
     "verbatimModuleSyntax": true,
     "strict": true,
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "Bundler", // recommended for library builds processed by a bundler
-    // lib controls platform detection — omitting "DOM" targets Node.js (platform: "node").
-    // Add "DOM" to target the browser (platform: "browser").
-    "lib": ["ESNext"]             // Node.js library — no DOM APIs
-    // "lib": ["ESNext", "DOM"]   // Browser library — includes DOM APIs, sets platform to "browser"
-  }
-}
-```
-
-### Preferred `tsconfig.json` setup — non-incremental
-
-Set `incremental: false` to opt out of the `.tsbuildinfo` cache entirely. Every build is a full compilation from scratch. Useful for CI environments where you want deterministic, cache-free output.
-
-```jsonc
-{
-  "compilerOptions": {
-    "outDir": "./dist",
-    "declaration": true,
-    "incremental": false,          	// disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
-    "isolatedModules": true,				// required — flags constructs esbuild can't safely transpile
-    "verbatimModuleSyntax": true,
-    "strict": true,									// Not needed with TypeScript 6 and above, since strict mode is enabled by default
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler", // recommended for library builds processed by a bundler
@@ -238,12 +211,6 @@ tsbuild
 # Minify build output
 tsbuild --minify  # or -m
 
-# Force a full rebuild, bypassing incremental compilation.
-tsbuild --force  # or -f
-
-# Clear the incremental build cache (.tsbuild/dts_cache.v7.br) before building.
-tsbuild --clearCache  # or -c
-
 # Build with watch mode
 tsbuild --watch  # or -w
 
@@ -260,7 +227,7 @@ tsbuild --help  # or -h
 tsbuild --version  # or -v
 ```
 
-> **Note**: `--watch`, `--force`, and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. Programmatic callers pass them as the explicit `CliOptions` argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default.
+> **Note**: `--watch` and `--minify` are CLI-only runtime options and are not valid in `tsconfig.json`. Programmatic callers pass runtime options as the explicit options argument to `TypeScriptProject`. `--noEmit` is only applied when explicitly passed, so `compilerOptions.noEmit` in `tsconfig.json` is still respected by default. `--force`/`-f` and `--clearCache`/`-c` have been removed; non-watch builds always compile.
 
 ### Exit Codes
 
@@ -281,60 +248,15 @@ In watch mode, build failures are reported but do not set a non-zero exit code �
   "scripts": {
     "build": "tsbuild",
     "build:watch": "tsbuild --watch",
-    "build:force": "tsbuild --force",
     "type-check": "tsbuild --noEmit"
   }
 }
 ```
 
-## Incremental Builds
+## Build and Watch Behavior
 
-tsbuild uses two separate caches to speed up repeated builds, and two flags to control them.
+Every non-watch build runs a full type-check and, unless `noEmit` is enabled, emits outputs. tsbuild does not keep a cross-process build cache, regardless of the TypeScript `incremental` option. Use `--watch` to keep a compiler snapshot alive across rebuilds; watch mode also reuses unchanged pre-processed declarations in memory.
 
-### How it works
-
-Incremental compilation is **enabled by default** — no configuration needed. To opt out, explicitly set `incremental: false` in `tsconfig.json`:
-
-```jsonc
-{
-  "compilerOptions": {
-    "incremental": false  // disables TypeScript's .tsbuildinfo cache and tsbuild's DTS cache
-  }
-}
-```
-
-With incremental enabled, each build maintains two caches inside a `.tsbuild/` directory:
-
-| Cache | File | What it stores |
-|-------|------|----------------|
-| Input manifest | `.tsbuild/dts_cache.v7.br` | Every file the compiler read (size and mtime) plus a key derived from the compiler options |
-| DTS cache | `.tsbuild/dts_cache.v7.br` | Pre-processed declaration files (Brotli-compressed) |
-
-On each build, tsbuild compares the input manifest with current file sizes, modification times, and compiler options to detect changes. TypeScript snapshots preserve compiler state within a process; the persistent manifest and DTS cache allow unchanged builds to skip emission and bundling.
-
-**Config change detection** — tsbuild stores a fingerprint of the current build configuration (minify, platform, source maps, iife, splitting, banner/footer, env, external, noExternal, dts options, etc.) alongside the DTS cache. If any of these settings change between builds, the output phase is forced even when TypeScript reports no source changes. The fingerprint is updated at the end of each build so subsequent runs do not repeatedly trigger a forced rebuild.
-
-### Ignoring the cache directory
-
-The `.tsbuild/` directory contains build artifacts that should not be committed to source control. Add it to your `.gitignore`:
-
-```bash
-echo '.tsbuild/' >> .gitignore
-```
-
-Or add the entry manually:
-
-```gitignore
-.tsbuild/
-```
-
-### Flags
-
-**`--force` (`-f`)** — Runs the output phase (esbuild + DTS bundling) even when TypeScript detects no changes. Useful when something outside the source files changed (e.g. an environment variable or esbuild config) and you need to regenerate output without touching the caches.
-
-**`--clearCache` (`-c`)** — Deletes the entire `.tsbuild/` directory before building, wiping both `.tsbuildinfo` and the DTS cache. The next build runs as if it's the first time. Use this when you suspect the cache is stale or after significant config changes.
-
-**Normal build (no flags)** — TypeScript compares source file hashes against `.tsbuildinfo`, re-emits only what changed, and the DTS cache is updated accordingly.
 
 ## Configuration Options
 
@@ -620,8 +542,7 @@ These are used internally but can be leveraged when extending tsbuild.
 ### Core Components
 
 **TypeScriptProject** (`src/type-script-project.ts`) - Central orchestrator that manages the build lifecycle
-**FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage with optional caching support
-**IncrementalBuildCache** (`src/incremental-build-cache.ts`) - Brotli-compressed caching to `.tsbuild/dts_cache.v7.br`
+**FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage and preprocessing
 **ProcessManager** (`src/process-manager.ts`) - Global cleanup coordinator for graceful shutdowns
 
 ### Plugin System
@@ -647,15 +568,14 @@ When a circular dependency is detected between declaration files, tsbuild emits 
 
 tsbuild is designed for speed:
 
-- **Incremental builds** - Only recompile changed files
+- **Watch rebuilds** - Reuse compiler snapshots and unchanged pre-processed declarations in memory
 - **In-memory declarations** - No intermediate disk I/O for `.d.ts` files
 - **Parallel processing** - Declaration bundling and transpilation run in parallel after type checking completes
-- **Smart caching** - Leverages `.tsbuildinfo` for TypeScript incremental compilation
+- **Full non-watch builds** - Always type-check and emit, ensuring outputs reflect current inputs
 
 Typical build times for the tsbuild project itself:
-- Full build: ~450-500ms
-- Incremental rebuild (no changes): ~5ms
-- Type-check only: ~10-15ms
+- Full build: ~200ms
+- Type-check only (cold): ~100-150ms
 
 ## Acknowledgments
 
@@ -693,7 +613,7 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 | Legacy Decorator Metadata | ❌ Removed | ✅ SWC | ✅ SWC | ✅ Native |
 | CommonJS Support | ❌ None | ✅ Yes | ✅ Yes | ✅ Yes |
 | Watch Mode | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
-| Incremental Builds | ✅ Yes | ⚠️ Limited | ⚠️ Limited | ✅ Yes |
+| Incremental Watch Rebuilds | ✅ Yes | ⚠️ Limited | ⚠️ Limited | ✅ Yes |
 | Production Ready | ⚠️ Experimental | ✅ Yes | ✅ Yes | ✅ Yes |
 
 > ¹ tsup uses **esbuild** for JS bundling and **rollup-plugin-dts** (a Rollup plugin) for declaration bundling. `--experimental-dts` uses `@microsoft/api-extractor` instead. An optional `--treeshake` flag also delegates tree-shaking to Rollup.

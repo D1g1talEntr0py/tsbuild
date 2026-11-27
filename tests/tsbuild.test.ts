@@ -114,33 +114,6 @@ describe('tsbuild CLI', () => {
 			expect(process.exitCode).toBeUndefined();
 		});
 
-		it('passes --force flag to TypeScriptProject', async () => {
-			const { dir, cleanup: c } = await TestHelper.createTempProject({
-				files: { 'src/index.ts': 'export const x = 1;' },
-				tsconfig: { tsbuild: { clean: false } }
-			});
-			cleanup = c;
-
-			// First build to prime the cache
-			process.argv = ['node', 'tsbuild', '-p', dir];
-			process.exitCode = undefined;
-			consoleLogSpy.mockRestore();
-			// @ts-expect-error
-			await import('../src/tsbuild.temp');
-			vi.resetModules();
-			consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-			// Second build with --force should also succeed
-			process.argv = ['node', 'tsbuild', '-p', dir, '--force'];
-			process.exitCode = undefined;
-			consoleLogSpy.mockRestore();
-			// @ts-expect-error
-			await import('../src/tsbuild.temp');
-
-			await expect(access(join(dir, 'dist/index.js'))).resolves.toBeUndefined();
-			expect(process.exitCode).toBeUndefined();
-		});
-
 		it.each(['cli', 'tsconfig'] as const)('checks a real project without emitting when noEmit comes from %s', async (source) => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const value: number = 1;' },
@@ -203,7 +176,7 @@ describe('tsbuild CLI', () => {
 
 			expect(buildSpy).toHaveBeenCalledOnce();
 			expect(closeSpy).not.toHaveBeenCalled();
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { clearCache: false, force: false, watch: true, minify: false });
+			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { watch: true, minify: false });
 			expect(process.exitCode).toBeUndefined();
 		});
 
@@ -216,7 +189,7 @@ describe('tsbuild CLI', () => {
 
 			expect(buildSpy).toHaveBeenCalledOnce();
 			expect(closeSpy).toHaveBeenCalledOnce();
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(process.cwd(), {}, { clearCache: false, force: false, watch: false, minify: false });
+			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(process.cwd(), {}, { watch: false, minify: false });
 			expect(process.exitCode).toBeUndefined();
 		});
 
@@ -230,13 +203,13 @@ describe('tsbuild CLI', () => {
 			expect(buildSpy).toHaveBeenCalledOnce();
 			expect(closeSpy).toHaveBeenCalledOnce();
 			expect(buildSpy).toHaveBeenCalledExactlyOnceWith();
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { clearCache: false, force: false, watch: false, minify: false });
+			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { watch: false, minify: false });
 			expect(process.exitCode).toBeUndefined();
 		});
 
-		it('passes explicit force, watch, and minify flags to TypeScriptProject', async () => {
+		it('passes explicit watch and minify flags to TypeScriptProject', async () => {
 			buildSpy.mockResolvedValue(null);
-			process.argv = ['node', 'tsbuild', '-p', directory, '--force', '--watch', '--minify'];
+			process.argv = ['node', 'tsbuild', '-p', directory, '--watch', '--minify'];
 			process.exitCode = undefined;
 
 			// @ts-expect-error - temp module created at runtime for cache busting
@@ -244,7 +217,7 @@ describe('tsbuild CLI', () => {
 
 			expect(buildSpy).toHaveBeenCalledOnce();
 			expect(closeSpy).not.toHaveBeenCalled();
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { clearCache: false, force: true, watch: true, minify: true });
+			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { watch: true, minify: true });
 			expect(process.exitCode).toBeUndefined();
 		});
 
@@ -255,21 +228,16 @@ describe('tsbuild CLI', () => {
 			// @ts-expect-error - temp module created at runtime for cache busting
 			await import('../src/tsbuild.temp');
 
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { clearCache: false, force: false, watch: false, minify: false, outputStyle: 'detailed' });
+			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { watch: false, minify: false, outputStyle: 'detailed' });
 			expect(process.exitCode).toBeUndefined();
 		});
 
-		it('passes --clearCache flag to TypeScriptProject', async () => {
-			process.argv = ['node', 'tsbuild', '-p', directory, '--clearCache'];
+		it.each([ '--force', '-f', '--clearCache', '-c' ])('rejects removed cache flag %s', async (flag) => {
+			process.argv = ['node', 'tsbuild', '-p', directory, flag];
 			process.exitCode = undefined;
 
-			// @ts-expect-error - temp module created at runtime for cache busting
-			await import('../src/tsbuild.temp');
-
-			expect(buildSpy).toHaveBeenCalledOnce();
-			expect(closeSpy).toHaveBeenCalledOnce();
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, {}, { clearCache: true, force: false, watch: false, minify: false });
-			expect(process.exitCode).toBeUndefined();
+			await expect(import('../src/tsbuild.temp')).rejects.toThrow();
+			expect(constructorSpy).not.toHaveBeenCalled();
 		});
 
 		it.each(['--noEmit', '-n'])('configures noEmit and disposes the project for %s', async (flag) => {
@@ -281,7 +249,7 @@ describe('tsbuild CLI', () => {
 
 			expect(buildSpy).toHaveBeenCalledExactlyOnceWith();
 			expect(closeSpy).toHaveBeenCalledOnce();
-			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, { compilerOptions: { noEmit: true } }, { clearCache: false, force: false, watch: false, minify: false });
+			expect(constructorSpy).toHaveBeenCalledExactlyOnceWith(directory, { compilerOptions: { noEmit: true } }, { watch: false, minify: false });
 			expect(process.exitCode).toBeUndefined();
 		});
 

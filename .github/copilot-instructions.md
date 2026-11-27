@@ -17,9 +17,8 @@
 - Build pipeline: type-check -> transpile -> declaration bundle.
 
 ## Core Architecture
-- `TypeScriptProject`: build orchestrator; decorators `@closeOnExit`, `@logPerformance`, `@debounce`; incremental via an input manifest (compiler inputs' size/mtime + options key) stored in the dts cache; no `.tsbuildinfo`.
+- `TypeScriptProject`: build orchestrator; decorators `@closeOnExit`, `@logPerformance`, `@debounce`; full type-check and emit for each non-watch build, with compiler snapshots reused by watch rebuilds.
 - `FileManager`: in-memory `.d.ts` store + write callback; declaration pre-processing.
-- `IncrementalBuildCache`: persistent Brotli declaration cache at `.tsbuild/dts_cache.v<version>.br` (filename version-stamped; also holds the input manifest, written only after an error-free type-check).
 - DTS bundler (`src/dts/`): TypeScript AST + `magic-string` (not Rollup/ESTree), dependency graph + topo sort, import/export stripping, identifier collision handling, per-instance resolution cache, `collectIdentifiers` WeakMap cache.
 - Plugins (`src/plugins/`):
   - `external-modules.ts`: bare specifiers external by default; `noExternal` forces bundling.
@@ -28,7 +27,7 @@
   - `iife.ts`: secondary IIFE build from in-memory ESM outputs.
 
 ## Behavioral Invariants
-- `FileManager.initialize()` restores cache before emission; `finalize()` persists after.
+- `FileManager` reuses pre-processed declarations in memory across watch rebuilds.
 - Watch rebuilds clear/repopulate `buildDependencies` before error checks (prevents leaks on failures).
 - `processDeclarations()` and `transpile()` run in parallel and are independent.
 - esbuild plugin registration order is significant.
@@ -40,7 +39,7 @@
 - Config source: `tsbuild` in `tsconfig.json`, validated by `schema.json`.
 - Defaults/features: `clean: true`; `env` supports `${process.env.VAR}` -> `import.meta.env.*`; platform auto-detected from `lib`.
 - CLI parser: kebab-case -> camelCase via `parseArgs`.
-- Supported options: `-h/--help`, `-v/--version`, `-f/--force`, `-w/--watch`, `-p/--project`, `-n/--noEmit`, `-c/--clearCache`, `-m/--minify`.
+- Supported options: `-h/--help`, `-v/--version`, `-w/--watch`, `-p/--project`, `-n/--noEmit`, `-m/--minify`.
 - Error formatting: TS via `formatDiagnosticsWithColorAndContext()`, esbuild via `formatMessages()`.
 - Never call `process.exit()` directly; use `ProcessManager`.
 - Exit behavior: build/type-check 1, bundle 2, config 3, uncaught 99, SIGINT 0 (graceful — deliberate, so package managers don't report a failed lifecycle).

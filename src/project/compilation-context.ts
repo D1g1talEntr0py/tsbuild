@@ -1,10 +1,7 @@
-import { statSync } from 'node:fs';
-import { Json } from '../json';
 import { Paths } from '../paths';
-import { version } from 'typescript';
 import { EmitOnly } from 'typescript/sync';
 import { FileExtension } from '../constants';
-import type { AbsolutePath, BuildInputManifest, BuildInputStat, RelativePath } from '../@types';
+import type { AbsolutePath, RelativePath } from '../@types';
 import type { API, CompilerOptions, Diagnostic, FileNotifications, Program, ProjectReference, Snapshot, SyntheticProjectId } from 'typescript/sync';
 
 /** Inputs needed to construct and rebuild a TypeScript compiler session. */
@@ -23,8 +20,6 @@ export type CompilationResult = {
 	diagnostics: readonly Diagnostic[];
 	/** Emitted declaration text keyed by absolute output path (empty when declarations are not emitted) */
 	declarations: ReadonlyMap<AbsolutePath, string>;
-	/** Input manifest for skipping the compiler on the next build; only present when the compilation is error-free */
-	manifest?: BuildInputManifest;
 };
 
 /** Watcher events that map to compiler file notifications. */
@@ -32,9 +27,6 @@ type NotificationEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir' | 
 
 /** One immutable compiler state: a snapshot and the program it contains. Disposing the snapshot releases both. */
 type Generation = { snapshot: Snapshot; program: Program<SyntheticProjectId> };
-
-/** Mtime marking a manifest entry as unverifiable, so the next build never trusts it. */
-const unverifiable = -1;
 
 /**
  * Batched request for the declaration phase: emits declarations, or under `noEmit` only checks them.
@@ -78,11 +70,6 @@ export class CompilationContext implements Disposable {
 	/** Returns a detached root-name snapshot for the caller's watcher updates. */
 	get rootNames(): string[] {
 		return [ ...this.#rootNames ];
-	}
-
-	/** Deterministic key of the compiler inputs that are not file contents: root names, compiler options and the TypeScript version. */
-	get manifestKey(): string {
-		return Json.serialize({ rootNames: this.#rootNames, compilerOptions: this.#compilerOptions, version });
 	}
 
 	/**
@@ -155,7 +142,6 @@ export class CompilationContext implements Disposable {
 	 * @returns Diagnostics, emitted declaration text and, when error-free, the input manifest
 	 */
 	compile(): CompilationResult {
-		const startedAt = Date.now();
 		const { program } = this.#generation ??= this.#createGeneration();
 		const { declaration, noEmit } = this.#compilerOptions;
 
@@ -187,16 +173,7 @@ export class CompilationContext implements Disposable {
 			}
 		}
 
-		return { diagnostics, declarations, manifest: diagnostics.length === 0 && this.#compilerOptions.incremental ? this.#createManifest(sourceFileNames, startedAt) : undefined };
-	}
-
-	/**
-	 * Adopts the inputs of a previous error-free compilation whose inputs are unchanged, so watch dependencies are known without compiling.
-	 * @param manifest - Up-to-date input manifest
-	 */
-	restore({ files }: BuildInputManifest): void {
-		this.#sourceFileNames = files.map(([ path ]) => path);
-		this.#dependencies = undefined;
+		return { diagnostics, declarations };
 	}
 
 	/** Returns project source dependencies of the last compilation (project files that are not declarations). */
@@ -247,19 +224,4 @@ export class CompilationContext implements Disposable {
 		this.#notifications = { changed: [], created: [], deleted: [] };
 	}
 
-	/**
-	 * Records the stat signature of every program input. An input modified after compilation started may not match what the
-	 * compiler read, so it is recorded as unverifiable and the next build recompiles.
-	 * @param fileNames - Every source file of the program, including libs and dependency declarations
-	 * @param startedAt - Epoch milliseconds captured before the compiler read any input
-	 */
-	#createManifest(fileNames: readonly string[], startedAt: number): BuildInputManifest {
-		const files: BuildInputStat[] = [];
-		for (const path of fileNames) {
-			const stats = statSync(path, { throwIfNoEntry: false });
-			if (stats !== undefined) { files.push([ path, stats.mtimeMs < startedAt ? stats.mtimeMs : unverifiable, stats.size ]) }
-		}
-
-		return { key: this.manifestKey, files };
-	}
 }

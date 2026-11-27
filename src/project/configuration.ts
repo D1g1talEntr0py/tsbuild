@@ -6,7 +6,6 @@ import { Paths } from '../paths';
 import { Json } from '../json';
 import { Logger } from '../logger';
 import { ConfigurationError } from '../errors';
-import { IncrementalBuildCache } from '../incremental-build-cache';
 import { inferEntryPoints, normalizeEntryPoints, type PackageJson } from '../entry-points';
 import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, Platform, BuildOutputStyle } from '../constants';
 import { diagnosticsHost } from './diagnostics';
@@ -14,7 +13,7 @@ import type { API } from 'typescript/sync';
 import type { AbsolutePath, RelativePath, CommandLineOptions, TypeScriptOptions, TypeScriptConfiguration, ReadConfigResult, EntryPoints, JsonString, BuildConfiguration } from '../@types';
 
 /** Default CLI-only runtime options for project construction. */
-export const defaultCommandLineOptions: CommandLineOptions = { clearCache: false, force: false, watch: false, minify: false };
+export const defaultCommandLineOptions: CommandLineOptions = { watch: false, minify: false };
 
 const domPredicate = (lib: string) => [ 'DOM', 'LIB.DOM.D.TS' ].includes(lib.toUpperCase());
 const jsonTsbuildKeys = [ 'entryPoints', 'platform', 'bundle', 'clean', 'outputStyle', 'packages', 'external', 'noExternal', 'dts', 'env', 'sourceMap', 'splitting', 'banner', 'footer', 'plugins', 'iife' ] as const;
@@ -100,7 +99,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 function validateJsonTsbuildConfiguration(tsbuild: unknown) {
 	if (isPlainObject(tsbuild)) {
-		for (const option of [ 'clearCache', 'force', 'minify', 'watch' ]) {
+		for (const option of [ 'minify', 'watch' ]) {
 			if (option in tsbuild) { throw new ConfigurationError(`Configuration option "tsbuild.${option}" is CLI-only; use the "--${option}" command-line option.`) }
 		}
 	}
@@ -122,11 +121,10 @@ function validateJsonTsbuildConfiguration(tsbuild: unknown) {
  * @param typeScriptOptions - Partial TypeScript options to merge
  * @param options - Command-line options
  * @param options.minify - Minify output
- * @param options.force - Force rebuild
  * @param options.watch - Watch mode
  * @returns Resolved configuration and TypeScript parser results
  */
-export function resolveConfiguration(api: API, directory: AbsolutePath, typeScriptOptions: TypeScriptOptions, { minify, force, watch, outputStyle }: CommandLineOptions): TypeScriptConfiguration {
+export function resolveConfiguration(api: API, directory: AbsolutePath, typeScriptOptions: TypeScriptOptions, { minify, watch, outputStyle }: CommandLineOptions): TypeScriptConfiguration {
 	const configFile = findConfigFile(directory) ?? Paths.join(directory, './tsconfig.json');
 	const configResult = api.readConfigFile(configFile) as ReadConfigResult;
 
@@ -176,7 +174,6 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 	const defaultTsbuildConfig: BuildConfiguration = {
 		splitting: bundle,
 		minify,
-		force,
 		bundle,
 		sourceMap: typeScriptOptions.compilerOptions?.sourceMap ?? configResult.config.compilerOptions?.sourceMap ?? false,
 		noExternal,
@@ -199,7 +196,7 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 			watch: defaultTsbuildConfig.watch
 		},
 		compilerOptions: {
-			...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, incremental: true, lib: [] },
+			...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, lib: [] },
 			...configResult.config.compilerOptions,
 			...typeScriptOptions.compilerOptions,
 			// Auto-inject 'node' only on Node platform — browser/neutral builds shouldn't pay the cost of loading @types/node (~3 MB of declarations).
@@ -238,6 +235,5 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 		configFilePath: configFile,
 		rootNames: fileNames,
 		configFileParsingDiagnostics: errors,
-		buildCache: baseConfig.compilerOptions.incremental ? new IncrementalBuildCache(directory) : undefined
 	};
 }

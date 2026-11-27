@@ -6,7 +6,6 @@ import { defaultCommandLineOptions, resolveConfiguration } from '../../src/proje
 import { diagnosticsHost } from '../../src/project/diagnostics';
 import { compilerOptionOverrides, defaultEntryFile, defaultSourceDirectory } from '../../src/constants';
 import { ConfigurationError } from '../../src/errors';
-import { IncrementalBuildCache } from '../../src/incremental-build-cache';
 import { Logger } from '../../src/logger';
 import { Paths } from '../../src/paths';
 import { TestHelper } from '../scripts/test-helper';
@@ -34,14 +33,13 @@ afterEach(() => {
 });
 
 describe('resolveConfiguration', () => {
-	it('preserves default options, absolute parser paths, and synchronous cache construction', async () => {
+	it('preserves default options and absolute parser paths', () => {
 		const config = resolveConfiguration(TestHelper.api, projectDirectory, {}, defaultCommandLineOptions);
-		expect(defaultCommandLineOptions).toEqual({ clearCache: false, force: false, watch: false, minify: false });
+		expect(defaultCommandLineOptions).toEqual({ watch: false, minify: false });
 		expect(config).toMatchObject({ directory: projectDirectory, configFilePath, clean: true, rootNames: [ '/project/src/index.ts' ], configFileParsingDiagnostics: [] });
-		expect(config.tsbuild).toMatchObject({ bundle: true, splitting: true, minify: false, force: false, sourceMap: false, outputStyle: 'summary', noExternal: [], packages: 'external', platform: 'node', dts: { resolve: false }, entryPoints: { index: defaultEntryFile }, watch: { enabled: false, recursive: true, emitInitial: false, persistent: true, renameTimeout: 150 } });
-		expect(config.compilerOptions).toMatchObject({ ...compilerOptionOverrides, outDir: '/project/dist', rootDir: '/project/src', noEmit: false, sourceMap: false, incremental: true, lib: [], types: [ 'node' ] });
-		expect(config.buildCache).toBeInstanceOf(IncrementalBuildCache);
-		await config.buildCache?.restore(new Map());
+		expect(config.tsbuild).toMatchObject({ bundle: true, splitting: true, minify: false, sourceMap: false, outputStyle: 'summary', noExternal: [], packages: 'external', platform: 'node', dts: { resolve: false }, entryPoints: { index: defaultEntryFile }, watch: { enabled: false, recursive: true, emitInitial: false, persistent: true, renameTimeout: 150 } });
+		expect(config.compilerOptions).toMatchObject({ ...compilerOptionOverrides, target: ScriptTarget.ESNext, outDir: '/project/dist', rootDir: '/project/src', noEmit: false, sourceMap: false, lib: [], types: [ 'node' ] });
+		expect(config.compilerOptions).not.toHaveProperty('incremental');
 	});
 
 	it('merges defaults, JSON, and API options in order while retaining compiler overrides', () => {
@@ -49,13 +47,19 @@ describe('resolveConfiguration', () => {
 		const config = resolveConfiguration(TestHelper.api, projectDirectory, {
 			compilerOptions: { outDir: './api-dist', sourceMap: false, types: [ 'shared', 'api' ], allowJs: true, skipLibCheck: false, target: ScriptTarget.ES2015 },
 			tsbuild: { clean: true, outputStyle: 'detailed', sourceMap: 'external', dts: { resolve: false }, banner: { js: 'api' }, noExternal: [ /api/ ] }
-		}, { clearCache: true, force: true, watch: true, minify: true });
+		}, { watch: true, minify: true });
 		expect(config.clean).toBe(true);
 		expect(config.compilerOptions).toMatchObject({ ...compilerOptionOverrides, outDir: '/project/api-dist', sourceMap: false, types: [ 'node', 'json', 'shared', 'api' ] });
-		expect(config.tsbuild).toMatchObject({ force: true, minify: true, outputStyle: 'detailed', sourceMap: 'external', dts: { entryPoints: [ 'index' ], resolve: false }, noExternal: [ /api/ ], watch: { enabled: true } });
+		expect(config.tsbuild).toMatchObject({ minify: true, outputStyle: 'detailed', sourceMap: 'external', dts: { entryPoints: [ 'index' ], resolve: false }, noExternal: [ /api/ ], watch: { enabled: true } });
 		expect(config.tsbuild.banner).toEqual({ js: 'api' });
 		expect(config.tsbuild.packages).toBeUndefined();
-		expect(config.buildCache).toBeUndefined();
+	});
+
+	it('preserves an explicitly configured TypeScript incremental option without enabling a tsbuild disk cache', () => {
+		writeConfig({ compilerOptions: { incremental: true } });
+		const config = resolveConfiguration(TestHelper.api, projectDirectory, {}, defaultCommandLineOptions);
+
+		expect(config.compilerOptions.incremental).toBe(true);
 	});
 
 	it.each([ 'dashboard', 'pipeline', 'artifacts', 'summary', 'detailed' ])('applies CLI output style %s over API and JSON configuration', (outputStyle) => {
@@ -137,13 +141,15 @@ describe('resolveConfiguration', () => {
 		expect(warn).toHaveBeenCalledExactlyOnceWith(message);
 	});
 
-	it.each([ 'clearCache', 'force', 'minify', 'watch' ])('rejects JSON CLI-only %s before applying API overrides or constructing a cache', (option) => {
+	it.each([ 'minify', 'watch' ])('rejects JSON CLI-only %s before applying API overrides', (option) => {
 		writeConfig({ tsbuild: { [option]: false, unknown: true } });
 		expect(() => resolveConfiguration(TestHelper.api, projectDirectory, { tsbuild: {} }, defaultCommandLineOptions)).toThrow(new ConfigurationError(`Configuration option "tsbuild.${option}" is CLI-only; use the "--${option}" command-line option.`));
 	});
 
 	it.each([
 		{ tsbuild: { typo: true }, path: 'tsbuild.typo', keys: 'entryPoints, platform, bundle, clean, outputStyle, packages, external, noExternal, dts, env, sourceMap, splitting, banner, footer, plugins, iife' },
+		{ tsbuild: { force: true }, path: 'tsbuild.force', keys: 'entryPoints, platform, bundle, clean, outputStyle, packages, external, noExternal, dts, env, sourceMap, splitting, banner, footer, plugins, iife' },
+		{ tsbuild: { clearCache: true }, path: 'tsbuild.clearCache', keys: 'entryPoints, platform, bundle, clean, outputStyle, packages, external, noExternal, dts, env, sourceMap, splitting, banner, footer, plugins, iife' },
 		{ tsbuild: { dts: { typo: true } }, path: 'tsbuild.dts.typo', keys: 'entryPoints, resolve' },
 		{ tsbuild: { banner: { typo: true } }, path: 'tsbuild.banner.typo', keys: 'js, css' },
 		{ tsbuild: { footer: { typo: true } }, path: 'tsbuild.footer.typo', keys: 'js, css' },

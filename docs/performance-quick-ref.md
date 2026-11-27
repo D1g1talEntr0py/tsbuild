@@ -3,7 +3,12 @@
 **Updated:** 2026-10-25
 **Environment:** Linux x64, Node.js 26.12.1, pnpm 12.15.0, TypeScript 7.1.0-beta
 
-## Current reference
+## Historical cache-enabled reference
+
+The measurements below predate removal of tsbuild's cross-process input and
+declaration caches. In particular, the no-op timings are not representative of
+current builds: non-watch invocations now perform a full type-check and emit.
+Retain these numbers only as the prior baseline.
 
 These are medians from five uninstrumented fresh-process CLI runs per mode.
 Each no-op run followed a cold build on the same isolated fixture, in a new
@@ -39,7 +44,7 @@ baseline. For original-to-current comparisons and stage-specific results, see
 
 1. Build a fresh split ESM CLI from current source; do not use a stale bundle.
 2. Copy fixed project fixtures to an isolated work directory.
-3. Clear only the fixture's `dist` and `.tsbuild` directories for cold runs.
+3. Clear only the fixture's `dist` directory for cold runs.
 4. Run samples sequentially and record environment, median, range, and sample
    count. Keep uninstrumented CLI, component timings, and memory diagnostics
    separate.

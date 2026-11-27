@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { version } from 'typescript';
 import { API, DiagnosticCategory, ModuleKind, ModuleResolutionKind } from 'typescript/sync';
 import { toRootedDirectoryPath, toRootedFilePath } from 'typescript/path';
 import { CompilationContext } from '../../src/project/compilation-context';
@@ -67,35 +66,24 @@ afterEach(async () => {
 });
 
 describe('CompilationContext', () => {
-	it('creates its generation lazily, returns detached roots and keys only compiler inputs', async () => {
+	it('creates its generation lazily and returns detached roots', async () => {
 		const createSnapshot = vi.spyOn(api, 'createSnapshot');
 		const context = createContext();
-		const key = context.manifestKey;
-		expect(JSON.parse(key)).toEqual({
-			rootNames: [ entryPath ],
-			compilerOptions: expect.objectContaining({ declaration: true, incremental: true }),
-			version
-		});
 		context.rootNames.push(dependencyPath);
 		expect(context.rootNames).toEqual([ entryPath ]);
 		expect(context.sourceText(entryPath)).toBeUndefined();
 		expect(context.dependencies.size).toBe(0);
 		context.notify('change', dependencyPath);
 		context.rebuild([ entryPath, dependencyPath ]);
-		expect(context.manifestKey).not.toBe(key);
 		expect(createSnapshot).not.toHaveBeenCalled();
 		await writeFile(dependencyPath, 'export const value = 2;');
-		const changedKey = context.manifestKey;
 		expect(context.compile().diagnostics).toEqual([]);
 		expect(context.sourceText(dependencyPath)).toBe('export const value = 2;');
-		expect(context.manifestKey).toBe(changedKey);
 		context.compile();
 		expect(createSnapshot).toHaveBeenCalledTimes(1);
 	});
 
-	it('emits detached declarations and an incremental manifest with input stat signatures', async () => {
-		const before = new Date(Date.now() - 10_000);
-		await utimes(entryPath, before, before);
+	it('emits detached declarations and tracks project dependencies', async () => {
 		const context = createContext();
 		const batch = vi.spyOn(api, 'batch');
 		const result = context.compile();
@@ -103,23 +91,18 @@ describe('CompilationContext', () => {
 		expect(batch).toHaveBeenCalledTimes(1);
 		expect(result.declarations.get(Paths.absolute(join(directory, 'dist/index.d.ts')))).toContain('export declare const result: number;');
 		expect(result.declarations.get(Paths.absolute(join(directory, 'dist/value.d.ts')))).toContain('value = 1');
-		expect(result.manifest?.key).toBe(context.manifestKey);
-		expect(result.manifest?.files).toContainEqual([ entryPath, (await stat(entryPath)).mtimeMs, (await stat(entryPath)).size ]);
-		expect(result.manifest!.files.length).toBeGreaterThan(2);
 		const dependencies = context.dependencies;
 		expect(dependencies).toEqual(new Set([ 'src/value.ts', 'src/index.ts' ]));
 		expect(context.dependencies).toBe(dependencies);
 		expect(context.sourceText(Paths.absolute(join(directory, 'missing.ts')))).toBeUndefined();
 		context.clear();
 		expect(result.declarations.size).toBe(2);
-		expect(result.manifest?.files.length).toBeGreaterThan(2);
 	});
 
-	it('returns semantic errors and does not create a manifest', async () => {
+	it('returns semantic errors', async () => {
 		await writeFile(dependencyPath, 'export const value = "wrong";');
 		const result = createContext().compile();
 		expect(result.diagnostics).toEqual(expect.arrayContaining([ expect.objectContaining({ code: 2322 }) ]));
-		expect(result.manifest).toBeUndefined();
 	});
 
 	it('prepends configuration parsing diagnostics to compiler diagnostics', async () => {
@@ -128,7 +111,6 @@ describe('CompilationContext', () => {
 		const result = createContext({ configFileParsingDiagnostics: [ diagnostic ] }).compile();
 		expect(result.diagnostics[0]).toBe(diagnostic);
 		expect(result.diagnostics.slice(1)).toEqual(expect.arrayContaining([ expect.objectContaining({ code: 2322 }) ]));
-		expect(result.manifest).toBeUndefined();
 	});
 
 	it.each([ true, false ])('checks without emitting declarations under noEmit (declaration: %s)', (declaration) => {
@@ -136,7 +118,6 @@ describe('CompilationContext', () => {
 		const result = context.compile();
 		expect(result.diagnostics).toEqual([]);
 		expect(result.declarations.size).toBe(0);
-		expect(result.manifest?.key).toBe(context.manifestKey);
 	});
 
 	it('returns declaration diagnostics under noEmit', async () => {
@@ -144,14 +125,6 @@ describe('CompilationContext', () => {
 		const result = createContext({ compilerOptions: { declaration: true, noEmit: true, isolatedDeclarations: true, types: [] } }).compile();
 		expect(result.diagnostics.length).toBeGreaterThan(0);
 		expect(result.declarations.size).toBe(0);
-		expect(result.manifest).toBeUndefined();
-	});
-
-	it('omits the manifest when incremental compilation is disabled', () => {
-		const result = createContext({ compilerOptions: { types: [], declaration: false, incremental: false } }).compile();
-		expect(result.diagnostics).toEqual([]);
-		expect(result.declarations.size).toBe(0);
-		expect(result.manifest).toBeUndefined();
 	});
 
 	it('filters declaration maps out of emitted declarations', () => {
@@ -247,23 +220,6 @@ describe('CompilationContext', () => {
 		expect(updateParams(nextUpdate).reconfigurePrograms).toBeUndefined();
 	});
 
-	it('restores only in-project non-declaration dependencies without creating a generation', () => {
-		const createSnapshot = vi.spyOn(api, 'createSnapshot');
-		const context = createContext();
-		const empty = context.dependencies;
-		context.restore({ key: context.manifestKey, files: [
-			[ entryPath, 0, 1 ], [ dependencyPath, 0, 1 ],
-			[ join(directory, 'globals.d.ts'), 0, 1 ],
-			[ directory + '-other/outside.ts', 0, 1 ]
-		] });
-		expect(context.dependencies).toEqual(new Set([ 'src/index.ts', 'src/value.ts' ]));
-		expect(context.dependencies).not.toBe(empty);
-		expect(context.sourceText(entryPath)).toBeUndefined();
-		expect(createSnapshot).not.toHaveBeenCalled();
-		context.restore({ key: context.manifestKey, files: [] });
-		expect(context.dependencies.size).toBe(0);
-	});
-
 	it.each([ 'clear', 'dispose' ])('releases the generation, dependencies and pending state with %s', async (method) => {
 		const createSnapshot = vi.spyOn(api, 'createSnapshot');
 		const context = createContext();
@@ -283,26 +239,6 @@ describe('CompilationContext', () => {
 		expect(context.compile().diagnostics).toEqual([]);
 		expect(context.sourceText(dependencyPath)).toBe('export const value = 9;');
 		expect(createSnapshot).toHaveBeenCalledTimes(2);
-	});
-
-	it('marks inputs modified at or after compilation start as unverifiable', async () => {
-		const startedAt = Date.now() + 10_000;
-		await utimes(entryPath, new Date(startedAt), new Date(startedAt));
-		await utimes(dependencyPath, new Date(startedAt + 1_000), new Date(startedAt + 1_000));
-		vi.spyOn(Date, 'now').mockReturnValue(startedAt);
-		const result = createContext().compile();
-		expect(result.diagnostics).toEqual([]);
-		expect(result.manifest?.files).toContainEqual([ entryPath, -1, (await stat(entryPath)).size ]);
-		expect(result.manifest?.files).toContainEqual([ dependencyPath, -1, (await stat(dependencyPath)).size ]);
-	});
-
-	it('omits inputs that disappeared from disk after the program read them', async () => {
-		const context = createContext();
-		context.compile();
-		await rm(dependencyPath);
-		const result = context.compile();
-		expect(result.diagnostics).toEqual([]);
-		expect(result.manifest?.files.some(([ path ]) => path === dependencyPath)).toBe(false);
 	});
 
 	it('disposes both snapshots and reports a missing program from the native boundary', () => {

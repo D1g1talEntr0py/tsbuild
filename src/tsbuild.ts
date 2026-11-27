@@ -5,11 +5,9 @@ import { BuildError } from './errors';
 const options = {
 	help: { type: 'boolean', default: undefined, short: 'h', description: 'Show this help message' },
 	version: { type: 'boolean', default: undefined, short: 'v', description: 'Show version number' },
-	force: { type: 'boolean', default: false, short: 'f', description: 'Force a full rebuild' },
 	watch: { type: 'boolean', default: false, short: 'w', description: 'Watch for changes and rebuild' },
 	project: { type: 'string', default: process.cwd(), short: 'p', description: 'Project directory (defaults to current directory)' },
 	noEmit: { type: 'boolean', default: false, short: 'n', description: 'Do not emit output files' },
-	clearCache: { type: 'boolean', default: false, short: 'c', description: 'Clear the cache before the build' },
 	minify: { type: 'boolean', default: false, short: 'm', description: 'Minify the output' },
 	outputStyle: { type: 'string', default: undefined, short: 's', description: 'Build report style (dashboard, pipeline, artifacts, summary, detailed; default: summary)' }
 } as const;

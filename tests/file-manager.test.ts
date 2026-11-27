@@ -3,11 +3,10 @@ import { readFile as fsReadFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultDirOptions } from '../src/constants';
 import { FileManager } from '../src/file-manager';
-import { IncrementalBuildCache } from '../src/incremental-build-cache';
 import { DeclarationProcessor } from '../src/dts/declaration-processor';
 import { TestHelper } from './scripts/test-helper';
 import type { MockInstance } from 'vitest';
-import type { AbsolutePath, BuildInputManifest, CachedDeclaration } from '../src/@types';
+import type { AbsolutePath } from '../src/@types';
 
 vi.mock('node:fs', async () => {
 	const memfs: typeof import('memfs') = await vi.importActual('memfs');
@@ -30,17 +29,13 @@ describe('FileManager', () => {
 	afterEach(() => { TestHelper.teardownMemfs() });
 
 	describe('ingest and lifecycle', () => {
-		it('constructs with and without a build cache', () => {
+		it('constructs with an empty declaration store', () => {
 			expect(new FileManager(TestHelper.api).getDeclarationFiles().size).toBe(0);
-			expect(new FileManager(TestHelper.api, new IncrementalBuildCache(tempDir)).getDeclarationFiles().size).toBe(0);
 		});
 
-		it('pre-processes declarations and finalizes uncached builds', async () => {
+		it('pre-processes declarations', () => {
 			const manager = new FileManager(TestHelper.api);
-			await manager.initialize();
-			expect(manager.finalize()).toBe(true);
 			manager.ingest(oneDeclaration('export const hello: string;'));
-			expect(manager.finalize()).toBe(true);
 			const result = manager.getDeclarationFiles().get(declarationPath);
 			expect(result?.code).toContain('declare const hello: string;');
 			expect(result?.code).toContain('export { hello }');
@@ -71,64 +66,6 @@ describe('FileManager', () => {
 			const manager = new FileManager(TestHelper.api);
 			manager.ingest(oneDeclaration(''));
 			expect(manager.getDeclarationFiles().size).toBe(0);
-			expect(manager.finalize()).toBe(true);
-		});
-
-		it('waits for a pending cache write during initialize', async () => {
-			const manager = new FileManager(TestHelper.api, new IncrementalBuildCache(tempDir));
-			manager.ingest(oneDeclaration('export const value: string;'));
-			manager.persistCache('fingerprint');
-			await manager.initialize();
-			expect(manager.finalize()).toBe(false);
-		});
-
-		it('resets the emit flag on initialize without clearing declarations', async () => {
-			const manager = new FileManager(TestHelper.api, new IncrementalBuildCache(tempDir));
-			manager.ingest(oneDeclaration('export const value: string;'));
-			await manager.initialize();
-			expect(manager.finalize()).toBe(false);
-			expect(manager.getDeclarationFiles().size).toBe(1);
-		});
-
-		it('restores cached declarations, and does not overwrite an already populated map', async () => {
-			const source = new Map<string, CachedDeclaration>([[declarationPath, {
-				code: 'declare const cached: string;', typeReferences: new Set<string>(), fileReferences: new Set<string>(),
-			}]]);
-			await new IncrementalBuildCache(tempDir).save(source, 'fingerprint');
-			const manager = new FileManager(TestHelper.api, new IncrementalBuildCache(tempDir));
-			await manager.restore();
-			expect(manager.getDeclarationFiles().get(declarationPath)?.code).toBe('declare const cached: string;');
-			manager.ingest(oneDeclaration('export const fresh: number;'));
-			await manager.restore();
-			expect(manager.getDeclarationFiles().size).toBe(1);
-			expect(manager.getDeclarationFiles().get(declarationPath)?.code).toContain('fresh');
-			await expect(new FileManager(TestHelper.api).restore()).resolves.toBeUndefined();
-		});
-
-		it('persists emitted declarations with their manifest', async () => {
-			const cache = new IncrementalBuildCache(tempDir);
-			const save = vi.spyOn(cache, 'save');
-			const manager = new FileManager(TestHelper.api, cache);
-			const manifest: BuildInputManifest = { key: 'input-key', files: [] };
-			manager.ingest(oneDeclaration('export const value: string;'), manifest);
-			manager.persistCache('fingerprint');
-			await manager.flush();
-			expect(save).toHaveBeenCalledWith(manager.getDeclarationFiles(), 'fingerprint', manifest);
-		});
-
-		it('saves configuration changes without compiler output, but otherwise skips cache writes', async () => {
-			const cache = new IncrementalBuildCache(tempDir);
-			const save = vi.spyOn(cache, 'save');
-			const manager = new FileManager(TestHelper.api, cache);
-			manager.persistCache('changed', true);
-			await manager.flush();
-			expect(save).toHaveBeenCalledWith(manager.getDeclarationFiles(), 'changed');
-			const uncached = new FileManager(TestHelper.api);
-			uncached.ingest(oneDeclaration('export const value: string;'));
-			uncached.persistCache('unused');
-			manager.persistCache('unchanged');
-			await manager.flush();
-			expect(save).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -186,7 +123,6 @@ describe('FileManager', () => {
 			expect(batch).not.toHaveBeenCalled();
 			expect(preProcess).not.toHaveBeenCalled();
 			expect(manager.getDeclarationFiles().size).toBe(0);
-			expect(manager.finalize()).toBe(true);
 		});
 
 		it('keeps the stored declarations when an emitted declaration cannot be parsed', () => {
@@ -248,13 +184,9 @@ describe('FileManager', () => {
 			expect(output).toContain('from "pkg"');
 		});
 
-		it('skips writing cached declarations whose code is empty', async () => {
-			const empty = new Map<string, CachedDeclaration>([[declarationPath, {
-				code: '', typeReferences: new Set<string>(), fileReferences: new Set<string>(),
-			}]]);
-			await new IncrementalBuildCache(tempDir).save(empty, 'fingerprint');
-			const manager = new FileManager(TestHelper.api, new IncrementalBuildCache(tempDir));
-			await manager.restore();
+		it('skips writing declarations whose code is empty', async () => {
+			const manager = new FileManager(TestHelper.api);
+			manager.ingest(oneDeclaration(''));
 			expect(await manager.writeFiles(tempDir)).toEqual([]);
 		});
 
@@ -299,80 +231,4 @@ describe('FileManager', () => {
 		expect(manager.getDeclarationFiles().size).toBe(0);
 	});
 
-	describe('flush', () => {
-		it('waits for saves and allows a subsequent save cycle', async () => {
-			const manager = new FileManager(TestHelper.api, new IncrementalBuildCache(tempDir));
-			manager.ingest(oneDeclaration('export const first: string;'));
-			manager.persistCache('one');
-			await manager.flush();
-			await expect(manager.flush()).resolves.toBeUndefined();
-			manager.ingest(oneDeclaration('export const second: number;'));
-			manager.persistCache('two');
-			await manager.flush();
-			expect(manager.getDeclarationFiles().get(declarationPath)?.code).toContain('second');
-		});
-
-		it('combines overlapping save promises', async () => {
-			const cache = new IncrementalBuildCache(tempDir);
-			const save = vi.spyOn(cache, 'save').mockImplementation(async () => {
-				await new Promise<void>(resolve => setImmediate(resolve));
-			});
-			const manager = new FileManager(TestHelper.api, cache);
-			manager.ingest(oneDeclaration('export const value: string;'));
-			manager.persistCache('one');
-			manager.persistCache('two');
-			await manager.flush();
-			expect(save).toHaveBeenCalledTimes(2);
-		});
-
-		it('handles rejected background saves without an unhandled rejection', async () => {
-			const cache = new IncrementalBuildCache(tempDir);
-			vi.spyOn(cache, 'save').mockRejectedValue(new Error('cache save failed'));
-			const manager = new FileManager(TestHelper.api, cache);
-			manager.ingest(oneDeclaration('export const value: string;'));
-			const unhandled: unknown[] = [];
-			const listener = (reason: unknown): void => { unhandled.push(reason) };
-			process.on('unhandledRejection', listener);
-			manager.persistCache('fingerprint');
-			await new Promise<void>(resolve => setImmediate(resolve));
-			process.off('unhandledRejection', listener);
-			expect(unhandled).toEqual([]);
-			await expect(manager.flush()).rejects.toThrow('cache save failed');
-		});
-	});
-
-	describe('async disposal', () => {
-		it('waits for cache writes before clearing declarations and shares its promise', async () => {
-			const cache = new IncrementalBuildCache(tempDir);
-			const manager = new FileManager(TestHelper.api, cache);
-			const saveStarted = Promise.withResolvers<void>();
-			const releaseSave = Promise.withResolvers<void>();
-			vi.spyOn(cache, 'save').mockImplementation(async () => {
-				saveStarted.resolve();
-				await releaseSave.promise;
-			});
-			manager.ingest(oneDeclaration('export const value: string;'));
-			manager.persistCache('fingerprint');
-			await saveStarted.promise;
-
-			const disposal = manager[Symbol.asyncDispose]();
-			expect(manager[Symbol.asyncDispose]()).toBe(disposal);
-			expect(manager.getDeclarationFiles()).toHaveProperty('size', 1);
-
-			releaseSave.resolve();
-			await disposal;
-			expect(manager.getDeclarationFiles()).toHaveProperty('size', 0);
-		});
-
-		it('releases declarations and propagates cache-save failures', async () => {
-			const cache = new IncrementalBuildCache(tempDir);
-			const manager = new FileManager(TestHelper.api, cache);
-			vi.spyOn(cache, 'save').mockRejectedValue(new Error('cache save failed'));
-			manager.ingest(oneDeclaration('export const value: string;'));
-			manager.persistCache('fingerprint');
-
-			await expect(manager[Symbol.asyncDispose]()).rejects.toThrow('cache save failed');
-			expect(manager.getDeclarationFiles()).toHaveProperty('size', 0);
-		});
-	});
 });

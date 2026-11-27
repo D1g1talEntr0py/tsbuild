@@ -51,11 +51,11 @@ describe('TypeScriptProject - Watch Mode', () => {
 	it('starts watching after build() and close() stops the watcher without error', async () => {
 		const { dir, cleanup: c } = await TestHelper.createTempProject({
 			files: { 'src/index.ts': 'export const version = 1;' },
-			tsconfig: { tsbuild: { clean: false } }
+			tsconfig: { compilerOptions: { incremental: true }, tsbuild: { clean: false } }
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		expect(await project.build()).toBeNull();
 		await new Promise<void>(resolve => setImmediate(resolve));
 		await expect(stat(join(dir, '.tsbuild', 'tsconfig.tsbuildinfo'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -91,7 +91,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 		const errorSpy = vi.spyOn(Logger, 'error');
-		project = new TypeScriptProject(dir, { compilerOptions: { noEmit: true } }, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, { compilerOptions: { noEmit: true } }, { watch: true, minify: false });
 
 		try {
 			{
@@ -120,7 +120,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -143,7 +143,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 		const failure = new Error('console unavailable');
@@ -168,7 +168,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -189,7 +189,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 			tsconfig: { tsbuild: { clean: false } }
 		});
 		cleanup = c;
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		const cache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
 		const indexPath = Paths.absolute(dir, 'dist/index.d.ts');
@@ -268,7 +268,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -317,7 +317,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -339,7 +339,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -362,7 +362,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -408,7 +408,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -436,7 +436,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -484,7 +484,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 
 		await new Promise<void>(resolve => setImmediate(resolve));
@@ -511,7 +511,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -538,7 +538,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -576,7 +576,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -625,7 +625,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -661,7 +661,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -684,7 +684,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -715,7 +715,7 @@ describe('TypeScriptProject - Watch Mode', () => {
 		});
 		cleanup = c;
 
-		project = new TypeScriptProject(dir, {}, { clearCache: false, force: false, watch: true, minify: false });
+		project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
 		await project.build();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
