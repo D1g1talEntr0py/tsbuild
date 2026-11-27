@@ -2,12 +2,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Logger } from './logger';
 import type { Closable } from './@types';
 
+const sigintCleanupTimeoutMs = 5000;
 const ProcessEvent = {
 	exit: 'exit',
 	sigint: 'SIGINT',
 	uncaughtException: 'uncaughtException'
-};
-const sigintCleanupTimeoutMs = 5000;
+} as const;
 
 /** Manages process events and allows registering closeable classes to be closed on exit */
 class ProcessManager implements Closable, Disposable {
@@ -18,8 +18,10 @@ class ProcessManager implements Closable, Disposable {
 	constructor() {
 		process.addListener(ProcessEvent.exit, this.#handleExit);
 		this.#listeners.defer(() => process.removeListener(ProcessEvent.exit, this.#handleExit));
+
 		process.addListener(ProcessEvent.sigint, this.#consoleExit);
 		this.#listeners.defer(() => process.removeListener(ProcessEvent.sigint, this.#consoleExit));
+
 		process.addListener(ProcessEvent.uncaughtException, this.#handleUncaughtException);
 		this.#listeners.defer(() => process.removeListener(ProcessEvent.uncaughtException, this.#handleUncaughtException));
 	}
@@ -76,17 +78,18 @@ class ProcessManager implements Closable, Disposable {
 	async #runCleanup() {
 		const pendingCleanup: Promise<void>[] = [];
 
+		// Iterate over all registered closeable resources and attempt to close them.
+		// Use a copy of the array to avoid issues if closeable resources are removed during iteration.
 		for (const [ index, closeable ] of [ ...this.#closeableClasses ].entries()) {
 			const resourceLabel = `${closeable.constructor.name || 'anonymous resource'} #${index + 1}`;
 
 			try {
 				const result = closeable.close();
+
 				if (result !== undefined) {
 					pendingCleanup.push(result.catch((error: unknown) => Logger.error(`Error while closing ${resourceLabel}...`, Error.isError(error) ? error.stack : error)));
 				}
-			} catch (error) {
-				Logger.error(`Error while closing ${resourceLabel}...`, Error.isError(error) ? error.stack : error);
-			}
+			} catch (error) { Logger.error(`Error while closing ${resourceLabel}...`, Error.isError(error) ? error.stack : error) }
 		}
 
 		this.close();

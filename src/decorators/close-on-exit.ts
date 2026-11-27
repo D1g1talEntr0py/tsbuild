@@ -7,10 +7,10 @@ import type { ClosableConstructor } from '../@types';
  * @param value - The constructor of the class to decorate
  * @param _context - The decorator context (unused)
  */
-export function closeOnExit<T extends ClosableConstructor>(value: T, _context: ClassDecoratorContext): T {
+export function closeOnExit<T extends ClosableConstructor>(value: T, _context: ClassDecoratorContext<T>): T {
 	// Return a new class that extends the original and registers with processManager
 	return class extends value {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any - TypeScript requires the use of any[] for generic mixin constructors
 		constructor(...args: any[]) {
 			// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
 			super(...args);

@@ -16,7 +16,7 @@ export type CompilationContextOptions = {
 };
 
 /** Plain-data result of one compilation; nothing in it references compiler-process handles. */
-export type CompilationResult = {
+type CompilationResult = {
 	diagnostics: readonly Diagnostic[];
 	/** Emitted declaration text keyed by absolute output path (empty when declarations are not emitted) */
 	declarations: ReadonlyMap<AbsolutePath, string>;
@@ -55,7 +55,7 @@ export class CompilationContext implements Disposable {
 	readonly #projectReferences: readonly ProjectReference[] | undefined;
 
 	/**
-	 * Captures compiler inputs. The compiler snapshot is created lazily on the first {@link compile}, so a build whose inputs are unchanged never starts it.
+	 * Captures compiler inputs. The compiler snapshot is created lazily on the first {@link compile} and reused by watch rebuilds.
 	 * @param options - Compiler inputs and the API that owns the compiler process
 	 */
 	constructor({ api, directory, compilerOptions, rootNames, configFileParsingDiagnostics = [], projectReferences }: CompilationContextOptions) {
@@ -139,13 +139,13 @@ export class CompilationContext implements Disposable {
 	/**
 	 * Type-checks the program and emits declarations in a single batched round trip.
 	 * Declarations are emitted only when `declaration` is enabled and `noEmit` is off; declaration diagnostics are checked separately under `noEmit`.
-	 * @returns Diagnostics, emitted declaration text and, when error-free, the input manifest
+	 * @returns Diagnostics and emitted declaration text
 	 */
 	compile(): CompilationResult {
 		const { program } = this.#generation ??= this.#createGeneration();
 		const { declaration, noEmit } = this.#compilerOptions;
 
-		const [ programDiagnostics, syntacticDiagnostics, globalDiagnostics, semanticDiagnostics, sourceFileNames, { emitOutput, declarationDiagnostics } ] = this.#api.batch(
+		const [	programDiagnostics, syntacticDiagnostics, globalDiagnostics, semanticDiagnostics, sourceFileNames, { emitOutput, declarationDiagnostics } ] = this.#api.batch(
 			program.getProgramDiagnostics.gen(),
 			program.getSyntacticDiagnostics.gen(),
 			program.getGlobalDiagnostics.gen(),

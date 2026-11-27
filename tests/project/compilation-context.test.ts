@@ -33,7 +33,6 @@ function createContext(overrides: Partial<CompilationContextOptions> = {}): Comp
 			moduleResolution: ModuleResolutionKind.Bundler,
 			types: [],
 			declaration: true,
-			incremental: true,
 			rootDir: toRootedDirectoryPath(join(directory, 'src'), undefined),
 			outDir: toRootedDirectoryPath(join(directory, 'dist'), undefined)
 		},
@@ -83,7 +82,7 @@ describe('CompilationContext', () => {
 		expect(createSnapshot).toHaveBeenCalledTimes(1);
 	});
 
-	it('emits detached declarations and tracks project dependencies', async () => {
+	it('emits detached declarations and tracks project dependencies', () => {
 		const context = createContext();
 		const batch = vi.spyOn(api, 'batch');
 		const result = context.compile();
@@ -114,7 +113,7 @@ describe('CompilationContext', () => {
 	});
 
 	it.each([ true, false ])('checks without emitting declarations under noEmit (declaration: %s)', (declaration) => {
-		const context = createContext({ compilerOptions: { module: ModuleKind.ESNext, types: [], declaration, noEmit: true, incremental: true } });
+		const context = createContext({ compilerOptions: { module: ModuleKind.ESNext, types: [], declaration, noEmit: true } });
 		const result = context.compile();
 		expect(result.diagnostics).toEqual([]);
 		expect(result.declarations.size).toBe(0);

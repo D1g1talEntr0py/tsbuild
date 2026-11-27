@@ -26,11 +26,11 @@ const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS '))
 const defaultCloseTimeoutMs = 5000;
 
 /**
- * Checks if a status object represents a rejected state.
- * @param status - Status object with a `status` property
- * @returns `true` if the status is 'rejected', otherwise `false`
+ * Unwraps a disposal stack failure chain, where each later failure wraps the earlier ones as `suppressed`.
+ * @param error The error thrown by `AsyncDisposableStack.disposeAsync()`.
+ * @returns The first failure that occurred during disposal.
  */
-const statusIsRejected = ({ status }: { status: string }) => status === 'rejected';
+const earliestDisposalError = (error: unknown): unknown => error instanceof SuppressedError ? earliestDisposalError(error.suppressed) : error;
 
 /** Class representing a TypeScript project */
 @closeOnExit
@@ -111,15 +111,15 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	 */
 	@logPerformance(PerformancePhase.BUILD)
 	async build(): Promise<TypeScriptProject | null> {
-		if (this.#activeBuilds++ === 0) {
-			this.#buildCompletion = new Promise<void>((resolve) => this.#resolveBuildCompletion = resolve);
-		}
+		// Increment the active build count and initialize the build completion promise if this is the first active build.
+		if (this.#activeBuilds++ === 0) { this.#buildCompletion = new Promise<void>((resolve) => this.#resolveBuildCompletion = resolve) }
 
 		Logger.header(`${tsLogo} tsbuild v${import.meta.env?.tsbuild_version ?? process.env['npm_package_version']}`);
 		setBuildOutputStyle(this.#configuration.tsbuild.outputStyle ?? BuildOutputStyle.SUMMARY, this.#buildConfiguration.watch.enabled);
 
 		try {
 			const cleanEnabled = await this.#resolveBuildPlan();
+
 			flushPerformanceLog();
 
 			await this.#compile();
@@ -133,7 +133,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 		} finally {
 			try {
 				// In watch mode, populate buildDependencies from TypeScript program's source files.
-				// This is necessary because esbuild's inputs are only available after transpile(), which may not run for declaration-only builds.
+				// Esbuild inputs are only available after transpile(), which may not run for declaration-only builds.
 				if (this.#buildConfiguration.watch.enabled && !this.#closed) {
 					this.#buildDependencies = this.#compilationContext.dependencies;
 
@@ -161,23 +161,21 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	close(timeoutMs: number = defaultCloseTimeoutMs): Promise<void> {
 		if (this.#closePromise !== undefined) { return this.#closePromise }
 
-		if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
-			return Promise.reject(new ConfigurationError(`Shutdown timeout must be a finite non-negative number of milliseconds; received ${timeoutMs}.`));
-		}
+		if (!Number.isFinite(timeoutMs) || timeoutMs < 0) { return Promise.reject(new ConfigurationError(`Shutdown timeout must be a finite non-negative number of milliseconds; received ${timeoutMs}.`)) }
 
 		this.#closed = true;
 		processManager.removeCloseable(this);
 		this.#rebuildQueue.close();
 
-		const runCleanupProcesses = () => Promise.allSettled([ Promise.resolve().then(() => this.#fileManager.close()), this.#esbuildRunner[Symbol.asyncDispose]() ]);
-		const drain = (this.#buildCompletion === undefined ? runCleanupProcesses() : this.#buildCompletion.then(runCleanupProcesses)).then((settled) => {
-			// Synchronous compiler/resource disposal is part of shutdown too: account for its failures on the shared close promise, not an unobserved side promise.
-			try { this.#clearRuntimeState() } catch (reason) { settled.push({ status: 'rejected', reason }) }
+		// Disposal runs in reverse registration order: esbuild context, declaration state, then compiler state.
+		const disposableStack = new AsyncDisposableStack();
+		disposableStack.defer(() => this.#clearRuntimeState());
+		disposableStack.defer(() => this.#fileManager.close());
+		disposableStack.use(this.#esbuildRunner);
 
-			return settled;
-		});
+		const dispose = () => disposableStack.disposeAsync();
 
-		this.#closePromise = this.#executeDrainCleanup(drain, timeoutMs);
+		this.#closePromise = this.#executeGracefulShutdown(this.#buildCompletion?.then(dispose, dispose) ?? dispose(), timeoutMs);
 		void this.#closePromise.catch(alwaysUndefined);
 		this.#projectWatcher.close();
 
@@ -235,7 +233,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	};
 
 	/**
-	 * Determines whether the output directory should be cleaned before bundling.
+	 * Validates output paths and determines whether the output directory should be cleaned.
 	 * @returns Whether cleanup is enabled for this build
 	 */
 	@logPerformance(PerformancePhase.INITIALIZATION)
@@ -260,15 +258,13 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	}
 
 	/**
-	 * Type-checks the project and optionally emits declaration files.
+	 * Type-checks the project and emits declaration files when enabled.
 	 */
 	@logPerformance(PerformancePhase.COMPILE)
 	async #compile(): Promise<void> {
 		const { diagnostics, declarations } = this.#compilationContext.compile();
 
-		if (diagnostics.length > 0) {
-			handleTypeErrors('Type-checking failed', dedupeDiagnostics(diagnostics), this.#directory);
-		}
+		if (diagnostics.length > 0) { handleTypeErrors('Type-checking failed', dedupeDiagnostics(diagnostics), this.#directory) }
 
 		this.#fileManager.ingest(declarations);
 	}
@@ -286,7 +282,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	}
 
 	/**
-	 * Returns the cached entry point map, resolving it once on first use.
+	 * Returns the entry point map, resolving it once on first use.
 	 * @returns Mutable entry point map for the current build cycle
 	 */
 	async #currentEntryPoints() {
@@ -295,25 +291,25 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 
 	/**
 	 * Waits for esbuild disposal within the shutdown deadline.
-	 * @param drain Pending file-manager and watch-context disposal results.
+	 * @param drain Pending disposal of the esbuild context and compiler state.
 	 * @param timeoutMs Maximum time to wait for asynchronous cleanup in milliseconds.
-	 * @returns A promise that resolves when both cleanup operations settle.
+	 * @returns A promise that resolves when all cleanup operations settle.
+	 * @throws {Error} The earliest disposal failure, or a timeout error.
 	 */
-	async #executeDrainCleanup(drain: Promise<PromiseSettledResult<void>[]>, timeoutMs: number) {
+	async #executeGracefulShutdown(drain: Promise<void>, timeoutMs: number) {
 		try {
-			const { promise, reject } = Promise.withResolvers<undefined>();
+			const { promise, reject } = Promise.withResolvers<never>();
 
-			using _timeout = setTimeout(() => reject(new Error(`Graceful shutdown timed out after ${timeoutMs}ms. Pending file-manager or esbuild cleanup may still be running.`)), timeoutMs);
+			using _timeout = setTimeout(() => reject(new Error(`Graceful shutdown timed out after ${timeoutMs}ms. Pending esbuild cleanup may still be running.`)), timeoutMs);
 
-			const settled = await Promise.race([ drain, promise ]);
-
-			if (settled !== undefined) {
-				const failure = settled.find(statusIsRejected);
-				if (failure?.status === 'rejected') { throw failure.reason }
-			}
+			// Wait for either the drain to complete or the timeout to occur.
+			await Promise.race([ drain, promise ]);
 		} catch (error) {
-			const failure = Error.isError(error) ? error : new Error(String(error));
+			const cause = earliestDisposalError(error);
+			const failure = Error.isError(cause) ? cause : new Error(String(cause));
+
 			Logger.error(`Graceful shutdown failed: ${failure.message}`);
+
 			throw failure;
 		}
 	}

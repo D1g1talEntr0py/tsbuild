@@ -71,6 +71,7 @@ const styleTextCodes = (format: InspectColor) => {
  */
 const generateTextFormatter = (format: InspectColor, replace?: string): FormatSupplier => {
 	const [ open, close ] = styleTextCodes(format);
+
 	return filterEmpty(open, close, replace);
 };
 

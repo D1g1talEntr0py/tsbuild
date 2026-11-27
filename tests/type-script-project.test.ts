@@ -12,7 +12,7 @@ import { alwaysUndefined, PerformancePhase } from 'src/constants';
 import { bundleDeclarations } from '../src/dts/declaration-bundler';
 import { EsbuildRunner } from '../src/project/esbuild-runner';
 import { flushPerformanceLog } from '../src/decorators/performance-logger';
-import { API } from 'typescript/sync';
+import { API, ModuleKind, ModuleResolutionKind } from 'typescript/sync';
 import { ScriptTarget } from 'typescript/ast';
 
 vi.mock('esbuild', async (importOriginal) => {
@@ -193,7 +193,7 @@ describe('TypeScriptProject', () => {
 		it('does not share syntax trees or cache disposal between live project instances', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export interface Shape { before: string }' },
-				// Exercise identical declaration paths without concurrent disk-cache writers.
+				// Exercise identical declaration paths without overlapping declaration processing.
 				tsconfig: { compilerOptions: { incremental: false }, tsbuild: { clean: false } }
 			});
 			cleanup = c;
@@ -275,6 +275,71 @@ describe('TypeScriptProject', () => {
 
 			const dts = await readFile(join(dir, 'dist/index.d.ts'), 'utf8');
 			expect(dts).toContain('value');
+		});
+
+		it('builds its own declarations without circular dependency warnings', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject();
+			cleanup = c;
+			const warn = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
+
+			try {
+				await using project = new TypeScriptProject(process.cwd(), {
+					compilerOptions: { outDir: join(dir, 'dist'), incremental: false },
+					tsbuild: { clean: false, entryPoints: { 'type-script-project': './src/type-script-project.ts', tsbuild: './src/tsbuild.ts' } }
+				});
+				await project.build();
+				expect(process.exitCode).toBeUndefined();
+				expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Circular dependency detected:'));
+
+				const consumer = join(dir, 'consumer.ts');
+				await writeFile(consumer, `import type { TypeScriptProject } from './dist/type-script-project.js';
+type Options = NonNullable<ConstructorParameters<typeof TypeScriptProject>[1]>;
+const styles = ['dashboard', 'pipeline', 'artifacts', 'summary', 'detailed'] as const;
+const options: Options[] = styles.map(outputStyle => ({ tsbuild: { outputStyle } }));
+// @ts-expect-error invalid output style
+const invalid: Options = { tsbuild: { outputStyle: 'invalid' } };
+export { options, invalid };`);
+
+				using api = new API({ cwd: dir });
+				using snapshot = api.createSnapshot({
+					createPrograms: [ { rootFiles: [ consumer ], compilerOptions: { target: ScriptTarget.ESNext, module: ModuleKind.ESNext, moduleResolution: ModuleResolutionKind.Bundler, strict: true, noEmit: true, skipLibCheck: false } } ]
+				});
+				const [ program ] = snapshot.operation.createdPrograms;
+				expect([ ...program.getProgramDiagnostics(), ...program.getSyntacticDiagnostics(), ...program.getGlobalDiagnostics(), ...program.getSemanticDiagnostics() ]).toEqual([]);
+			} finally {
+				warn.mockRestore();
+			}
+		});
+
+		it('rebuilds successfully after a phase failure', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const value: number = 42;' },
+				tsconfig: { compilerOptions: { declaration: true } }
+			});
+			cleanup = c;
+
+			let fail = true;
+			const plugin = {
+				name: 'fail-once',
+				setup(build: { onEnd: (callback: () => void) => void }) {
+					build.onEnd(() => {
+						if (fail) { throw new Error('intentional phase failure') }
+					});
+				}
+			};
+
+			const first = new TypeScriptProject(dir, { tsbuild: { plugins: [ plugin ] } });
+			await first.build();
+			first.close();
+
+			process.exitCode = undefined;
+			fail = false;
+			const second = new TypeScriptProject(dir, { tsbuild: { plugins: [ plugin ] } });
+			await second.build();
+			second.close();
+
+			expect(process.exitCode).toBeUndefined();
+			await expect(TestHelper.importOutput<{ value: number }>(join(dir, 'dist/index.js'))).resolves.toMatchObject({ value: 42 });
 		});
 
 		it('writes shebang entry points with executable mode from the start', async () => {
@@ -678,6 +743,9 @@ describe('TypeScriptProject', () => {
 			expect(output.x).toBe(1);
 		});
 
+	});
+
+	describe('type-check-only builds', () => {
 		it.each(['tsconfig', 'constructor'] as const)('returns the project without validating or cleaning output paths (noEmit from %s)', async (source) => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const value: number = 1;', 'keep.txt': 'keep' },
@@ -1013,6 +1081,9 @@ describe('TypeScriptProject', () => {
 			await expect(readFile(join(dir, 'dist/index.d.ts'), 'utf8')).resolves.toContain('type Greeting = string;');
 		});
 
+	});
+
+	describe('resolveConfiguration', () => {
 		it('detects browser platform from an inherited DOM lib', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const title = document.title;' }
@@ -1249,6 +1320,161 @@ describe('TypeScriptProject', () => {
 			}
 		});
 
+		it('waits for an in-flight build before releasing state', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { compilerOptions: { declaration: true }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+
+			let releaseClean!: () => void;
+			let cleanStarted!: () => void;
+			const cleanReady = new Promise<void>((resolve) => { cleanStarted = resolve });
+			const pendingClean = new Promise<void>((resolve) => { releaseClean = resolve });
+			const originalRun = EsbuildRunner.prototype.run;
+			const runSpy = vi.spyOn(EsbuildRunner.prototype, 'run').mockImplementation(async function (entryPoints) {
+				cleanStarted();
+				await pendingClean;
+				return originalRun.call(this, entryPoints);
+			});
+
+			try {
+				const project = new TypeScriptProject(dir);
+				const build = project.build();
+				await cleanReady;
+
+				const closing = project.close();
+				let settled = false;
+				void closing.then(() => { settled = true });
+				await Promise.resolve();
+				expect(settled).toBe(false);
+
+				releaseClean();
+				await build;
+				await closing;
+			} finally {
+				runSpy.mockRestore();
+			}
+		});
+
+		it.each([
+			{ esbuildFails: false },
+			{ esbuildFails: true }
+		])('disposes in order, releases compiler state, and reports the earliest failure (esbuild fails: $esbuildFails)', async ({ esbuildFails }) => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({ tsconfig: { tsbuild: { clean: false } } });
+			cleanup = c;
+			const compilerError = new Error('compiler disposal failed');
+			const esbuildError = new Error('esbuild disposal failed');
+			const expected = esbuildFails ? esbuildError : compilerError;
+			const events: string[] = [];
+			const errorLog = vi.spyOn(Logger, 'error').mockImplementation(() => {});
+			const dispose = API.prototype[Symbol.dispose];
+			const spy = vi.spyOn(API.prototype, Symbol.dispose).mockImplementation(function (this: API) {
+				events.push('compiler');
+				dispose.call(this);
+				throw compilerError;
+			});
+			let contextSpy: MockInstance<BuildContext['dispose']> | undefined;
+			try {
+				const project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
+				await project.build();
+				const watchContext = await vi.mocked(context).mock.results.at(-1)!.value as BuildContext;
+				const disposeContext = watchContext.dispose.bind(watchContext);
+				contextSpy = vi.spyOn(watchContext, 'dispose').mockImplementation(async () => {
+					events.push('esbuild');
+					await disposeContext();
+					if (esbuildFails) { throw esbuildError }
+				});
+				const syntaxCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+				expect(syntaxCache.size).toBeGreaterThan(0);
+
+				const closing = project.close();
+				await expect(closing).rejects.toBe(expected);
+				expect(errorLog).toHaveBeenCalledWith(`Graceful shutdown failed: ${expected.message}`);
+				expect(events).toEqual([ 'esbuild', 'compiler' ]);
+				expect(syntaxCache.size).toBe(0);
+				expect(project.close()).toBe(closing);
+				expect(contextSpy).toHaveBeenCalledOnce();
+				expect(spy).toHaveBeenCalledOnce();
+			} finally { contextSpy?.mockRestore(); spy.mockRestore(); errorLog.mockRestore() }
+		});
+
+		it('releases compiler state when the in-flight build fails during shutdown', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({ tsconfig: { tsbuild: { clean: false } } });
+			cleanup = c;
+			const transpileStarted = Promise.withResolvers<void>();
+			const releaseTranspile = Promise.withResolvers<void>();
+			const contextMock = vi.mocked(context);
+			const originalContext = contextMock.getMockImplementation()!;
+			const disposed = Promise.withResolvers<void>();
+			const dispose = API.prototype[Symbol.dispose];
+			const spy = vi.spyOn(API.prototype, Symbol.dispose).mockImplementation(function (this: API) {
+				dispose.call(this);
+				disposed.resolve();
+			});
+			const project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
+			try {
+				contextMock.mockImplementation(async () => {
+					transpileStarted.resolve();
+					await releaseTranspile.promise;
+					throw new Error('transpile failed');
+				});
+				const build = project.build();
+				await transpileStarted.promise;
+
+				const closing = project.close();
+				expect(spy).not.toHaveBeenCalled();
+				releaseTranspile.resolve();
+				await build;
+				await closing;
+				await disposed.promise;
+				expect(spy).toHaveBeenCalledOnce();
+			} finally {
+				releaseTranspile.resolve();
+				contextMock.mockImplementation(originalContext);
+				spy.mockRestore();
+			}
+		});
+
+		it('keeps compiler resources alive after a shutdown timeout until esbuild disposal drains', async () => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject();
+			cleanup = c;
+			const pending = Promise.withResolvers<void>();
+			const disposed = Promise.withResolvers<void>();
+			const dispose = API.prototype[Symbol.dispose];
+			const spy = vi.spyOn(API.prototype, Symbol.dispose).mockImplementation(function (this: API) {
+				dispose.call(this);
+				disposed.resolve();
+			});
+			const project = new TypeScriptProject(dir, {}, { watch: true, minify: false });
+			let contextSpy: MockInstance<BuildContext['dispose']> | undefined;
+			try {
+				await project.build();
+				const syntaxCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+				expect(syntaxCache.size).toBeGreaterThan(0);
+				const watchContext = await vi.mocked(context).mock.results.at(-1)!.value as BuildContext;
+				const disposeContext = watchContext.dispose.bind(watchContext);
+				contextSpy = vi.spyOn(watchContext, 'dispose').mockImplementation(async () => {
+					await pending.promise;
+					await disposeContext();
+				});
+				const closing = project.close(1);
+				await expect(closing).rejects.toThrow('timed out after 1ms');
+				expect(spy).not.toHaveBeenCalled();
+				expect(syntaxCache.size).toBeGreaterThan(0);
+				expect(project.close()).toBe(closing);
+				pending.resolve();
+				await disposed.promise;
+				expect(spy).toHaveBeenCalledOnce();
+				expect(syntaxCache.size).toBe(0);
+			} finally {
+				pending.resolve();
+				await disposed.promise;
+				contextSpy?.mockRestore();
+				spy.mockRestore();
+			}
+		});
+
 		it('waits for watch context disposal exactly once', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const x = 1;' },
@@ -1282,6 +1508,26 @@ describe('TypeScriptProject', () => {
 				await project.close();
 				disposeSpy.mockRestore();
 			}
+		});
+
+		it.each([ false, true ])('releases project resources when await using scope exits: %s', async (throws) => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export const x = 1;' },
+				tsconfig: { compilerOptions: { declaration: true }, tsbuild: { clean: false } }
+			});
+			cleanup = c;
+			const project = new TypeScriptProject(dir);
+			await project.build();
+			const sourceFileCache = vi.mocked(bundleDeclarations).mock.calls.at(-1)![0].sourceFileCache!;
+			const scopeError = new Error('scope failed');
+			const outcome = (async () => {
+				await using resource = project;
+				expect(resource).toBe(project);
+				if (throws) { throw scopeError }
+			})();
+
+			if (throws) { await expect(outcome).rejects.toBe(scopeError) } else { await expect(outcome).resolves.toBeUndefined() }
+			expect(sourceFileCache.size).toBe(0);
 		});
 
 		it('rejects invalid timeouts without preventing later cleanup', async () => {

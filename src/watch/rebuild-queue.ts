@@ -23,8 +23,8 @@ export type RebuildQueueOptions = {
 
 const pendingChangeKey = (event: FileSystemEvent, path: AbsolutePath): string => `${event}:${path}`;
 const isRenameSuppressedEvent = (event: FileSystemEvent): boolean => event === 'change' || event === 'add' || event === 'addDir' || event === 'unlink' || event === 'unlinkDir';
-const hasRenameChanges = (changes: ReadonlyArray<PendingFileChange>): boolean => changes.some(({ event, nextPath }) => nextPath !== undefined && isRenameEvent(event));
 const isRenameEventFilter = ({ event, nextPath }: PendingFileChange) => nextPath !== undefined && isRenameEvent(event);
+const hasRenameChanges = (changes: ReadonlyArray<PendingFileChange>): boolean => changes.some(isRenameEventFilter);
 
 /**
  * Returns whether a watcher event renames a file or directory.
@@ -39,7 +39,10 @@ export function isRenameEvent(event: FileSystemEvent): event is 'rename' | 'rena
  * @param changes - Filtered watcher changes that will be applied to the rebuild
  */
 export function formatPendingChangeSummary(changes: ReadonlyArray<PendingFileChange>): string {
-	const renamedFiles = changes.filter(isRenameEventFilter).length;
+	let renamedFiles = 0;
+	for (const change of changes) {
+		if (isRenameEventFilter(change)) { renamedFiles++ }
+	}
 
 	if (renamedFiles > 0) { return `${renamedFiles} file${renamedFiles === 1 ? '' : 's'} renamed detected.` }
 
@@ -121,10 +124,11 @@ export class RebuildQueue implements Closable, Disposable {
 			if (nextPathKey !== undefined) { relatedKeys.add(nextPathKey) }
 		}
 
-		const mapPendingChange = (key: string) => this.#pendingChanges.get(key);
-		const hasNextPath = (change: QueuedPendingChange | undefined) => change?.nextPath !== undefined;
-
-		if (Array.from(relatedKeys, mapPendingChange).some(hasNextPath) && isRenameSuppressedEvent(event)) { return }
+		if (isRenameSuppressedEvent(event)) {
+			for (const relatedKey of relatedKeys) {
+				if (this.#pendingChanges.get(relatedKey)?.nextPath !== undefined) { return }
+			}
+		}
 
 		for (const key of relatedKeys) { this.#deletePendingChange(key) }
 
@@ -372,12 +376,17 @@ export class RebuildQueue implements Closable, Disposable {
 
 		if (deferredChanges.length === 0) { return pendingFileChanges }
 
-		const queuedChangePathMapper = ({ path }: QueuedPendingChange) => path;
-		const deferredChangeFilter = ({ event, path, nextPath }: QueuedPendingChange) => nextPath !== undefined || event !== 'change' || !touchedPaths.has(path);
+		const touchedPaths = new Set<AbsolutePath>();
+		for (const { path } of pendingFileChanges) { touchedPaths.add(path) }
 
-		const touchedPaths = new Set(pendingFileChanges.map(queuedChangePathMapper));
+		const changes: QueuedPendingChange[] = [];
+		for (const change of deferredChanges) {
+			if (change.nextPath !== undefined || change.event !== 'change' || !touchedPaths.has(change.path)) { changes.push(change) }
+		}
 
-		return [ ...deferredChanges.filter(deferredChangeFilter), ...pendingFileChanges ];
+		for (const change of pendingFileChanges) { changes.push(change) }
+
+		return changes;
 	}
 
 	/**

@@ -555,7 +555,7 @@ These are used internally but can be leveraged when extending tsbuild.
 ### Core Components
 
 **TypeScriptProject** (`src/type-script-project.ts`) - Central orchestrator that manages the build lifecycle
-**FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage and preprocessing
+**FileManager** (`src/file-manager.ts`) - In-memory `.d.ts` storage with optional caching support
 **ProcessManager** (`src/process-manager.ts`) - Global cleanup coordinator for graceful shutdowns
 
 ### Plugin System

@@ -7,25 +7,17 @@ import { resolvePlugins } from '../plugins/resolve-plugin';
 import { createIifePluginHandle } from '../plugins/iife';
 import { createWriteOutputPlugin } from '../plugins/output';
 import { externalModulesPlugin } from '../plugins/external-modules';
+import { guard, TypeDefinition } from '../type-definition';
 import { BuildError, BundleError, ConfigurationError, castError } from '../errors';
 import { BuildMessageType, format, newLine, processEnvExpansionPattern, toJsxRenderingMode } from '../constants';
 
 import type { API, CompilerOptions } from 'typescript/sync';
 import type { PackageJson } from '../entry-points';
-import type { BuildContext, BuildFailure, BuildOptions, BuildResult, Message, OutputFile } from 'esbuild';
+import type { BuildContext, BuildOptions, BuildResult, Message, OutputFile } from 'esbuild';
 import type { AbsolutePath, EntryPoints, JsonString, Plugin, ProjectBuildConfiguration, WrittenFile } from '../@types';
 
 type RunnerBuildOptions = Pick<ProjectBuildConfiguration, 'watch' | 'iife' | 'plugins' | 'noExternal' | 'env' | 'bundle' | 'packages' | 'platform' | 'sourceMap' | 'target' | 'banner' | 'footer' | 'outDir' | 'splitting' | 'minify'>;
 type RunnerOptions = { api: API; directory: AbsolutePath; compilerOptions: CompilerOptions; configFilePath: AbsolutePath; buildOptions: RunnerBuildOptions };
-
-/**
- * Narrows a caught esbuild error to its structured failure shape (`{ errors, warnings }`).
- * esbuild rejects with a plain object, not necessarily an Error instance.
- * @param error - The caught value to narrow
- */
-function isBuildFailure(error: unknown): error is BuildFailure {
-	return typeof error === 'object' && error !== null && Array.isArray((error as BuildFailure).errors);
-}
 
 /** Owns esbuild execution, plugin scopes, and reusable watch resources. */
 export class EsbuildRunner implements AsyncDisposable {
@@ -161,6 +153,12 @@ export class EsbuildRunner implements AsyncDisposable {
 		} catch (error) {
 			if (error instanceof BuildError) { throw error }
 
+			/**
+			 * Narrows a caught esbuild error to its structured `errors` array.
+			 * esbuild rejects with a plain object, not necessarily an Error instance.
+			 * @param error - The caught value to narrow
+			 */
+			const isBuildFailure = TypeDefinition.typeGuardOfShape({ errors: guard((value: unknown): value is Message[] => Array.isArray(value)) }, TypeDefinition.Mode.structural);
 			const errors = isBuildFailure(error) ? error.errors : undefined;
 			const message = errors !== undefined && errors.length > 0 ? (await formatMessages(errors, { kind: 'error', color: true })).join(newLine) : castError(error).message;
 

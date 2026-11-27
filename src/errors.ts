@@ -3,9 +3,7 @@
  * Provides standardized error handling with exit codes
  */
 
-/**
- * Base error class for all build-related errors
- */
+/** Base error class for all build-related errors */
 export class BuildError extends Error {
 	constructor(message: string, public readonly code: number = 1) {
 		super(message);
@@ -14,9 +12,7 @@ export class BuildError extends Error {
 	}
 }
 
-/**
- * Error thrown during TypeScript type checking
- */
+/** Error thrown during TypeScript type checking */
 export class TypeCheckError extends BuildError {
 	constructor(message: string, public readonly diagnostics?: string) {
 		super(message, 1);
@@ -24,9 +20,7 @@ export class TypeCheckError extends BuildError {
 	}
 }
 
-/**
- * Error thrown during bundling process
- */
+/** Error thrown during bundling process */
 export class BundleError extends BuildError {
 	constructor(message: string) {
 		super(message, 2);
@@ -34,9 +28,7 @@ export class BundleError extends BuildError {
 	}
 }
 
-/**
- * Error thrown for invalid configuration
- */
+/** Error thrown for invalid configuration */
 export class ConfigurationError extends BuildError {
 	constructor(message: string) {
 		super(message, 3);
@@ -44,6 +36,10 @@ export class ConfigurationError extends BuildError {
 	}
 }
 
+/**
+ * Casts an unknown exception to a standard Error instance.
+ * @param exception - The value to cast
+ */
 export const castError = (exception: unknown): Error => Error.isError(exception) ? exception : new Error(typeof exception === 'string' ? exception : 'Unknown error');
 
 /**
