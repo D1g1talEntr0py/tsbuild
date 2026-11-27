@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { formatDiagnostics } from 'typescript/sync';
+import { ScriptTarget } from 'typescript/ast';
 import { toRootedDirectoryPath } from 'typescript/path';
 import { Paths } from '../paths';
 import { Json } from '../json';
@@ -128,6 +129,7 @@ function validateJsonTsbuildConfiguration(tsbuild: unknown) {
 export function resolveConfiguration(api: API, directory: AbsolutePath, typeScriptOptions: TypeScriptOptions, { minify, watch, outputStyle }: CommandLineOptions): TypeScriptConfiguration {
 	const configFile = findConfigFile(directory) ?? Paths.join(directory, './tsconfig.json');
 	const configResult = api.readConfigFile(configFile) as ReadConfigResult;
+	const { target: apiTarget, ...apiCompilerOptions } = typeScriptOptions.compilerOptions ?? {};
 
 	if (configResult.error !== undefined) {
 		throw new ConfigurationError(formatDiagnostics([configResult.error], diagnosticsHost));
@@ -145,7 +147,7 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 	}
 
 	const bundle = typeScriptOptions.tsbuild?.bundle ?? configResult.config.tsbuild?.bundle ?? true;
-	const { lib } = api.parseJsonConfigFileContent({ ...configResult.config, compilerOptions: { ...configResult.config.compilerOptions, ...typeScriptOptions.compilerOptions } }, { configFileName: configFile }).options;
+	const { lib } = api.parseJsonConfigFileContent({ ...configResult.config, compilerOptions: { ...configResult.config.compilerOptions, ...apiCompilerOptions } }, { configFileName: configFile }).options;
 	const platform = typeScriptOptions.tsbuild?.platform ?? configResult.config.tsbuild?.platform ?? (lib?.some(domPredicate) ? Platform.BROWSER : Platform.NODE);
 	const noExternal = typeScriptOptions.tsbuild?.noExternal ?? configResult.config.tsbuild?.noExternal ?? [];
 	const hasExplicitEntryPoints = typeScriptOptions.tsbuild?.entryPoints !== undefined || configResult.config.tsbuild?.entryPoints !== undefined;
@@ -197,7 +199,7 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 		compilerOptions: {
 			...{ outDir: defaultOutDirectory, noEmit: false, sourceMap: false, lib: [] },
 			...configResult.config.compilerOptions,
-			...typeScriptOptions.compilerOptions,
+			...apiCompilerOptions,
 			// Auto-inject 'node' only on Node platform — browser/neutral builds shouldn't pay the cost of loading @types/node (~3 MB of declarations).
 			// Users can still opt in by listing 'node' explicitly in their tsconfig types array.
 			types: (() => {
@@ -226,6 +228,7 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 		...baseConfig,
 		compilerOptions: {
 			...options,
+			target: apiTarget ?? options.target ?? ScriptTarget.ESNext,
 			lib: lib ?? options.lib,
 			...(rootDir === undefined ? {} : { rootDir: toRootedDirectoryPath(rootDir, undefined) }),
 			...compilerOptionOverrides

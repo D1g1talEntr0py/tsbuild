@@ -13,6 +13,7 @@ import { bundleDeclarations } from '../src/dts/declaration-bundler';
 import { EsbuildRunner } from '../src/project/esbuild-runner';
 import { flushPerformanceLog } from '../src/decorators/performance-logger';
 import { API } from 'typescript/sync';
+import { ScriptTarget } from 'typescript/ast';
 
 vi.mock('esbuild', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('esbuild')>();
@@ -46,6 +47,32 @@ describe('TypeScriptProject', () => {
 	});
 
 	describe('build', () => {
+		it.each([
+			{ label: 'JSON target', target: 'ES2018', apiTarget: undefined, preservesModernSyntax: false },
+			{ label: 'API target', target: 'ES2022', apiTarget: ScriptTarget.ES2018, preservesModernSyntax: false },
+			{ label: 'default target', target: undefined, apiTarget: undefined, preservesModernSyntax: true }
+		])('uses the $label for JavaScript output', async ({ target, apiTarget, preservesModernSyntax }) => {
+			const { dir, cleanup: c } = await TestHelper.createTempProject({
+				files: { 'src/index.ts': 'export function read(input?: { value?: string }): string { return input?.value ?? "fallback"; }' },
+				tsconfig: { compilerOptions: { target, declaration: false } }
+			});
+			cleanup = c;
+
+			const project = new TypeScriptProject(dir, apiTarget === undefined ? {} : { compilerOptions: { target: apiTarget } });
+			try {
+				await project.build();
+				expect(process.exitCode).toBeUndefined();
+				const output = await readFile(join(dir, 'dist/index.js'), 'utf8');
+				expect(output.includes('?.')).toBe(preservesModernSyntax);
+				expect(output.includes('??')).toBe(preservesModernSyntax);
+				const module = await TestHelper.importOutput<{ read(input?: { value?: string }): string }>(join(dir, 'dist/index.js'));
+				expect(module.read()).toBe('fallback');
+				expect(module.read({ value: 'value' })).toBe('value');
+			} finally {
+				await project.close();
+			}
+		});
+
 		it('runs output phases on every build and rebuilds when an artifact disappears', async () => {
 			const { dir, cleanup: c } = await TestHelper.createTempProject({
 				files: { 'src/index.ts': 'export const value: number = 1;' },
@@ -291,6 +318,8 @@ describe('TypeScriptProject', () => {
 			project.close();
 
 			expect(process.exitCode).toBe(1);
+			await expect(access(join(dir, 'dist/index.js'))).rejects.toThrow();
+			await expect(access(join(dir, 'dist/index.d.ts'))).rejects.toThrow();
 		});
 
 		it('sets exit code 3 when entry point does not exist', async () => {

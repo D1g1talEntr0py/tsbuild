@@ -49,10 +49,28 @@ describe('resolveConfiguration', () => {
 			tsbuild: { clean: true, outputStyle: 'detailed', sourceMap: 'external', dts: { resolve: false }, banner: { js: 'api' }, noExternal: [ /api/ ] }
 		}, { watch: true, minify: true });
 		expect(config.clean).toBe(true);
-		expect(config.compilerOptions).toMatchObject({ ...compilerOptionOverrides, outDir: '/project/api-dist', sourceMap: false, types: [ 'node', 'json', 'shared', 'api' ] });
+		expect(config.compilerOptions).toMatchObject({ ...compilerOptionOverrides, target: ScriptTarget.ES2015, outDir: '/project/api-dist', sourceMap: false, types: [ 'node', 'json', 'shared', 'api' ] });
+		expect(config.configFileParsingDiagnostics).toEqual([]);
 		expect(config.tsbuild).toMatchObject({ minify: true, outputStyle: 'detailed', sourceMap: 'external', dts: { entryPoints: [ 'index' ], resolve: false }, noExternal: [ /api/ ], watch: { enabled: true } });
 		expect(config.tsbuild.banner).toEqual({ js: 'api' });
 		expect(config.tsbuild.packages).toBeUndefined();
+	});
+
+	it('honors a target inherited from an extended config', () => {
+		vol.writeFileSync('/project/base.json', JSON.stringify({ compilerOptions: { target: 'ES2018' } }));
+		writeConfig({ extends: './base.json' });
+
+		const config = resolveConfiguration(TestHelper.api, projectDirectory, {}, defaultCommandLineOptions);
+		expect(config.compilerOptions.target).toBe(ScriptTarget.ES2018);
+	});
+
+	it('uses the API target over an inherited target', () => {
+		vol.writeFileSync('/project/base.json', JSON.stringify({ compilerOptions: { target: 'ES2018' } }));
+		writeConfig({ extends: './base.json' });
+
+		const config = resolveConfiguration(TestHelper.api, projectDirectory, { compilerOptions: { target: ScriptTarget.ES2022 } }, defaultCommandLineOptions);
+		expect(config.compilerOptions.target).toBe(ScriptTarget.ES2022);
+		expect(config.configFileParsingDiagnostics).toEqual([]);
 	});
 
 	it('preserves an explicitly configured TypeScript incremental option without enabling a tsbuild disk cache', () => {

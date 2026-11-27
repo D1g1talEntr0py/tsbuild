@@ -172,13 +172,12 @@ describe('constants', () => {
 		});
 
 		it('exports compilerOptionOverrides with required properties', () => {
-			expect(compilerOptionOverrides.noEmitOnError).toBe(true);
+			expect(compilerOptionOverrides.noEmitOnError).toBe(false);
 			expect(compilerOptionOverrides.allowJs).toBe(false);
 			expect(compilerOptionOverrides.checkJs).toBe(false);
 			expect(compilerOptionOverrides.declarationMap).toBe(false);
 			expect(compilerOptionOverrides.skipLibCheck).toBe(true);
 			expect(compilerOptionOverrides.preserveSymlinks).toBe(false);
-			expect(compilerOptionOverrides.target).toBe(ScriptTarget.ESNext);
 		});
 	});
 });

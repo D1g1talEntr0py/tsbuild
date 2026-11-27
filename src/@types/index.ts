@@ -53,7 +53,7 @@ interface DetailedPerformanceEntry<D> extends PerformanceEntry {
 
 type Pattern = string | RegExp;
 
-const ES_VERSIONS = [6, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025] as const;
+const ES_VERSIONS = [6, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026] as const;
 type EsVersion = typeof ES_VERSIONS[number];
 type EsTarget = `ES${EsVersion}` | 'ESNext';
 
@@ -230,13 +230,12 @@ type SourceFile = {
 
 // Compiler option overrides type
 type CompilerOptionOverrides = Readonly<{
-	noEmitOnError: true;
+	noEmitOnError: false;
 	allowJs: false;
 	checkJs: false;
 	declarationMap: false;
 	skipLibCheck: true;
 	preserveSymlinks: false;
-	target: ScriptTarget.ESNext;
 }>;
 
 // Text formatting function type

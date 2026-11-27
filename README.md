@@ -6,7 +6,7 @@
 [![codecov](https://img.shields.io/codecov/c/github/D1g1talEntr0py/tsbuild?branch=main&label=coverage)](https://codecov.io/gh/D1g1talEntr0py/tsbuild)
 [![License: MIT](https://img.shields.io/github/license/D1g1talEntr0py/tsbuild)](https://github.com/D1g1talEntr0py/tsbuild/blob/main/LICENSE)
 [![Node.js](https://img.shields.io/node/v/@d1g1tal/tsbuild)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript->=5.6.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript->=7.1-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 A TypeScript build tool that combines two tools into one workflow: **TypeScript's type system** for correctness and **esbuild** for speed. Built for modern ESM-only projects on Node.js 24+.
 
@@ -158,7 +158,11 @@ That's it. tsbuild reads your `compilerOptions`, infers entry points from your `
 
 #### Your tsconfig.json Does the Heavy Lifting
 
-Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, `baseUrl`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
+Because tsbuild uses the TypeScript compiler API directly, it reads your `compilerOptions` automatically. There is no need to re-declare `target`, `module`, `lib`, `strict`, `paths`, `moduleResolution`, or any other TypeScript settings in a separate config — they are already in your `tsconfig.json`, and tsbuild honours them as-is.
+
+When `compilerOptions.target` is omitted, tsbuild defaults to `ESNext`. An `ES2026` target also uses `ESNext` for JavaScript output because esbuild does not yet support `ES2026`.
+
+For JavaScript emission, esbuild's `alwaysStrict` setting follows `compilerOptions.strict`. If `strict` is omitted, tsbuild uses TypeScript 7's strict-by-default behavior; an explicit `strict: false` is preserved.
 
 The `tsbuild` section only covers options that don't belong in `compilerOptions`: bundling behavior, entry points, output formatting, and similar build-specific settings.
 
@@ -166,6 +170,8 @@ This means your type-checker and your build always use the exact same TypeScript
 
 The only `compilerOptions` setting tsbuild requires:
 - **`outDir`** — determines where built files are written
+
+TypeScript 7 requires an explicit `rootDir` whenever `outDir` is set and the sources do not sit directly beside `tsconfig.json`. When `rootDir` is omitted, tsbuild sets it to the common directory of your source files (e.g. `src/`), which preserves the familiar `dist/` layout. Set `rootDir` explicitly to override it.
 
 Declaration generation is **not required**. If `declaration: true` is already set in your `tsconfig.json`, tsbuild will automatically generate and bundle `.d.ts` files. If it's not set, tsbuild skips that step — no changes needed either way.
 
@@ -449,7 +455,7 @@ Watch mode snapshots `tsconfig.json` and `package.json` configuration when it st
 
 Watch mode uses Watchr 6 with initial events disabled and waits for watcher startup before reporting that it is watching. Watch targets must exist; startup failures are reported rather than silently watching the current directory. An empty source include list with no local plugin dependencies does not start a watcher.
 
-TypeScript 5 remains supported for building projects. TypeScript 5 consumers typechecking tsbuild's public API must set `skipLibCheck: true` because Watchr 6 declarations reference `esnext.temporal`; TypeScript 6 supports those declarations. tsbuild already enables `skipLibCheck` internally.
+tsbuild 4 requires TypeScript 7.1 or newer and uses its native compiler API. Use tsbuild 3 for TypeScript 5 and 6 projects.
 
 ## Advanced Features
 

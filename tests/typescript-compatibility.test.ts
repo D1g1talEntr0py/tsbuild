@@ -387,7 +387,7 @@ export default CFoo;
 		it('recognizes options used by compilerOptionOverrides and read from user config', () => {
 			const { errors } = api.parseJsonConfigFileContent({
 				compilerOptions: {
-					noEmitOnError: true, allowJs: false, checkJs: false, declarationMap: false, skipLibCheck: true, preserveSymlinks: false, target: 'ESNext',
+					noEmitOnError: false, allowJs: false, checkJs: false, declarationMap: false, skipLibCheck: true, preserveSymlinks: false, target: 'ESNext',
 					declaration: true, incremental: true, outDir: 'dist', noEmit: false, sourceMap: false, emitDeclarationOnly: false, strict: true,
 					useDefineForClassFields: true, noImplicitOverride: true, paths: {}, rootDir: './src', types: [ 'node' ]
 				},

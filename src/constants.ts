@@ -10,8 +10,8 @@ const Platform = { NODE: 'node', BROWSER: 'browser', NEUTRAL: 'neutral' } as con
 const BuildMessageType = { ERROR: 'error', WARNING: 'warning' } as const;
 const DependencyEntryType = { DEPENDENCIES: 'dependencies', PEER_DEPENDENCIES: 'peerDependencies' } as const;
 const compilerOptionOverrides: CompilerOptionOverrides = {
-	// Skip code generation when error occurs
-	noEmitOnError: true,
+	// tsbuild stops on any diagnostic before writing output; the compiler flag would only repeat the declaration diagnostics pass during emit
+	noEmitOnError: false,
 	// Do not allow JavaScript files to be imported into TypeScript files
 	allowJs: false,
 	// Skip type-checking JavaScript files
@@ -21,9 +21,7 @@ const compilerOptionOverrides: CompilerOptionOverrides = {
 	// Skip type-checking all dependencies
 	skipLibCheck: true,
 	// Ensure TS2742 errors are visible when `true`. TODO - Figure out how to have this work with a value of `true`
-	preserveSymlinks: false,
-	// Ensure we can parse the latest code
-	target: ScriptTarget.ESNext
+	preserveSymlinks: false
 };
 
 /** Maps TypeScript ScriptTarget enum to esbuild-compatible EsTarget string */

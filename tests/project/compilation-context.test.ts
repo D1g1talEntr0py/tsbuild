@@ -127,6 +127,12 @@ describe('CompilationContext', () => {
 		expect(result.declarations.size).toBe(0);
 	});
 
+	it('returns declaration diagnostics from emit when noEmitOnError is off', async () => {
+		await writeFile(entryPath, 'class Hidden { private value = 1; } export const value = new Hidden();');
+		const result = createContext({ compilerOptions: { declaration: true, noEmitOnError: false, isolatedDeclarations: true, types: [] } }).compile();
+		expect(result.diagnostics).toEqual(expect.arrayContaining([ expect.objectContaining({ code: 9010 }) ]));
+	});
+
 	it('filters declaration maps out of emitted declarations', () => {
 		const result = createContext({ compilerOptions: { types: [], declaration: true, declarationMap: true } }).compile();
 		expect(result.diagnostics).toEqual([]);
