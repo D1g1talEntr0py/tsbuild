@@ -12,15 +12,17 @@
  *     iterator-style bench, so only the build subprocess wall-time is measured.
  *   - Competing tools are fetched on-demand via `pnpm dlx --package=X@version`
  *     (no project deps added; cache is pre-warmed before benchmarking).
+ *   - Mitata's parent-process heap sampler is disabled. Separate builds sample
+ *     the build process tree's RSS every 5 ms, outside all timing measurements.
  *
- * Build modes (groups):
+ * Build modes (groups, run per scenario so each pair sits side by side):
  *   1. FULL    — bundle + type-check + dts (the headline)
- *   2. NO-DTS  — bundle + type-check, no declarations on the standard workload
+ *   2. NO-DTS  — bundle + type-check, no declarations on the same workload
  *                (gives a "what does dts cost?" reference)
  *
  * After mitata runs we also print:
  *   - tsbuild self-reported phase breakdown (the inner cost of the full build)
- *   - cold-build artifact metadata: output byte count and file metrics per tool
+ *   - cold-build output size and sampled peak process-tree RSS per tool and scenario
  *
  * Usage:
  *   pnpm bench
@@ -28,7 +30,7 @@
  *   pnpm bench -- --scenario=small --smoke --no-save
  */
 import { bench, group, summary, barplot, run as mitataRun } from 'mitata';
-import { execSync, spawnSync, execFileSync } from 'node:child_process';
+import { execSync, spawnSync, execFileSync, execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync, mkdirSync, existsSync, readdirSync, statSync, mkdtempSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +41,7 @@ import { tmpdir } from 'node:os';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const tsbuildBin = join(root, 'dist/tsbuild.js');
 const ansiPattern = /\x1b\[[0-9;]*m/g;
+const memorySampleIntervalMs = 5;
 
 /** Synthetic workload shared by the performance and declaration-quality runners. */
 export interface BenchmarkScenario {
@@ -101,6 +104,59 @@ function execWithOutput(cmd: string, args: string[], cwd: string): { stdout: str
 		throw new Error(`command exited with ${exitInfo}\ncommand: ${[cmd, ...args].join(' ')}\nstdout:\n${r.stdout ?? ''}\nstderr:\n${r.stderr ?? ''}`);
 	}
 	return { stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+function processTreeRss(pid: number): number {
+	const output = execFileSync('ps', [ '-e', '-o', 'pid=,ppid=,rss=' ], { encoding: 'utf8' });
+	const processes = new Map<number, { parent: number; rss: number }>();
+	for (const line of output.trim().split('\n')) {
+		const fields = line.trim().split(/\s+/).map(Number);
+		if (fields.length !== 3 || fields.some(value => !Number.isSafeInteger(value) || value < 0)) {
+			throw new Error(`Unexpected ps output while sampling build memory: ${line}`);
+		}
+		const [ id, parent, rssKb ] = fields;
+		processes.set(id, { parent, rss: rssKb * 1024 });
+	}
+
+	let total = 0;
+	const pending = [ pid ];
+	for (const current of pending) {
+		const info = processes.get(current);
+		if (info === undefined) { continue }
+		total += info.rss;
+		for (const [ id, { parent } ] of processes) {
+			if (parent === current) { pending.push(id) }
+		}
+	}
+	return total;
+}
+
+function measureCommandMemory(cmd: string, args: string[], cwd: string): Promise<number> {
+	return new Promise((resolve, reject) => {
+		let peakRssBytes = 0;
+		let samplingError: Error | undefined;
+		const child = execFile(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } }, (error, stdout, stderr) => {
+			clearInterval(timer);
+			if (error !== null) {
+				reject(new Error(`Memory measurement command failed: ${[ cmd, ...args ].join(' ')}\nstdout:\n${stdout}\nstderr:\n${stderr}`, { cause: error }));
+			} else if (samplingError !== undefined) {
+				reject(samplingError);
+			} else if (peakRssBytes === 0) {
+				reject(new Error(`No process-tree RSS samples captured for ${cmd}.`));
+			} else {
+				resolve(peakRssBytes);
+			}
+		});
+		const timer = setInterval(() => {
+			if (child.pid === undefined) { return }
+			try {
+				peakRssBytes = Math.max(peakRssBytes, processTreeRss(child.pid));
+			} catch (cause) {
+				samplingError = new Error(`Failed to sample process-tree RSS for ${cmd}.`, { cause });
+				clearInterval(timer);
+			}
+		}, memorySampleIntervalMs);
+	});
 }
 
 /** Recursively sum byte sizes of all files under dir; returns 0 if missing. */
@@ -287,6 +343,15 @@ export function execTool(tool: Tool, cwd: string, scenario: BenchmarkScenario): 
 		const [ cmd, args ] = commands[i];
 		exec(cmd, args, cwd);
 	}
+}
+
+/** Measures peak process-tree RSS in bytes, taking the maximum across sequential type-check/build commands. */
+export async function measureToolMemory(tool: Tool, cwd: string, scenario: BenchmarkScenario): Promise<number> {
+	let peakRssBytes = 0;
+	for (const [ cmd, args ] of toolCommands(tool, cwd, scenario)) {
+		peakRssBytes = Math.max(peakRssBytes, await measureCommandMemory(cmd, args, cwd));
+	}
+	return peakRssBytes;
 }
 
 function execToolWithOutput(tool: Tool, cwd: string, scenario: BenchmarkScenario): { stdout: string; stderr: string } {
@@ -548,10 +613,11 @@ interface Artifact {
 	scenario: string;
 	wallMs: number;
 	outputBytes: number;
+	peakRssBytes: number;
 	phases?: Phases;
 }
 
-function measureArtifact(dir: string, tool: Tool, scenario: BenchmarkScenario): Artifact {
+async function measureArtifact(dir: string, tool: Tool, scenario: BenchmarkScenario): Promise<Artifact> {
 	generateSyntheticProject(dir, scenario);
 	resetForTool(dir, tool, scenario);
 	const start = performance.now();
@@ -560,7 +626,11 @@ function measureArtifact(dir: string, tool: Tool, scenario: BenchmarkScenario): 
 	const outputBytes = dirSizeBytes(join(dir, tool.outDir));
 	verifyToolOutput(dir, tool, scenario);
 	const phases = tool.id.startsWith('tsbuild') ? parseTsbuildPhases(r.stdout + r.stderr) : undefined;
-	return { id: tool.id, scenario: scenario.id, wallMs, outputBytes, phases };
+	generateSyntheticProject(dir, scenario);
+	resetForTool(dir, tool, scenario);
+	const peakRssBytes = await measureToolMemory(tool, dir, scenario);
+	verifyToolOutput(dir, tool, scenario);
+	return { id: tool.id, scenario: scenario.id, wallMs, outputBytes, peakRssBytes, phases };
 }
 
 // ─── Custom rendering ──────────────────────────────────────────────────────────
@@ -569,12 +639,13 @@ function renderArtifactTable(title: string, artifacts: Artifact[]): void {
 	const sorted = artifacts.slice().sort((a, b) => a.outputBytes - b.outputBytes);
 	const longestId = sorted.reduce((m, a) => Math.max(m, a.id.length), 0);
 	console.log(`\n${c.bold}${c.cyan}┌─ ${title}${c.reset}`);
-	console.log(`${c.dim}│  one cold build per tool · output size · ${sorted[0]?.scenario ?? 'no samples'} scenario${c.reset}`);
+	console.log(`${c.dim}│  output size · sampled peak RSS (separate build, ${memorySampleIntervalMs} ms polling)${c.reset}`);
 	console.log(`${c.dim}│${c.reset}`);
 	for (let i = 0; i < sorted.length; i++) {
 		const a = sorted[i];
-		console.log(`${c.dim}│${c.reset}  ${c.cyan}${a.id.padEnd(longestId)}${c.reset}  ${c.dim}out${c.reset} ${fmtKb(a.outputBytes).padStart(8)}`);
+		console.log(`${c.dim}│${c.reset}  ${c.cyan}${a.id.padEnd(longestId)}${c.reset}  ${c.dim}out${c.reset} ${fmtKb(a.outputBytes).padStart(8)}  ${c.dim}RSS${c.reset} ${(a.peakRssBytes / 1024 / 1024).toFixed(1).padStart(7)} MB`);
 	}
+	console.log(`${c.dim}│  RSS sums the build process and descendants; shared pages can be counted more than once.${c.reset}`);
 	console.log(`${c.dim}└─${c.reset}`);
 }
 
@@ -638,54 +709,40 @@ async function main(): Promise<void> {
 			barplot(() => {
 				summary(() => {
 					for (const scenario of selectedScenarios) {
-						const fullTools = toolsForMode(true);
-						group(`Full · ${scenario.label} · type-check + bundle + dts`, () => {
-							for (const tool of fullTools) {
-								bench(tool.id, function* () {
-									generateSyntheticProject(dir, scenario);
-									resetForTool(dir, tool, scenario);
-									yield () => { execTool(tool, dir, scenario); };
-								});
-							}
-						});
-					}
-
-					const noDtsTools = toolsForMode(false);
-					group(`No dts · ${artifactScenario.label} · type-check + bundle`, () => {
-						for (const tool of noDtsTools) {
-							bench(tool.id, function* () {
-								generateSyntheticProject(dir, artifactScenario);
-								resetForTool(dir, tool, artifactScenario);
-								yield () => { execTool(tool, dir, artifactScenario); };
+						for (const dts of [ true, false ]) {
+							const tools = toolsForMode(dts);
+							group(dts ? `Full · ${scenario.label} · type-check + bundle + dts` : `No dts · ${scenario.label} · type-check + bundle`, () => {
+								for (const tool of tools) {
+									bench(tool.id, function* () {
+										generateSyntheticProject(dir, scenario);
+										resetForTool(dir, tool, scenario);
+										yield { heap: false, bench: () => { execTool(tool, dir, scenario); } };
+									});
+								}
 							});
 						}
-					});
+					}
 				});
 			});
 
 			await mitataRun({ colors: useColor });
 
-			console.log(`\n${c.dim}Capturing cold-build artifact metadata (output size) — separate from timing.${c.reset}`);
-			const fullTools = toolsForMode(true);
-			for (const tool of fullTools) {
-				process.stdout.write(`  ${tool.id.padEnd(24)} `);
-				const artifact = measureArtifact(dir, tool, artifactScenario);
-				fullArtifacts.push(artifact);
-				console.log(`${c.green}✓${c.reset} ${fmtKb(artifact.outputBytes)}`);
+			console.log(`\n${c.dim}Capturing cold-build output sizes and process-tree memory — memory sampling uses separate builds from timing.${c.reset}`);
+			for (const scenario of selectedScenarios) {
+				for (const dts of [ true, false ]) {
+					const artifacts: Artifact[] = [];
+					for (const tool of toolsForMode(dts)) {
+						process.stdout.write(`  ${tool.id.padEnd(24)} `);
+						const artifact = await measureArtifact(dir, tool, scenario);
+						artifacts.push(artifact);
+						console.log(`${c.green}✓${c.reset} ${fmtKb(artifact.outputBytes)}`);
+					}
+					(dts ? fullArtifacts : noDtsArtifacts).push(...artifacts);
+					renderArtifactTable(`${dts ? 'Full build artifacts · type-check + bundle + dts' : 'No-dts build artifacts'} · ${scenario.label}`, artifacts);
+				}
 			}
 
-			const noDtsTools = toolsForMode(false);
-			for (const tool of noDtsTools) {
-				process.stdout.write(`  ${tool.id.padEnd(24)} `);
-				const artifact = measureArtifact(dir, tool, artifactScenario);
-				noDtsArtifacts.push(artifact);
-				console.log(`${c.green}✓${c.reset} ${fmtKb(artifact.outputBytes)}`);
-			}
-
-			renderArtifactTable('Full build artifacts · type-check + bundle + dts', fullArtifacts);
-			renderArtifactTable('No-dts build artifacts', noDtsArtifacts);
-
-			const tsbuildArtifact = fullArtifacts.find(artifact => artifact.id === 'tsbuild');
+			const tsbuildArtifact = fullArtifacts.find(artifact => artifact.id === 'tsbuild' && artifact.scenario === artifactScenario.id);
 			if (tsbuildArtifact?.phases) renderPhaseBreakdown(tsbuildArtifact.phases);
 
 			if (saveResults) {
@@ -694,6 +751,8 @@ async function main(): Promise<void> {
 					timestamp: new Date().toISOString(),
 					node: process.version,
 					platform: process.platform,
+					memory_metric: 'sampled_process_tree_rss',
+					memory_sample_interval_ms: memorySampleIntervalMs,
 					scenarios: selectedScenarios.map(scenario => ({
 						id: scenario.id,
 						modules: scenario.moduleCount,
@@ -703,14 +762,14 @@ async function main(): Promise<void> {
 						scenario: artifact.scenario,
 						tool: artifact.id,
 						wall_ms: Math.round(artifact.wallMs),
-						peak_rss_mb: null,
+						peak_rss_mb: artifact.peakRssBytes / 1024 / 1024,
 						output_kb: artifact.outputBytes / 1024,
 					})),
 					no_dts: noDtsArtifacts.map(artifact => ({
 						scenario: artifact.scenario,
 						tool: artifact.id,
 						wall_ms: Math.round(artifact.wallMs),
-						peak_rss_mb: null,
+						peak_rss_mb: artifact.peakRssBytes / 1024 / 1024,
 						output_kb: artifact.outputBytes / 1024,
 					})),
 					tsbuild_phases: tsbuildArtifact?.phases ?? null,

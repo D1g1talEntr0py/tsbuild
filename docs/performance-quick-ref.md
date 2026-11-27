@@ -53,6 +53,25 @@ Do not infer a memory leak from RSS alone; compare live heap after separately
 controlled GC diagnostics and observe resource counts across repeated watch
 edits.
 
+## Bundler benchmark memory
+
+`pnpm bench` disables Mitata's heap row: it measures allocations in the benchmark
+runner, not the tools running in subprocesses. Each selected scenario and DTS
+mode instead reports **sampled peak process-tree RSS** in MB in its artifact
+table, using 1024 bytes = 1 KB and 1024 KB = 1 MB. The Linux `ps` utility must
+be available.
+
+Memory is sampled at a nominal 5 ms interval during a separate fresh build, so
+neither Mitata timings nor saved cold-build `wall_ms` values include polling.
+Each sample sums the build process and its descendants, including native
+TypeScript and esbuild processes. For tools with a separate type-check command,
+the result is the larger command peak, not the sum of sequential peaks.
+
+Short-lived peaks may fall between samples, and shared resident pages can be
+counted by more than one process. This is sampled RSS, not exclusive memory or
+a leak measurement. Saved `peak_rss_mb` values use MB (bytes / 1024 / 1024);
+`memory_metric` and `memory_sample_interval_ms` record the measurement method.
+
 ## Validation note
 
 The current test and type-check suites pass. ESLint currently aborts before
