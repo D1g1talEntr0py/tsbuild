@@ -20,7 +20,7 @@ import { FileManager } from './file-manager';
 import { processManager } from './process-manager';
 import { normalizeEntryPoints, resolveEntryPoints, updateEntryPoints } from './entry-points';
 import type { SourceDeclaration } from './dts/@types';
-import type { CommandLineOptions, Closable, ProjectBuildConfiguration, TypeScriptConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, EntryPoints, PendingFileChange, VoidFunction } from './@types';
+import type { CommandLineOptions, Closable, ProjectBuildConfiguration, TypeScriptConfiguration, TypeScriptOptions, WrittenFile, AbsolutePath, RelativePath, Path, EntryPoints, PendingFileChange, VoidFunction } from './@types';
 
 const tsLogo = TextFormat.bgBlue(TextFormat.bold(TextFormat.whiteBright(' TS ')));
 const defaultCloseTimeoutMs = 5000;
@@ -52,7 +52,7 @@ export class TypeScriptProject implements Closable, AsyncDisposable {
 	readonly #outputPathValidator: OutputPathValidator;
 	readonly #configuration: TypeScriptConfiguration;
 	readonly #buildConfiguration: ProjectBuildConfiguration;
-	readonly #configuredEntryPoints: EntryPoints<RelativePath>;
+	readonly #configuredEntryPoints: EntryPoints<Path>;
 	/** Owns compiler state and synchronous project resources; disposed after build and asynchronous cleanup have drained */
 	readonly #resources = new DisposableStack();
 	/** Project-lifetime detached ASTs keyed by the exact preprocessed declaration text and path. */

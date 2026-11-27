@@ -8,6 +8,7 @@ import type { Plugin } from 'esbuild';
 import type { API, CompilerOptions } from 'typescript/sync';
 import type { NamespacedUnregister, OnImport } from '@d1g1tal/tsnode/api';
 import type { PluginDescriptor, PluginIdentifier, PluginFactory, AbsolutePath, PackageSpecifier, PluginSpecifier } from '../@types';
+import { guard, TypeDefinition } from '../type-definition';
 
 type PluginScope = {
 	handle: NamespacedUnregister | undefined;
@@ -17,6 +18,8 @@ type PluginScope = {
 	dependencies: Set<AbsolutePath>;
 };
 
+type PluginSetup = Plugin['setup'];
+
 /** A normalized plugin reference, including its resolved import target and optional local TypeScript path. */
 type PluginReference = {
 	descriptor: PluginDescriptor;
@@ -25,7 +28,7 @@ type PluginReference = {
 };
 
 /** Per-project options controlling the isolated tsnode scope used to load local TypeScript plugins. */
-export type PluginScopeOptions = {
+type PluginScopeOptions = {
 	/** Unique namespace identifying this project's plugin module graph to tsnode's scoped loader hooks */
 	namespace: string;
 	/** Absolute path to the project's tsconfig.json, used by tsnode to resolve path aliases/compiler options for local TS plugins */
@@ -37,7 +40,7 @@ export type PluginScopeOptions = {
 };
 
 /** Result of resolving a project's configured plugins into esbuild Plugin objects. */
-export interface PluginConfiguration extends Disposable {
+interface PluginConfiguration extends Disposable {
 	plugins: Plugin[];
 	/**
 	 * Absolute paths of local TypeScript files loaded through the tsnode plugin scope — the
@@ -52,11 +55,7 @@ export interface PluginConfiguration extends Disposable {
  * @param value The value to check
  * @returns True if the value is a Plugin object
  */
-function isPlugin(value: unknown): value is Plugin {
-	if (typeof value !== 'object' || value === null) { return false }
-
-	return 'name' in value && typeof value.name === 'string' && 'setup' in value && typeof value.setup === 'function';
-}
+const isPlugin: (value: unknown) => value is Plugin = TypeDefinition.typeGuardOfShape({ name: String, setup: guard((value: unknown): value is PluginSetup => typeof value === 'function') }, TypeDefinition.Mode.structural);
 
 /**
  * Checks whether a value is a function that can be called as a plugin factory.
@@ -79,7 +78,7 @@ function resolvePluginReference(reference: PluginIdentifier, projectDir: Absolut
 	let localTypeScriptPath: AbsolutePath | undefined;
 	const rawSpecifier = typeof reference === 'string' ? reference : reference[0];
 
-	if (Paths.isPath(rawSpecifier)) {
+	if (Paths.isLocalSpecifier(rawSpecifier)) {
 		specifier = rawSpecifier;
 		resolved = Paths.absolute(projectDir, specifier);
 		localTypeScriptPath = typeScriptExtensionExpression.test(resolved) ? resolved : undefined;

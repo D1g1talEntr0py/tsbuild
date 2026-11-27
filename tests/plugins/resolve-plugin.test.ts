@@ -3,13 +3,13 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolvePlugins } from 'src/plugins/resolve-plugin';
-import type { Plugin } from 'esbuild';
 import { toRootedFilePath } from 'typescript/path';
 import { TestHelper } from '../scripts/test-helper';
+import type { Plugin } from 'esbuild';
 import type { CompilerOptions } from 'typescript/sync';
 import type { AbsolutePath } from 'src/@types';
 
-const projectDir = '/test-project';
+const projectDir = '/test-project' as AbsolutePath;
 const scopeOptions = { namespace: 'test-resolve-plugin', tsconfigPath: '/test-project/tsconfig.json' as AbsolutePath, compilerOptions: {} as CompilerOptions, api: TestHelper.api };
 
 const validPlugin: Plugin = { name: 'test-plugin', setup: vi.fn() };
@@ -33,6 +33,20 @@ describe('resolvePlugins', () => {
 			const second: Plugin = { name: 'second', setup: vi.fn() };
 			const result = await resolvePlugins([ validPlugin, second ], projectDir, scopeOptions);
 			expect(result.plugins).toEqual([ validPlugin, second ]);
+		});
+
+		it('accepts Plugin objects with extra metadata or inherited required properties', async () => {
+			const withMetadata = { ...validPlugin, metadata: true };
+			class InheritedPlugin {
+				get name() { return 'inherited-plugin' }
+				setup() {}
+			}
+			const inherited = new InheritedPlugin();
+
+			const result = await resolvePlugins([ withMetadata, inherited ], projectDir, scopeOptions);
+
+			expect(result.plugins[0]).toBe(withMetadata);
+			expect(result.plugins[1]).toBe(inherited);
 		});
 	});
 
@@ -184,11 +198,11 @@ describe('resolvePlugins', () => {
 		});
 
 		describe('with a real local TypeScript plugin', () => {
-			let dir: string;
+			let dir: AbsolutePath;
 			let compilerOptions: CompilerOptions;
 
 			beforeEach(async () => {
-				dir = await mkdtemp(join(tmpdir(), 'tsbuild-resolve-plugin-'));
+				dir = await mkdtemp(join(tmpdir(), 'tsbuild-resolve-plugin-')) as AbsolutePath;
 				await mkdir(join(dir, 'lib'), { recursive: true });
 				compilerOptions = { configFilePath: toRootedFilePath(join(dir, 'tsconfig.json'), undefined), paths: { '@lib/*': [ './lib/*' ] } };
 

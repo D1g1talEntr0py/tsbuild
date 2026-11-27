@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('node:fs/promises', async () => {
 	const memfs = await import('memfs');
@@ -8,7 +8,7 @@ vi.mock('node:fs/promises', async () => {
 import { vol } from 'memfs';
 import { Paths } from 'src/paths';
 import { resolve, relative, parse } from 'node:path';
-import type { Path } from 'src/@types';
+import type { AbsolutePath, Path, RelativePath } from 'src/@types';
 
 beforeEach(() => { vol.reset() });
 afterEach(() => { vol.reset() });
@@ -34,6 +34,12 @@ describe('Paths', () => {
 		});
 
 		describe('normalize', () => {
+			it('retains the input path kind in its return type', () => {
+				expectTypeOf(Paths.Posix.normalize('/project' as AbsolutePath)).toEqualTypeOf<AbsolutePath>();
+				expectTypeOf(Paths.Posix.normalize('./src' as RelativePath)).toEqualTypeOf<RelativePath>();
+				expectTypeOf(Paths.Posix.normalize('./src')).toEqualTypeOf<string>();
+			});
+
 			it('removes redundant separators and resolves dot segments', () => {
 				expect(Paths.Posix.normalize('/foo//bar/../baz/.')).toBe('/foo/baz');
 			});
@@ -81,6 +87,16 @@ describe('Paths', () => {
 			expect(result).toBe(relative('/foo/bar', '/foo/baz'));
 		});
 
+		describe('directoryName', () => {
+			it('retains the input path kind in its return type', () => {
+				expectTypeOf(Paths.directoryName('/project/src/index.ts' as AbsolutePath)).toEqualTypeOf<AbsolutePath>();
+				expectTypeOf(Paths.directoryName('./src/index.ts' as RelativePath)).toEqualTypeOf<RelativePath>();
+				expectTypeOf(Paths.directoryName('./src/index.ts')).toEqualTypeOf<string>();
+				expectTypeOf(Paths.Posix.directoryName('/project/src/index.ts' as AbsolutePath)).toEqualTypeOf<AbsolutePath>();
+				expectTypeOf(Paths.Posix.directoryName('./src/index.ts' as RelativePath)).toEqualTypeOf<RelativePath>();
+			});
+		});
+
 		it('handles same directory', () => {
 			expect(Paths.relative('/foo', '/foo')).toBe('');
 		});
@@ -99,6 +115,18 @@ describe('Paths', () => {
 			const result = Paths.parse('/home/user/file');
 			expect(result.ext).toBe('');
 			expect(result.name).toBe('file');
+		});
+	});
+
+	describe('appendExtension', () => {
+		it('appends the supplied extension before query and fragment suffixes', () => {
+			expect(Paths.appendExtension('./data', '.json')).toBe('./data.json');
+			expect(Paths.appendExtension('./style?raw#section', '.css')).toBe('./style.css?raw#section');
+			expect(Paths.appendExtension('./types#section?mode', '.d.ts')).toBe('./types.d.ts#section?mode');
+			expectTypeOf(Paths.appendExtension('/project/file' as AbsolutePath, '.d.ts')).toEqualTypeOf<AbsolutePath>();
+			expectTypeOf(Paths.appendExtension('./file' as RelativePath, '/.d.ts')).toEqualTypeOf<Path>();
+			expectTypeOf(Paths.appendExtension('./file', '.d.ts')).toEqualTypeOf<string>();
+			expect(Paths.appendExtension('?' as RelativePath, '/.d.ts')).toBe('/.d.ts?');
 		});
 	});
 
@@ -122,6 +150,21 @@ describe('Paths', () => {
 		it('throws a TypeError for relative non-URL paths', () => {
 			expect(() => Paths.normalize('relative/path' as Path)).toThrow(new TypeError('Paths.normalize requires an absolute path, got: relative/path'));
 		});
+
+		it('rejects URLs without an absolute pathname', () => {
+			expect(() => Paths.normalize('custom://host')).toThrow(new TypeError('Paths.normalize requires a URL with an absolute pathname, got: custom://host'));
+		});
+	});
+
+	describe('join', () => {
+		it('widens joins whose branded relative input may be empty', () => {
+			const emptyRelativePath = Paths.relative('/same', '/same');
+
+			expect(Paths.join(emptyRelativePath, '/other')).toBe('/other');
+			expectTypeOf(Paths.join(emptyRelativePath, '/other')).toEqualTypeOf<Path>();
+			expectTypeOf(Paths.join('/project' as AbsolutePath, 'src')).toEqualTypeOf<AbsolutePath>();
+			expectTypeOf(Paths.join('./project')).toEqualTypeOf<string>();
+		});
 	});
 
 	describe('canonical', () => {
@@ -137,7 +180,7 @@ describe('Paths', () => {
 		});
 	});
 
-	describe('isPath', () => {
+	describe('isLocalSpecifier', () => {
 		const pathMatrix: [string, boolean][] = [
 			['/',         true],
 			['./',        true],
@@ -158,7 +201,22 @@ describe('Paths', () => {
 		];
 
 		it.each(pathMatrix)('"%s" → %s', (input, expected) => {
-			expect(Paths.isPath(input)).toBe(expected);
+			expect(Paths.isLocalSpecifier(input)).toBe(expected);
+		});
+
+		it('distinguishes local module specifiers from bare package-like specifiers', () => {
+			expect(Paths.isLocalSpecifier('src/index.ts')).toBe(false);
+			expect(Paths.isLocalSpecifier('./src/index.ts')).toBe(true);
+		});
+
+		it('narrows local module specifiers to paths without choosing an absolute or relative kind', () => {
+			const specifier: string = './src/index.ts';
+
+			if (Paths.isLocalSpecifier(specifier)) {
+				expectTypeOf(specifier).toEqualTypeOf<Path>();
+			} else {
+				expect.fail('Expected a local module specifier');
+			}
 		});
 	});
 

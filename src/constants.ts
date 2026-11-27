@@ -74,7 +74,8 @@ const FileExtension = {
 	TSX: '.tsx',
 	JSX: '.jsx',
 	JS: '.js',
-	DTS: '.d.ts',
+	D_TS: '.d.ts',
+	D_TSX: '.d.tsx',
 	CSS: '.css',
 	JSON: '.json'
 } as const;

@@ -10,10 +10,10 @@ const outputCheckBatchSize = 64;
  * @returns Whether every output passed its check
  */
 export async function everyOutputInBatches<T>(values: readonly T[], check: (value: T) => Promise<boolean>): Promise<boolean> {
-	for (let offset = 0; offset < values.length; offset += outputCheckBatchSize) {
-		const results = await Promise.allSettled(values.slice(offset, offset + outputCheckBatchSize).map(async (value) => check(value)));
+	const resultMapper = (value: T) => Promise.try(check, value);
 
-		for (const result of results) {
+	for (let offset = 0, length = values.length; offset < length; offset += outputCheckBatchSize) {
+		for (const result of await Promise.allSettled(values.slice(offset, offset + outputCheckBatchSize).map(resultMapper))) {
 			if (result.status === 'rejected') { throw result.reason }
 			if (!result.value) { return false }
 		}

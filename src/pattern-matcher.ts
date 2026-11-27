@@ -9,6 +9,7 @@ const alwaysFalse = () => false;
  * With `allowSubpaths: true`, `pattern` also matches `pattern/...`.
  * @param patterns An array of string or RegExp patterns to match against.
  * @param options Options for the pattern matcher.
+ * @param allowSubpaths Whether to allow subpath matches for string patterns.
  * @returns A function that takes a string and returns true if it matches any of the patterns.
  */
 export function createPatternMatcher(patterns: readonly Pattern[], allowSubpaths: boolean = true): (id: string) => boolean {
@@ -30,10 +31,12 @@ export function createPatternMatcher(patterns: readonly Pattern[], allowSubpaths
 	return (id: string) => {
 		if (exact.has(id)) { return true }
 
+		// Check for subpath matches using the prefixes array
 		for (let i = 0, length = prefixes.length; i < length; i++) {
 			if (id.startsWith(prefixes[i])) { return true }
 		}
 
+		// Check for RegExp matches using the regexps array
 		for (let i = 0, length = regexps.length; i < length; i++) {
 			if (regexps[i].test(id)) { return true }
 		}

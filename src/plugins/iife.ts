@@ -1,7 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { Paths } from '../paths';
 import { FileExtension, format } from '../constants';
-import { basename, dirname, join, resolve } from 'node:path';
 import type { AbsolutePath, IifeOptions } from '../@types/index';
 import type { BuildOptions, BuildResult, OutputFile, Plugin } from 'esbuild';
 
@@ -45,9 +44,9 @@ export function createIifePluginHandle(options?: IifeOptions): IifePluginHandle 
 				const entryPointNames = extractEntryNames(build.initialOptions.entryPoints);
 
 				build.onEnd(async ({ outputFiles }: BuildResult) => {
-					if (!outputFiles || outputFiles.length === 0 || entryPointNames.length === 0) { return }
+					if (outputFiles === undefined || outputFiles.length === 0 || entryPointNames.length === 0) { return }
 
-					files.push(...(await buildIife(outputFiles, entryPointNames, outdir, options?.globalName, sourcemap, minify)));
+					files.push(...await buildIife(outputFiles, entryPointNames, outdir, options?.globalName, sourcemap, minify));
 				});
 			}
 		}
@@ -67,9 +66,9 @@ function extractEntryNames(entryPoints: BuildOptions['entryPoints']) {
 		const names: string[] = [];
 		for (const entry of entryPoints) {
 			if (typeof entry === 'string') {
-				names.push(basename(entry).replace(fileExtensionRegex, ''));
+				names.push(Paths.baseName(entry).replace(fileExtensionRegex, ''));
 			} else {
-				names.push(entry.out ?? basename(entry.in).replace(fileExtensionRegex, ''));
+				names.push(entry.out ?? Paths.baseName(entry.in).replace(fileExtensionRegex, ''));
 			}
 		}
 
@@ -146,35 +145,31 @@ function wrapAsIife(text: string, globalName?: string) {
  */
 async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[], outdir: string, globalName: string | undefined, sourcemap: BuildOptions['sourcemap'], minify: BuildOptions['minify']) {
 	const { build: esbuild } = await import('esbuild');
-	const fileContents = new Map<string, string>();
+	const fileContents = new Map<AbsolutePath, string>();
 
 	// Decode JS outputs once for the IIFE virtual loader.
-	for (const file of primaryOutputs) {
-		const absolute = resolve(file.path);
-		if (absolute.endsWith(FileExtension.JS)) { fileContents.set(absolute, file.text) }
+	for (const { path, text } of primaryOutputs) {
+		const absolute = Paths.absolute(path);
+		if (absolute.endsWith(FileExtension.JS)) { fileContents.set(absolute, text) }
 	}
 
 	const validEntries: Array<{ name: string; path: AbsolutePath }> = [];
 	for (const name of entryPointNames) {
 		const path = Paths.absolute(outdir, name + FileExtension.JS);
-		if (fileContents.has(path)) {
-			validEntries.push({ name, path });
-		}
+		if (fileContents.has(path)) { validEntries.push({ name, path }) }
 	}
 
 	if (validEntries.length === 0) { return [] }
 
-	const sourcemapValue = sourcemap !== undefined && sourcemap !== false ? 'external' : false;
-	const plugins = [ virtualLoaderPlugin(fileContents) ];
-	const iifeOutdir = join(outdir, namespace);
+	sourcemap = sourcemap !== undefined && sourcemap !== false ? 'external' : false;
+	outdir = Paths.join(outdir, namespace);
 
-	await mkdir(iifeOutdir, { recursive: true });
-
-	const results = await Promise.all(validEntries.map(({ name, path }) => {
-		return esbuild({ entryPoints: { [name]: path }, bundle: true, format, splitting: false, outdir: iifeOutdir, sourcemap: sourcemapValue, minify, write: false, logLevel: 'warning', plugins });
-	}));
+	await mkdir(outdir, { recursive: true });
 
 	const written: OutputFile[] = [];
+	const results = await Promise.all(validEntries.map(({ name, path }) => {
+		return esbuild({ entryPoints: { [name]: path }, bundle: true, format, splitting: false, outdir, sourcemap, minify, write: false, logLevel: 'warning', plugins: [ virtualLoaderPlugin(fileContents) ] });
+	}));
 
 	for (const { outputFiles } of results) {
 		const outputFilePaths = new Set(outputFiles.map(({ path }) => path));
@@ -188,9 +183,8 @@ async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[]
 
 			let outputText = wrapAsIife(file.text, globalName);
 
-			// esbuild does not add //# sourceMappingURL= to outputFiles when write:false;
-			// append it manually when the map file is present in the result.
-			if (outputFilePaths.has(`${file.path}.map`)) { outputText += `\n//# sourceMappingURL=${basename(file.path)}.map` }
+			// esbuild does not add //# sourceMappingURL= to outputFiles when write:false; append it manually when the map file is present in the result.
+			if (outputFilePaths.has(`${file.path}.map`)) { outputText += `\n//# sourceMappingURL=${Paths.baseName(file.path)}.map` }
 
 			written.push({ path: file.path, contents: Buffer.from(outputText), text: outputText, hash: file.hash });
 		}
@@ -205,7 +199,7 @@ async function buildIife(primaryOutputs: OutputFile[], entryPointNames: string[]
  * @param fileContents Map of absolute file paths to their JavaScript content
  * @returns An esbuild Plugin for virtual file loading
  */
-function virtualLoaderPlugin(fileContents: Map<string, string>): Plugin {
+function virtualLoaderPlugin(fileContents: Map<AbsolutePath, string>): Plugin {
 	return {
 		name: 'iife:virtual-loader',
 		/**
@@ -213,22 +207,20 @@ function virtualLoaderPlugin(fileContents: Map<string, string>): Plugin {
 		 * @param build The esbuild build instance
 		 */
 		setup(build) {
-			build.onResolve({ filter: /.*/ }, (args) => {
-				if (args.kind === 'entry-point') { return { path: args.path, namespace } }
+			build.onResolve({ filter: /.*/ }, ({ kind, path, resolveDir }) => {
+				if (kind === 'entry-point') { return { path, namespace } }
 
-				if (!args.path.startsWith('.') && !args.path.startsWith('/')) {
-					return { external: true };
-				}
+				if (!path.startsWith('.') && !path.startsWith('/')) { return { external: true } }
 
-				const resolved = resolve(args.resolveDir, args.path);
+				const absolutePath = Paths.absolute(resolveDir, path);
 
-				return fileContents.has(resolved) ? { path: resolved, namespace } : { external: true };
+				return fileContents.has(absolutePath) ? { path: absolutePath, namespace } : { external: true };
 			});
 
 			build.onLoad({ filter: /.*/, namespace }, (args) => {
-				const contents = fileContents.get(args.path);
+				const contents = fileContents.get(args.path as AbsolutePath);
 
-				return contents === undefined ? null : { contents, loader: 'js', resolveDir: dirname(args.path) };
+				return contents === undefined ? null : { contents, loader: 'js', resolveDir: Paths.directoryName(args.path) };
 			});
 		}
 	};

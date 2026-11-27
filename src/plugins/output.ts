@@ -2,48 +2,165 @@ import { readFile } from 'node:fs/promises';
 import { Files } from '../files';
 import { Paths } from '../paths';
 import { FileExtension } from '../constants';
+import { LanguageVariant, SyntaxKind } from 'typescript/ast';
+import { createScanner } from 'typescript/ast/scanner';
 import type { Metafile, OutputFile, Plugin } from 'esbuild';
-import type { AbsolutePath, WrittenFile, Mutable, SourceFile } from '../@types';
+import type { AbsolutePath, WrittenFile, Mutable, SourceFile, PathDescriptor } from '../@types';
 
+type MetafileOutputs = Metafile['outputs'];
+type MetafileOutputValues = MetafileOutputs[string];
+type ReplacementSpecifier = { start: number; end: number; content: string };
 type WriteOutputOptions = { iifeFiles?: OutputFile[], resolveImports?: boolean };
 
-const relativeSpecifierPredicate = ({ path: importPath }: { path: string }) =>
-	(importPath.startsWith('./') || importPath.startsWith('../')) && !pathWithoutQueryOrFragment(importPath).endsWith('/') && !hasExtension(importPath);
+/**
+ * Rewrites extension-less relative import/export/dynamic-import specifiers to include `.js`.
+ * @param code The JavaScript output content to rewrite.
+ * @returns The content with `.js` added to eligible relative specifiers.
+ */
+function rewriteRelativeSpecifiers(code: string): string {
+	const replacements: ReplacementSpecifier[] = [];
+	const scanner = createScanner(true, LanguageVariant.Standard, code);
+
+	/**
+	 * Adds a rewrite for a relative specifier without an extension.
+	 * @param start The start index of the specifier in the code.
+	 * @param end The end index of the specifier in the code.
+	 * @param tokenText The text of the specifier token, including quotes.
+	 */
+	const addSpecifierRewrite = (start: number, end: number, tokenText: string) => {
+		const quote = tokenText[0];
+		const specifier = tokenText.slice(1, -1);
+		if (!Paths.isRelativePathWithoutExtension(specifier)) { return }
+
+		replacements.push({ start, end, content: `${quote}${Paths.appendExtension(specifier, FileExtension.JS)}${quote}` });
+	};
+
+	let seenImportOrExport = false;
+	let importOrExportDepth = 0;
+	let expectSpecifierAfterFrom = false;
+	let expectSideEffectImportSpecifier = false;
+	let maybeDynamicImport = false;
+	let expectDynamicImportSpecifier = false;
+
+	for (let token = scanner.scan(); token !== SyntaxKind.EndOfFile; token = scanner.scan()) {
+		switch (token) {
+			case SyntaxKind.ImportKeyword: {
+				seenImportOrExport = true;
+				importOrExportDepth = 0;
+				expectSpecifierAfterFrom = false;
+				expectSideEffectImportSpecifier = true;
+				maybeDynamicImport = true;
+				expectDynamicImportSpecifier = false;
+
+				break;
+			}
+			case SyntaxKind.ExportKeyword: {
+				seenImportOrExport = true;
+				importOrExportDepth = 0;
+				expectSpecifierAfterFrom = false;
+				expectSideEffectImportSpecifier = false;
+				maybeDynamicImport = false;
+				expectDynamicImportSpecifier = false;
+
+				break;
+			}
+			case SyntaxKind.OpenParenToken: {
+				if (maybeDynamicImport) {
+					expectDynamicImportSpecifier = true;
+					maybeDynamicImport = false;
+				}
+
+				if (seenImportOrExport) { importOrExportDepth += 1 }
+
+				break;
+			}
+			case SyntaxKind.CloseParenToken: {
+				if (seenImportOrExport && importOrExportDepth > 0) { importOrExportDepth -= 1 }
+
+				break;
+			}
+			case SyntaxKind.FromKeyword: {
+				if (seenImportOrExport) {
+					expectSpecifierAfterFrom = true;
+					expectSideEffectImportSpecifier = false;
+				}
+
+				break;
+			}
+			case SyntaxKind.StringLiteral:
+			case SyntaxKind.NoSubstitutionTemplateLiteral: {
+				if (expectDynamicImportSpecifier || expectSpecifierAfterFrom || expectSideEffectImportSpecifier) {
+					addSpecifierRewrite(scanner.getTokenStart(), scanner.getTokenEnd(), scanner.getTokenText());
+					expectDynamicImportSpecifier = false;
+					expectSpecifierAfterFrom = false;
+					expectSideEffectImportSpecifier = false;
+				}
+
+				break;
+			}
+			case SyntaxKind.SemicolonToken: {
+				seenImportOrExport = false;
+				importOrExportDepth = 0;
+				expectSpecifierAfterFrom = false;
+				expectSideEffectImportSpecifier = false;
+				maybeDynamicImport = false;
+				expectDynamicImportSpecifier = false;
+
+				break;
+			}
+			case SyntaxKind.OpenBraceToken:
+			case SyntaxKind.OpenBracketToken:
+			case SyntaxKind.LessThanToken:
+			case SyntaxKind.Identifier:
+			case SyntaxKind.AsteriskToken:
+			case SyntaxKind.TypeKeyword:
+			case SyntaxKind.DefaultKeyword:
+			case SyntaxKind.AsKeyword: {
+				maybeDynamicImport = false;
+
+				break;
+			}
+			default: break;
+		}
+
+		// End `import { ... }` / `export { ... }` clause where semicolon may be omitted.
+		if (seenImportOrExport && importOrExportDepth === 0 && token === SyntaxKind.CloseBraceToken) { expectSideEffectImportSpecifier = false }
+	}
+
+	if (replacements.length === 0) { return code }
+
+	// Single forward pass; repeated slice-and-concat is O(n * replacements) on large bundles.
+	replacements.sort((left, right) => left.start - right.start);
+
+	let cursor = 0;
+	const segments: string[] = [];
+	for (const { start, content, end } of replacements) {
+		segments.push(code.slice(cursor, start), content);
+		cursor = end;
+	}
+
+	segments.push(code.slice(cursor));
+
+	return segments.join('');
+}
 
 /**
- * Removes any query string or fragment from the import specifier.
- * @param specifier Import specifier string
- * @returns Path without any query or fragment
+ * Predicate to check if a given path descriptor represents a relative path without an extension.
+ * @param path - The path descriptor to check
+ * @returns True if the path is a relative path without an extension, false otherwise
  */
-function pathWithoutQueryOrFragment(specifier: string) {
-	let suffixStart = specifier.length;
-	const hashIndex = specifier.indexOf('#');
-	const queryIndex = specifier.indexOf('?');
-
-	if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
-	if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
-
-	return specifier.slice(0, suffixStart);
-}
+const relativeSpecifierPredicate = ({ path }: { path: PathDescriptor }) => Paths.isRelativePathWithoutExtension(path);
 
 /**
  * Resolves the output path used by tsbuild's extension rewrite for a relative import.
  * @param importPath - Import specifier from esbuild's metafile
  * @returns Relative output path without any query or fragment
  */
-function importOutputPath(importPath: string) {
-	const path = pathWithoutQueryOrFragment(importPath);
+function importOutputPath(importPath: PathDescriptor) {
+	const path = Paths.pathWithoutQueryOrFragment(importPath);
 
-	return hasExtension(path) ? path : `${path}${FileExtension.JS}`;
+	return Paths.isRelativePathWithoutExtension(importPath) ? Paths.appendExtension(path, FileExtension.JS) : path;
 }
-
-const hasExtension = (specifier: string) => {
-	const path = pathWithoutQueryOrFragment(specifier);
-	const lastSlashIndex = path.lastIndexOf('/');
-
-	// Determines if the last segment of the path contains a dot, indicating a file extension.
-	return (lastSlashIndex === -1 ? path : path.slice(lastSlashIndex + 1)).includes('.');
-};
 
 type RelativeImportResolution = { errors: string[]; assets: SourceFile[] };
 
@@ -54,7 +171,7 @@ type RelativeImportResolution = { errors: string[]; assets: SourceFile[] };
  * @param directory - Project directory used to resolve output paths
  * @returns Build diagnostics for unresolvable imports and the assets to write alongside the output
  */
-async function resolveRelativeImports(outputs: Metafile['outputs'], directory: AbsolutePath): Promise<RelativeImportResolution> {
+async function resolveRelativeImports(outputs: MetafileOutputs, directory: AbsolutePath): Promise<RelativeImportResolution> {
 	const outputPaths = new Set(Object.keys(outputs).map((outputPath) => Paths.absolute(directory, outputPath)));
 	const assetSources = new Map<AbsolutePath, AbsolutePath>();
 	const errors: string[] = [];
@@ -66,7 +183,7 @@ async function resolveRelativeImports(outputs: Metafile['outputs'], directory: A
 
 		for (const { path: importPath } of metadata.imports) {
 			if (!importPath.startsWith('./') && !importPath.startsWith('../')) { continue }
-			if (pathWithoutQueryOrFragment(importPath).endsWith('/')) { continue }
+			if (Paths.pathWithoutQueryOrFragment(importPath).endsWith('/')) { continue }
 
 			const relativeImportPath = importOutputPath(importPath);
 			const importedOutputPath = Paths.absolute(Paths.directoryName(absoluteOutputPath), relativeImportPath);
@@ -107,9 +224,9 @@ async function resolveRelativeImports(outputs: Metafile['outputs'], directory: A
  * @param assets - Non-JavaScript files imported by unbundled output, written as-is.
  * @returns Array of written files with their relative paths and sizes.
  */
-async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs'], directory: AbsolutePath, iifeFiles: OutputFile[] = [], assets: SourceFile[] = []): Promise<WrittenFile[]> {
-	const outputMetadata = new Map<AbsolutePath, Metafile['outputs'][string]>();
-	const entryPoints = new Set<string>();
+async function writeOutput(outputFiles: OutputFile[] | undefined, outputs: MetafileOutputs, directory: AbsolutePath, iifeFiles: OutputFile[] | undefined, assets: SourceFile[] | undefined): Promise<WrittenFile[]> {
+	const entryPoints = new Set<AbsolutePath>();
+	const outputMetadata = new Map<AbsolutePath, MetafileOutputValues>();
 
 	for (const [ outputPath, metadata ] of Object.entries(outputs)) {
 		const absolutePath = Paths.absolute(directory, outputPath);
@@ -126,7 +243,7 @@ async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs
 		if (path.endsWith(FileExtension.JS)) {
 			if (outputMetadata.get(path)?.imports.some(relativeSpecifierPredicate) ?? false) {
 				// `OutputFile.text` is a lazily decoded getter — only touch it for files that actually need rewriting.
-				const rewritten = Files.rewriteRelativeSpecifiers(file.text);
+				const rewritten = rewriteRelativeSpecifiers(file.text);
 				sourceFile.data = rewritten;
 				sourceFile.size = Buffer.byteLength(rewritten);
 			}
@@ -134,16 +251,20 @@ async function writeOutput(outputFiles: OutputFile[], outputs: Metafile['outputs
 			if (entryPoints.has(path) && Files.hasShebang(contents)) { sourceFile.options = { mode: 0o755 } }
 		}
 
-		return sourceFile;
+		return Object.freeze(sourceFile);
 	};
 
 	const writeEntries: SourceFile[] = [];
 
-	for (const file of outputFiles) { writeEntries.push(processOutput(file)) }
+	if (outputFiles !== undefined) {
+		for (const file of outputFiles) { writeEntries.push(processOutput(file)) }
+	}
 
-	for (const file of iifeFiles) { writeEntries.push(processOutput(file)) }
+	if (iifeFiles !== undefined) {
+		for (const file of iifeFiles) { writeEntries.push(processOutput(file)) }
+	}
 
-	writeEntries.push(...assets);
+	if (assets !== undefined && assets.length > 0) { writeEntries.push(...assets) }
 
 	return Files.writeFiles(directory, writeEntries);
 }
@@ -163,17 +284,20 @@ export const createWriteOutputPlugin = (directory: AbsolutePath, onWritten: (wri
 	setup(build) {
 		build.onEnd(async ({ outputFiles, metafile, errors }) => {
 			const outputs = metafile?.outputs;
+
 			if (errors.length > 0 || outputs === undefined) { return }
 
-			let assets: SourceFile[] = [];
+			let assets: SourceFile[] | undefined;
+
 			if (resolveImports) {
-				const resolution = await resolveRelativeImports(outputs, directory);
-				if (resolution.errors.length > 0) { return { errors: resolution.errors.map((text) => ({ text })) } }
-				assets = resolution.assets;
+				const { errors, assets: resolvedAssets } = await resolveRelativeImports(outputs, directory);
+
+				if (errors.length > 0) { return { errors: errors.map((text) => ({ text })) } }
+
+				assets = resolvedAssets;
 			}
 
-			onWritten(await writeOutput(outputFiles ?? [], outputs, directory, iifeFiles, assets));
-			return;
+			return onWritten(await writeOutput(outputFiles, outputs, directory, iifeFiles, assets));
 		});
 	}
 });

@@ -1,16 +1,16 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { formatDiagnostics } from 'typescript/sync';
 import { ScriptTarget } from 'typescript/ast';
 import { toRootedDirectoryPath } from 'typescript/path';
+import { Files } from '../files';
 import { Paths } from '../paths';
 import { Json } from '../json';
 import { Logger } from '../logger';
+import { diagnosticsHost } from './diagnostics';
 import { ConfigurationError } from '../errors';
 import { BuildOutputStyle, buildOutputStyles, isBuildOutputStyle } from '../build-output-style';
-import { inferEntryPoints, normalizeEntryPoints, type PackageJson } from '../entry-points';
-import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, Platform } from '../constants';
-import { diagnosticsHost } from './diagnostics';
+import { compilerOptionOverrides, defaultSourceDirectory, defaultOutDirectory, defaultEntryPoint, defaultEntryFile, Platform, Encoding } from '../constants';
+import { type PackageJson, inferEntryPoints, normalizeEntryPoints } from '../entry-points';
 import type { API } from 'typescript/sync';
 import type { AbsolutePath, RelativePath, CommandLineOptions, TypeScriptOptions, TypeScriptConfiguration, ReadConfigResult, EntryPoints, JsonString, BuildConfiguration } from '../@types';
 
@@ -22,7 +22,7 @@ const jsonTsbuildKeys = [ 'entryPoints', 'platform', 'bundle', 'clean', 'outputS
 const jsonDtsKeys = [ 'entryPoints', 'resolve' ] as const;
 const jsonBannerFooterKeys = [ 'js', 'css' ] as const;
 const jsonIifeKeys = [ 'globalName' ] as const;
-const declarationFileExpression = /\.d\.(?:[^./]+\.)?[cm]?ts$/;
+const declarationFileExpression = /\.d\.(?:[^./]+\.)?ts$/;
 
 /**
  * Computes the deepest directory containing every non-declaration root file.
@@ -38,7 +38,10 @@ function commonSourceDirectory(fileNames: readonly string[]) {
 
 		const segments = Paths.directoryName(fileName).split('/');
 
-		if (common === undefined) { common = segments; continue }
+		if (common === undefined) {
+			common = segments;
+			continue;
+		}
 
 		let length = 0;
 		while (length < common.length && common[length] === segments[length]) { length++ }
@@ -55,9 +58,9 @@ function commonSourceDirectory(fileNames: readonly string[]) {
  * @returns Absolute path of the nearest tsconfig.json, or undefined when none exists
  */
 function findConfigFile(directory: AbsolutePath): AbsolutePath | undefined {
-	for (let current = directory, parent = dirname(current) as AbsolutePath; ; current = parent, parent = dirname(current) as AbsolutePath) {
+	for (let current = directory, parent = Paths.directoryName(current); ; current = parent, parent = Paths.directoryName(current)) {
 		const candidate = Paths.join(current, 'tsconfig.json');
-		if (existsSync(candidate)) { return candidate }
+		if (Files.existsSync(candidate)) { return candidate }
 		if (parent === current) { return undefined }
 	}
 }
@@ -66,8 +69,8 @@ function findConfigFile(directory: AbsolutePath): AbsolutePath | undefined {
  * Reads a UTF-8 file, returning undefined when it cannot be read.
  * @param path - Absolute file path
  */
-function readOptionalFile(path: AbsolutePath): string | undefined {
-	try { return readFileSync(path, 'utf8') } catch { return undefined }
+function readOptionalJsonFile<T>(path: AbsolutePath): JsonString<T> | undefined {
+	try { return readFileSync(path, Encoding.utf8) as JsonString<T> } catch { return undefined }
 }
 
 /**
@@ -136,6 +139,7 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 	}
 
 	validateJsonTsbuildConfiguration(configResult.config.tsbuild);
+
 	if (outputStyle !== undefined && !isBuildOutputStyle(outputStyle)) {
 		throw new ConfigurationError(`Invalid value for "--outputStyle": ${String(outputStyle)}. Valid values: ${buildOutputStyles.join(', ')}`);
 	}
@@ -156,7 +160,8 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 	let inferredEntryPoints: EntryPoints<RelativePath> | undefined;
 	if (!hasExplicitEntryPoints) {
 		const packageJsonPath = Paths.join(directory, 'package.json');
-		const packageJsonContent = readOptionalFile(packageJsonPath) as JsonString<PackageJson> | undefined;
+		const packageJsonContent = readOptionalJsonFile<PackageJson>(packageJsonPath);
+
 		if (packageJsonContent) {
 			try {
 				const pkgJson = Json.parse<PackageJson>(packageJsonContent);
@@ -216,16 +221,15 @@ export function resolveConfiguration(api: API, directory: AbsolutePath, typeScri
 		}
 	};
 
-	baseConfig.tsbuild.entryPoints = normalizeEntryPoints(baseConfig.tsbuild.entryPoints);
-
 	// Resolve relative to the requested project directory even when the config was found in an ancestor; TypeScript still needs a config file name to accept `incremental`
-	const { options, fileNames, errors } = api.parseJsonConfigFileContent(baseConfig, { configFileName: Paths.join(directory, basename(configFile)) });
+	const { options, fileNames, errors } = api.parseJsonConfigFileContent(baseConfig, { configFileName: Paths.join(directory, Paths.baseName(configFile)) });
 	const rootDir = options.rootDir ?? commonSourceDirectory(fileNames);
 
 	// Build final configuration with all required fields
 	// Note: compilerOptionOverrides must be spread last to ensure they take precedence
 	return {
 		...baseConfig,
+		tsbuild: { ...baseConfig.tsbuild, entryPoints: normalizeEntryPoints(baseConfig.tsbuild.entryPoints) },
 		compilerOptions: {
 			...options,
 			target: apiTarget ?? options.target ?? ScriptTarget.ESNext,

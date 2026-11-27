@@ -1,18 +1,29 @@
-import { serialize, deserialize } from 'node:v8';
-import { defaultCleanOptions, defaultDirOptions, Encoding, FileExtension } from './constants';
-import { brotliDecompress, brotliCompress, constants as brotliConstants } from 'node:zlib';
 import { Paths } from './paths';
 import { isErrnoException } from './errors';
+import { defaultCleanOptions, defaultDirOptions, Encoding } from './constants';
 import { access, chmod, constants as fsConstants, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { LanguageVariant, SyntaxKind } from 'typescript/ast';
-import { createScanner } from 'typescript/ast/scanner';
-import type { WriteFileOptions } from 'node:fs';
-import type { AbsolutePath, Path, WrittenFile } from './@types';
 import { type TypeGuard, guard, TypeDefinition } from './type-definition';
+import { type Dirent, type WriteFileOptions, existsSync } from 'node:fs';
+import type { AbsolutePath, Path, RelativePath, WrittenFile } from './@types';
 
-type ReplacementSpecifier = { start: number; end: number; content: string };
+/** Options for {@link Files.readDirectory}. */
+export type ReadDirectoryOptions = {
+	/** Encoding of entry names. `'buffer'` returns names as `Buffer` objects. Default is `'utf8'`. */
+	encoding?: BufferEncoding | 'buffer';
+	/** Return `Dirent` objects instead of entry names. Default is `false`. */
+	withFileTypes?: boolean;
+	/** Include entries from all subdirectories. Default is `false`. */
+	recursive?: boolean;
+};
+
+/** Entry name type of {@link Files.readDirectory}, inferred from the `encoding` option. */
+type DirectoryEntryName<O extends ReadDirectoryOptions> = O['encoding'] extends 'buffer' ? Buffer<ArrayBuffer> : O['encoding'] extends BufferEncoding | undefined ? RelativePath : RelativePath | Buffer<ArrayBuffer>;
+
+/** Result of {@link Files.readDirectory}, inferred from the `encoding` and `withFileTypes` options. */
+export type DirectoryEntries<O extends ReadDirectoryOptions> = O['withFileTypes'] extends true ? Dirent<DirectoryEntryName<O>>[] : O['withFileTypes'] extends false | undefined ? DirectoryEntryName<O>[] : DirectoryEntryName<O>[] | Dirent<DirectoryEntryName<O>>[];
+
 type WritableData = string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView>;
-type WriteEntry = { path: AbsolutePath | string; data: WritableData; options?: WriteFileOptions; size?: number };
+type WriteEntry = { path: AbsolutePath; data: WritableData; options?: WriteFileOptions; size?: number };
 
 const removalBatchSize = 32;
 const writeBatchSize = 32;
@@ -21,37 +32,17 @@ const writeBatchSize = 32;
  * Creates a directory if it does not exist.
  * @param directory The path to the directory to create.
  */
-const makeDirMapper = (directory: string) => mkdir(directory, defaultDirOptions);
+const makeDirMapper = (directory: AbsolutePath) => mkdir(directory, defaultDirOptions);
 
-/**
- * Checks if the given object is a WrittenFile.
- * @param writtenFile The object to check.
- * @returns True if the object is a WrittenFile, false otherwise.
- */
-export const isWrittenFile = (writtenFile: unknown): writtenFile is WrittenFile =>
-	writtenFile !== null && typeof writtenFile === 'object' && !Array.isArray(writtenFile) && 'path' in writtenFile && typeof writtenFile.path === 'string' && 'size' in writtenFile && typeof writtenFile.size === 'number';
-
-/**
- * Checks if the given array contains only WrittenFile objects.
- * @param data The value to check.
- * @returns True if all elements in the array are WrittenFile objects, false otherwise.
- */
-export const isWrittenFiles = (data: unknown): data is WrittenFile[] => Array.isArray(data) ? data.every(isWrittenFile) : false;
-
-/**
- * A class for handling file operations such as reading, writing, compressing, and decompressing files.
- */
+/** A class for handling file operations such as reading, writing, compressing, and decompressing files. */
 export class Files {
 	private constructor() { throw new Error('Static class - no instantiation') }
 
-	/** Checks whether a value contains only valid written-file metadata. */
-	static isWrittenFiles: TypeGuard<WrittenFile[]> = TypeDefinition.typeGuardOfArray({ path: guard(Paths.isRelativePath), size: Number });
-
 	/**
 	 * Check if a file exists.
-	 * @param filePath The path to the file.
+	 * @param filePath Absolute filesystem path to the file.
 	 */
-	static async exists(filePath: Path | string): Promise<boolean> {
+	static async exists(filePath: Path): Promise<boolean> {
 		try {
 			await access(filePath, fsConstants.F_OK);
 			return true;
@@ -64,16 +55,22 @@ export class Files {
 	}
 
 	/**
+	 * Check if a file exists synchronously.
+	 * @param path The path to the file.
+	 */
+	static existsSync: (path: Path) => boolean = existsSync;
+
+	/**
 	 * Clear a directory by removing all of its entries in parallel.
 	 * Uses readdir + parallel rm so libuv's thread pool can unlink subtrees concurrently,
 	 * which is significantly faster than a single recursive `rm` for large output trees.
 	 * The directory itself is preserved (no mkdir needed afterward).
 	 * @param directory The path to the directory to clear.
 	 */
-	static async empty(directory: Path | string): Promise<void> {
-		let entries: string[];
+	static async empty(directory: Path): Promise<void> {
+		let entries: RelativePath[];
 
-		try { entries = await readdir(directory) } catch (error) {
+		try { entries = await Files.readDirectory(directory) } catch (error) {
 			// Directory doesn't exist - create it so callers can write into it
 			if (isErrnoException(error) && error.code === 'ENOENT') {
 				await mkdir(directory, defaultDirOptions);
@@ -86,7 +83,7 @@ export class Files {
 
 		if (entries.length === 0) { return }
 
-		const removalMapper = (entry: string) => rm(Paths.join(directory, entry), defaultCleanOptions);
+		const removalMapper = (entry: RelativePath) => rm(Paths.join(directory, entry), defaultCleanOptions);
 
 		// Keep removal concurrency bounded to avoid thread pool thrash on very large trees.
 		for (let i = 0, length = entries.length; i < length; i += removalBatchSize) {
@@ -101,7 +98,7 @@ export class Files {
 	 * @param data The data to write to the file.
 	 * @param options Optional write file options.
 	 */
-	static async write(filePath: Path | string, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }): Promise<void> {
+	static async write(filePath: Path, data: WritableData, options: WriteFileOptions = { encoding: Encoding.utf8 }): Promise<void> {
 		await mkdir(Paths.directoryName(filePath), defaultDirOptions);
 
 		return writeFile(filePath, data, options);
@@ -120,7 +117,7 @@ export class Files {
 		if (entries.length === 0) { return [] }
 
 		const writtenFiles: WrittenFile[] = [];
-		const directories = new Set<string>();
+		const directories = new Set<AbsolutePath>();
 
 		for (const { path, data, size } of entries) {
 			writtenFiles.push({ path: Paths.relative(projectDirectory, path), size: Files.#resolveFileSize(data, size) });
@@ -146,129 +143,11 @@ export class Files {
 	}
 
 	/**
-	 * Rewrites extension-less relative import/export/dynamic-import specifiers to include `.js`.
-	 * @param code The JavaScript output content to rewrite
+	 * Checks if the given array contains only WrittenFile objects.
+	 * @param data The value to check.
+	 * @returns True if all elements in the array are WrittenFile objects, false otherwise.
 	 */
-	static rewriteRelativeSpecifiers(code: string): string {
-		const appendJsExtension = (specifier: string) => {
-			const hashIndex = specifier.indexOf('#');
-			const queryIndex = specifier.indexOf('?');
-			let suffixStart = specifier.length;
-
-			if (hashIndex !== -1) { suffixStart = Math.min(suffixStart, hashIndex) }
-			if (queryIndex !== -1) { suffixStart = Math.min(suffixStart, queryIndex) }
-
-			return `${specifier.slice(0, suffixStart)}${FileExtension.JS}${specifier.slice(suffixStart)}`;
-		};
-
-		const scanner = createScanner(true, LanguageVariant.Standard, code);
-
-		const replacements: ReplacementSpecifier[] = [];
-		const addSpecifierRewrite = (start: number, end: number, tokenText: string) => {
-			const quote = tokenText[0];
-			const specifier = tokenText.slice(1, -1);
-			replacements.push({ start, end, content: `${quote}${appendJsExtension(specifier)}${quote}` });
-		};
-
-		let seenImportOrExport = false;
-		let importOrExportDepth = 0;
-		let expectSpecifierAfterFrom = false;
-		let expectSideEffectImportSpecifier = false;
-		let maybeDynamicImport = false;
-		let expectDynamicImportSpecifier = false;
-
-		for (let token = scanner.scan(); token !== SyntaxKind.EndOfFile; token = scanner.scan()) {
-			switch (token) {
-				case SyntaxKind.ImportKeyword: {
-					seenImportOrExport = true;
-					importOrExportDepth = 0;
-					expectSpecifierAfterFrom = false;
-					expectSideEffectImportSpecifier = true;
-					maybeDynamicImport = true;
-					expectDynamicImportSpecifier = false;
-					break;
-				}
-				case SyntaxKind.ExportKeyword: {
-					seenImportOrExport = true;
-					importOrExportDepth = 0;
-					expectSpecifierAfterFrom = false;
-					expectSideEffectImportSpecifier = false;
-					maybeDynamicImport = false;
-					expectDynamicImportSpecifier = false;
-					break;
-				}
-				case SyntaxKind.OpenParenToken: {
-					if (maybeDynamicImport) {
-						expectDynamicImportSpecifier = true;
-						maybeDynamicImport = false;
-					}
-					if (seenImportOrExport) { importOrExportDepth += 1 }
-					break;
-				}
-				case SyntaxKind.CloseParenToken: {
-					if (seenImportOrExport && importOrExportDepth > 0) { importOrExportDepth -= 1 }
-					break;
-				}
-				case SyntaxKind.FromKeyword: {
-					if (seenImportOrExport) {
-						expectSpecifierAfterFrom = true;
-						expectSideEffectImportSpecifier = false;
-					}
-					break;
-				}
-				case SyntaxKind.StringLiteral:
-				case SyntaxKind.NoSubstitutionTemplateLiteral: {
-					if (expectDynamicImportSpecifier || expectSpecifierAfterFrom || expectSideEffectImportSpecifier) {
-						addSpecifierRewrite(scanner.getTokenStart(), scanner.getTokenEnd(), scanner.getTokenText());
-						expectDynamicImportSpecifier = false;
-						expectSpecifierAfterFrom = false;
-						expectSideEffectImportSpecifier = false;
-					}
-					break;
-				}
-				case SyntaxKind.SemicolonToken: {
-					seenImportOrExport = false;
-					importOrExportDepth = 0;
-					expectSpecifierAfterFrom = false;
-					expectSideEffectImportSpecifier = false;
-					maybeDynamicImport = false;
-					expectDynamicImportSpecifier = false;
-					break;
-				}
-				case SyntaxKind.OpenBraceToken:
-				case SyntaxKind.OpenBracketToken:
-				case SyntaxKind.LessThanToken:
-				case SyntaxKind.Identifier:
-				case SyntaxKind.AsteriskToken:
-				case SyntaxKind.TypeKeyword:
-				case SyntaxKind.DefaultKeyword:
-				case SyntaxKind.AsKeyword: {
-					maybeDynamicImport = false;
-					break;
-				}
-				default: break;
-			}
-
-			// End `import { ... }` / `export { ... }` clause where semicolon may be omitted.
-			if (seenImportOrExport && importOrExportDepth === 0 && token === SyntaxKind.CloseBraceToken) { expectSideEffectImportSpecifier = false }
-		}
-
-		if (replacements.length === 0) { return code }
-
-		// Single forward pass; repeated slice-and-concat is O(n * replacements) on large bundles.
-		replacements.sort((left, right) => left.start - right.start);
-
-		let cursor = 0;
-		const segments: string[] = [];
-		for (const { start, content, end } of replacements) {
-			segments.push(code.slice(cursor, start), content);
-			cursor = end;
-		}
-
-		segments.push(code.slice(cursor));
-
-		return segments.join('');
-	}
+	static isWrittenFiles: TypeGuard<WrittenFile[]> = TypeDefinition.typeGuardOfArray({ path: guard(Paths.isRelativePath), size: Number });
 
 	/**
 	 * Returns true when JavaScript output begins with a shebang line.
@@ -277,6 +156,7 @@ export class Files {
 	static hasShebang(output: string | Uint8Array): boolean {
 		if (output.length < 2) { return false }
 
+		// A shebang line starts with "#!" at the very beginning of the file. Comparing the character codes is faster than slicing the string.
 		return typeof output === 'string' ? output.charCodeAt(0) === 0x23 && output.charCodeAt(1) === 0x21 : output[0] === 0x23 && output[1] === 0x21;
 	}
 
@@ -285,7 +165,7 @@ export class Files {
 	 * @param filePath The file path.
 	 * @param mode Numeric mode bits (e.g. `0o755`).
 	 */
-	static chmod: (filePath: Path | string, mode: number) => Promise<void> = chmod;
+	static chmod: (filePath: Path, mode: number) => Promise<void> = chmod;
 
 	/**
 	 * Load a file and return its contents as a string.
@@ -293,64 +173,20 @@ export class Files {
 	 * @param encoding The encoding to use when reading the file. Default is UTF-8.
 	 * @returns The file contents as a string.
 	 */
-	static read<T extends string = string>(filePath: Path, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
+	static read<T extends string = string>(filePath: AbsolutePath, encoding: BufferEncoding = Encoding.utf8): Promise<T> {
 		// Brand the result as T (e.g. JsonString<X>) — encoding is always set, so this always reads as a string
-		return readFile(Paths.normalize(filePath), { encoding }) as Promise<T>;
+		return readFile(filePath, { encoding }) as Promise<T>;
 	}
 
 	/**
 	 * Reads the contents of a directory.
 	 * @param directoryPath The path to the directory.
-	 * @returns An array of file and directory names within the specified directory.
+	 * @param options The name encoding, whether to return `Dirent` objects, and whether to recurse into subdirectories.
+	 * @returns Entry names, or `Dirent` objects when `withFileTypes` is `true`.
 	 */
-	static readDirectory: (directoryPath: Path) => Promise<string[]> = readdir;
-
-	/**
-	 * Decompress a Brotli-compressed buffer.
-	 * Uses callback-based API wrapped in a Promise for faster performance than streaming.
-	 * @param buffer The compressed buffer to decompress.
-	 * @returns The decompressed buffer.
-	 */
-	static decompressBuffer(buffer: Buffer): Promise<Buffer> {
-		return new Promise<Buffer>((resolve, reject) => brotliDecompress(buffer, (error, result) => error ? reject(error) : resolve(result)));
-	}
-
-	/**
-	 * Compress data using Brotli compression.
-	 * Uses callback-based API wrapped in a Promise for faster performance than streaming.
-	 * @param buffer The buffer to compress.
-	 * @returns The compressed buffer.
-	 */
-	static compressBuffer(buffer: Buffer): Promise<Buffer> {
-		const params: Record<number, number> = {
-			[brotliConstants.BROTLI_PARAM_QUALITY]: 5
-		};
-
-		return new Promise<Buffer>((resolve, reject) => brotliCompress(buffer, { params }, (error, result) => error ? reject(error) : resolve(result)));
-	}
-
-	/**
-	 * Load a file and deserialize it using V8 deserialization.
-	 * Faster than JSON.parse for complex objects.
-	 * @param path The path to the file.
-	 * @returns The deserialized object.
-	 */
-	static async readCompressed<T = unknown>(path: Path): Promise<T> {
-		// Deserializing arbitrary persisted state is an inherent boundary cast, like JSON.parse
-		return deserialize(await this.decompressBuffer(await readFile(Paths.normalize(path)))) as T;
-	}
-
-	/**
-	 * Serialize an object using V8 serialization and save to a Brotli-compressed file.
-	 * Faster than JSON.stringify for complex objects.
-	 * @param path The path to the file.
-	 * @param data The object to serialize and save.
-	 */
-	static async writeCompressed<T>(path: Path, data: T): Promise<void> {
-		const normalizedPath = Paths.normalize(path);
-		await mkdir(Paths.directoryName(normalizedPath), defaultDirOptions);
-
-		return writeFile(normalizedPath, await this.compressBuffer(serialize(data)));
+	static readDirectory<O extends ReadDirectoryOptions = { encoding?: BufferEncoding; withFileTypes?: false }>(directoryPath: Path, { encoding = Encoding.utf8, withFileTypes = false, recursive = false }: O = {} as O): Promise<DirectoryEntries<O>> {
+		// readdir's overloads cannot accept runtime-variable options, and the conditional return type cannot be narrowed, so both are asserted
+		return (readdir as (path: Path, options: Required<ReadDirectoryOptions>) => Promise<DirectoryEntries<ReadDirectoryOptions>>)(directoryPath, { encoding, withFileTypes, recursive }) as Promise<DirectoryEntries<O>>;
 	}
 
 	/**

@@ -327,7 +327,6 @@ If your editor still doesn't pick this up for `tsconfig.json`, add a per-workspa
 }
 ```
 
-If a directory is provided, all files within it (recursively, excluding `.d.ts` files) will be used as entry points. Each entry is named by its path relative to that directory, so `./src/ciphers/aes.ts` under `"./src"` is emitted as `ciphers/aes.js`.
 If a directory is provided, every file within it (recursively, excluding `.d.ts` files) is used as an entry point; symbolic links are not followed. Output names preserve the relative directory structure, so `./src/internal/helper.ts` from a `./src` entry is emitted as `internal/helper.js`. This is how `bundle: false` builds (whose default entry point is `./src`) emit a transpiled file for every source module.
 
 When `entryPoints` is omitted entirely, tsbuild automatically infers entry points from `package.json` by reverse-mapping output paths back to their source files. This applies to both bundled and unbundled (`"bundle": false`) builds. Resolution order:

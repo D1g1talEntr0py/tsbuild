@@ -2,7 +2,7 @@ import { FileExtension } from './constants';
 import { ConfigurationError } from './errors';
 import { Files } from './files';
 import { Paths } from './paths';
-import type { AbsolutePath, EntryPoints, RelativePath } from './@types/index';
+import type { AbsolutePath, EntryPoints, Path, RelativePath } from './@types/index';
 
 type PackageJsonExportValue = string | null | PackageJsonExportValue[] | { [key: string]: PackageJsonExportValue | undefined };
 type PackageJsonExports = PackageJsonExportValue;
@@ -28,7 +28,7 @@ const startsWithDotSlash = /^\.\//;
 const outputToSourceExtension: ReadonlyMap<string, string> = new Map([
 	[ FileExtension.JS, FileExtension.TS ],
 	[ FileExtension.JSX, FileExtension.TSX ],
-	[ FileExtension.DTS, FileExtension.TS ]
+	[ FileExtension.D_TS, FileExtension.TS ]
 ]);
 
 /**
@@ -44,19 +44,19 @@ function stemOf(filePath: string) {
 }
 
 /**
- * Normalizes array entry points to a stable output-name map.
+ * Normalizes entry points to a stable output-name map with branded paths.
  * @param entryPoints Array of source paths
  * @returns Entry points keyed by source filename stem
  */
-function normalizeEntryPoints(entryPoints: EntryPoints<RelativePath> | RelativePath[]): EntryPoints<RelativePath> {
-	if (!Array.isArray(entryPoints)) { return entryPoints }
+function normalizeEntryPoints(entryPoints: EntryPoints<string> | string[]): EntryPoints<Path> {
+	if (!Array.isArray(entryPoints)) { return entryPoints as EntryPoints<Path> }
 
-	const normalized: EntryPoints<RelativePath> = {};
+	const normalized: EntryPoints<Path> = {};
 	for (const entryPoint of entryPoints) {
 		const name = stemOf(entryPoint);
 		if (normalized[name] !== undefined) { throw new ConfigurationError(`Duplicate entry point stem: ${name}`) }
 
-		normalized[name] = entryPoint;
+		normalized[name] = entryPoint as Path;
 	}
 
 	return normalized;
@@ -125,8 +125,8 @@ function wildcardToSourceDirectory(outputPath: string, outDir: string, sourceDir
  * @param exportValue String shorthand or conditional export object
  * @returns The resolved output path, or undefined if no supported condition is found
  */
-function resolveConditionalExport(exportValue: PackageJsonExportValue): string | undefined {
-	if (typeof exportValue === 'string') { return exportValue }
+function resolveConditionalExport(exportValue: PackageJsonExportValue): Path | undefined {
+	if (typeof exportValue === 'string') { return exportValue as Path }
 
 	if (exportValue === null) { return undefined }
 
@@ -204,6 +204,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 				}
 
 				const sourcePath = outputToSourcePath(outputPath, outDir, sourceDir);
+
 				if (sourcePath) { entryPoints[subpath === '.' ? stemOf(sourcePath) : subpathToEntryName(subpath, packageJson.name)] = sourcePath }
 			}
 		}
@@ -224,6 +225,7 @@ function inferEntryPoints(packageJson: PackageJson, outDir: string, sourceDir: s
 
 	if (!hasEntries) {
 		const legacyPath = packageJson.module ?? packageJson.main;
+
 		if (legacyPath !== undefined) {
 			const sourcePath = outputToSourcePath(legacyPath, outDir, sourceDir);
 
@@ -295,19 +297,28 @@ async function resolveEntryPoint(directory: AbsolutePath, name: string, entryPoi
  * @returns Entry mapping with one key per file in the directory tree
  */
 async function expandDirectoryEntryPoints(directory: AbsolutePath, prefix = '', entries: EntryPoints<AbsolutePath> = {}) {
-	for (const file of (await Files.readDirectory(directory)).sort()) {
+	for (const file of await Files.readDirectory(directory)) {
 		const filePath = Paths.join(directory, file);
-		const fileType = await Paths.getType(filePath);
 
-		if (fileType === 'directory') {
-			await expandDirectoryEntryPoints(filePath, `${prefix}${file}/`, entries);
-		} else if (!file.endsWith(FileExtension.DTS) && fileType === 'file') {
-			entries[`${prefix}${Paths.parse(file).name}`] = filePath;
+		switch (await Paths.getType(filePath)) {
+			case 'directory': {
+				await expandDirectoryEntryPoints(filePath, `${prefix}${file}/`, entries);
+				break;
+			}
+			case 'file': {
+				if (file.endsWith(FileExtension.D_TS)) { break }
+
+				const name = `${prefix}${Paths.parse(file).name}`;
+				if (entries[name] !== undefined) { throw new ConfigurationError(`Duplicate entry point stem: ${name}`) }
+
+				entries[name] = filePath;
+				break;
+			}
 		}
 	}
 
 	return entries;
 }
 
-export { inferEntryPoints, normalizeEntryPoints, outputToSourcePath, resolveConditionalExport, resolveEntryPoints, subpathToEntryName, updateEntryPoints };
 export type { PackageJson };
+export { inferEntryPoints, normalizeEntryPoints, outputToSourcePath, resolveConditionalExport, resolveEntryPoints, subpathToEntryName, updateEntryPoints };

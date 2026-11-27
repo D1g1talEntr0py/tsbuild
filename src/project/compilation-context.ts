@@ -169,7 +169,7 @@ export class CompilationContext implements Disposable {
 		const declarations = new Map<AbsolutePath, string>();
 		if (emitOutput !== undefined) {
 			for (const [ path, { text } ] of emitOutput.outputFiles) {
-				if (path.endsWith(FileExtension.DTS)) { declarations.set(path as string as AbsolutePath, text) }
+				if (path.endsWith(FileExtension.D_TS)) { declarations.set(path as string as AbsolutePath, text) }
 			}
 		}
 
@@ -182,7 +182,7 @@ export class CompilationContext implements Disposable {
 			const dependencies = new Set<RelativePath>();
 			const dirWithSlash = this.#directory + '/';
 			for (const fileName of this.#sourceFileNames) {
-				if (fileName.startsWith(dirWithSlash) && !fileName.endsWith(FileExtension.DTS)) { dependencies.add(Paths.relative(this.#directory, fileName)) }
+				if (fileName.startsWith(dirWithSlash) && !fileName.endsWith(FileExtension.D_TS)) { dependencies.add(Paths.relative(this.#directory, fileName)) }
 			}
 			this.#dependencies = dependencies;
 		}

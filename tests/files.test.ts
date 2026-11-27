@@ -1,13 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-vi.mock('node:zlib', async () => {
-	const actual = await vi.importActual<typeof import('node:zlib')>('node:zlib');
-	return {
-		...actual,
-		brotliCompress: vi.fn(actual.brotliCompress),
-		brotliDecompress: actual.brotliDecompress
-	};
-});
+import { describe, it, expect, expectTypeOf, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('node:fs/promises', async () => {
 	const memfs = await import('memfs');
@@ -15,7 +6,6 @@ vi.mock('node:fs/promises', async () => {
 });
 
 import { vol } from 'memfs';
-import * as zlib from 'node:zlib';
 import { Files } from 'src/files';
 import type { AbsolutePath, Path } from 'src/@types';
 
@@ -81,8 +71,7 @@ describe('Files', () => {
 		});
 
 		it('re-throws non-ENOENT errors from readdir', async () => {
-			const fsp = await import('node:fs/promises');
-			const readdirSpy = vi.spyOn(fsp, 'readdir').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+			const readdirSpy = vi.spyOn(Files, 'readDirectory').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 			await expect(Files.empty('/any' as Path)).rejects.toThrow('EACCES');
 			readdirSpy.mockRestore();
 		});
@@ -121,9 +110,9 @@ describe('Files', () => {
 			const fsp = await import('node:fs/promises');
 			const mkdirSpy = vi.spyOn(fsp, 'mkdir');
 			const written = await Files.writeFiles('/' as AbsolutePath, [
-				{ path: '/batch/a.txt' as Path, data: 'a' },
-				{ path: '/batch/b.txt' as Path, data: Buffer.from('b') },
-				{ path: '/batch/nested/c.txt' as Path, data: 'c' },
+				{ path: '/batch/a.txt' as AbsolutePath, data: 'a' },
+				{ path: '/batch/b.txt' as AbsolutePath, data: Buffer.from('b') },
+				{ path: '/batch/nested/c.txt' as AbsolutePath, data: 'c' },
 			]);
 
 			expect(vol.readFileSync('/batch/a.txt', 'utf8')).toBe('a');
@@ -159,7 +148,7 @@ describe('Files', () => {
 			});
 
 			const writes = Array.from({ length: concurrencyCap * 2 }, (_, index) => ({
-				path: `/batch/${index.toString()}.txt` as Path,
+				path: `/batch/${index.toString()}.txt` as AbsolutePath,
 				data: `${index.toString()}`,
 			}));
 
@@ -177,68 +166,14 @@ describe('Files', () => {
 
 	describe('chmod', () => {
 		it('updates file mode bits', async () => {
-			await Files.write('/mode/file.sh' as Path, '#!/usr/bin/env node\n');
-			await Files.chmod('/mode/file.sh' as Path, 0o755);
+			await Files.write('/mode/file.sh' as AbsolutePath, '#!/usr/bin/env node\n');
+			await Files.chmod('/mode/file.sh' as AbsolutePath, 0o755);
 			const stats = vol.statSync('/mode/file.sh');
 			expect(Number(stats.mode) & 0o777).toBe(0o755);
 		});
 	});
 
-	describe('output helpers', () => {
-		it('rewrites extension-less relative import specifiers to .js', () => {
-			const code = [
-				'import { a } from "./dep";',
-				'export { b } from "../pkg/item";',
-				'import "./setup";',
-				'const lazy = await import("./lazy/module");'
-			].join('\n');
-
-			const rewritten = Files.rewriteRelativeSpecifiers(code);
-
-			expect(rewritten).toContain('from "./dep.js"');
-			expect(rewritten).toContain('from "../pkg/item.js"');
-			expect(rewritten).toContain('import "./setup.js"');
-			expect(rewritten).toContain('import("./lazy/module.js")');
-		});
-
-		it('rewrites scanned module specifiers and preserves their suffixes', () => {
-			const code = [
-				'import { a } from "./dep?raw";',
-				'import { b } from "../pkg/item#fragment";',
-				'import "./setup";',
-				'const lazy = await import("./lazy/module");'
-			].join('\n');
-
-			const rewritten = Files.rewriteRelativeSpecifiers(code);
-
-			expect(rewritten).toContain('from "./dep.js?raw"');
-			expect(rewritten).toContain('from "../pkg/item.js#fragment"');
-			expect(rewritten).toContain('import "./setup.js"');
-			expect(rewritten).toContain('import("./lazy/module.js")');
-		});
-
-		it('does not rewrite import-like text inside comments or string literals', () => {
-			const code = [
-				"const message = 'from \"./not-an-import\"';",
-				'// import "./also-not-an-import";',
-				'import "./real-import";'
-			].join('\n');
-
-			const rewritten = Files.rewriteRelativeSpecifiers(code);
-
-			expect(rewritten).toContain("'from \"./not-an-import\"'");
-			expect(rewritten).toContain('// import "./also-not-an-import";');
-			expect(rewritten).toContain('import "./real-import.js";');
-		});
-
-		it('rewrites dynamic imports when import attributes are present', () => {
-			const code = 'const data = await import("./config", { with: { type: "json" } });';
-
-			const rewritten = Files.rewriteRelativeSpecifiers(code);
-
-			expect(rewritten).toContain('import("./config.js", { with: { type: "json" } })');
-		});
-
+	describe('hasShebang', () => {
 		it('detects shebangs at the start of a file', () => {
 			expect(Files.hasShebang('#!/usr/bin/env node\nconsole.log("hi");')).toBe(true);
 			expect(Files.hasShebang('console.log("hi");')).toBe(false);
@@ -246,6 +181,10 @@ describe('Files', () => {
 	});
 
 	describe('read', () => {
+		it('requires an absolute filesystem path', () => {
+			expectTypeOf<Parameters<typeof Files.read>[0]>().toEqualTypeOf<AbsolutePath>();
+		});
+
 		it('reads file contents as string', async () => {
 			vol.fromJSON({ '/test/file.txt': 'hello world' });
 			const result = await Files.read('/test/file.txt' as AbsolutePath);
@@ -263,47 +202,20 @@ describe('Files', () => {
 			const result = await Files.readDirectory('/dir' as AbsolutePath);
 			expect(result.sort()).toEqual(['a.txt', 'b.txt', 'c.txt']);
 		});
-	});
 
-	describe('compressBuffer / decompressBuffer', () => {
-		it('round-trips Brotli compression', async () => {
-			const original = Buffer.from('Hello, Brotli compression test! '.repeat(100));
-			const compressed = await Files.compressBuffer(original);
-			expect(compressed.length).toBeLessThan(original.length);
-			const decompressed = await Files.decompressBuffer(compressed);
-			expect(decompressed).toEqual(original);
+		it('returns Dirent objects recursively when requested', async () => {
+			vol.fromJSON({ '/dir/a.txt': 'a', '/dir/sub/b.txt': 'b' });
+			const result = await Files.readDirectory('/dir' as AbsolutePath, { withFileTypes: true, recursive: true });
+			const files = result.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
+			expect(files).toEqual(['a.txt', 'b.txt']);
 		});
 
-		it('passes the expected Brotli quality parameter', async () => {
-				const original = Buffer.from('demo payload');
-				const spy = vi.mocked(zlib.brotliCompress);
-				spy.mockClear();
-
-				await Files.compressBuffer(original);
-
-				expect(spy).toHaveBeenCalledWith(
-					original,
-					expect.objectContaining({
-						params: expect.objectContaining({
-							[zlib.constants.BROTLI_PARAM_QUALITY]: 5
-						})
-					}),
-					expect.any(Function)
-				);
-			});
-
-		it('round-trips V8 serialized + Brotli compressed data', async () => {
-			vol.mkdirSync('/cache', { recursive: true });
-			const data = { version: 2, files: { 'a.d.ts': { code: 'declare const a: string;' } } };
-			await Files.writeCompressed('/cache/data.br' as AbsolutePath, data);
-			const result = await Files.readCompressed<typeof data>('/cache/data.br' as AbsolutePath);
-			expect(result).toEqual(data);
-		});
-
-		it('creates parent directories for writeCompressed', async () => {
-			vol.mkdirSync('/', { recursive: true });
-			await Files.writeCompressed('/deep/nested/cache.br' as AbsolutePath, { test: true });
-			expect(vol.existsSync('/deep/nested/cache.br')).toBe(true);
+		it('returns Buffer names when encoding is buffer', async () => {
+			vol.fromJSON({ '/dir/a.txt': 'a' });
+			const result = await Files.readDirectory('/dir' as AbsolutePath, { encoding: 'buffer' });
+			expect(Buffer.isBuffer(result[0])).toBe(true);
+			expect(result[0].toString()).toBe('a.txt');
 		});
 	});
+
 });

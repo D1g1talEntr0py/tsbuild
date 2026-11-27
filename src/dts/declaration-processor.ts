@@ -508,16 +508,17 @@ export class DeclarationProcessor {
 			// Remove empty statements (spurious semicolons)
 			if (isEmptyStatement(node)) {
 				magic.remove(node.getStart(), node.getEnd());
+
 				return; // nothing else to do for this node
 			}
 
 			// Fix import/export paths: .d.ts → .js
 			if ((isImportDeclaration(node) || isExportDeclaration(node)) && node.moduleSpecifier && isStringLiteral(node.moduleSpecifier)) {
 				const { text } = node.moduleSpecifier;
-				if (text.startsWith('.') && text.endsWith(FileExtension.DTS)) {
+
+				if (text.startsWith('.') && text.endsWith(FileExtension.D_TS)) {
 					// Replace .d.ts or .d.tsx with .js (faster than regex)
-					const replacement = text.endsWith('.d.tsx') ? text.slice(0, -6) + FileExtension.JS : text.slice(0, -5) + FileExtension.JS;
-					magic.overwrite(node.moduleSpecifier.getStart() + 1, node.moduleSpecifier.getEnd() - 1, replacement);
+					magic.overwrite(node.moduleSpecifier.getStart() + 1, node.moduleSpecifier.getEnd() - 1, text.endsWith(FileExtension.D_TSX) ? text.slice(0, -6) + FileExtension.JS : text.slice(0, -5) + FileExtension.JS);
 				}
 			}
 

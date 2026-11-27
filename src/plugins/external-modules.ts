@@ -13,31 +13,28 @@ type ExternalModulesPluginOptions = { dependencies?: Pattern[], noExternal?: Pat
 const createPathAliasPattern = (key: string) => {
 	const wildcardIndex = key.indexOf('*');
 
-	if (wildcardIndex === -1) { return key }
-
 	// Escape the suffix after the wildcard, if any, and anchor it to the end of the string.
-	return new RegExp(`^${RegExp.escape(key.slice(0, wildcardIndex))}.*${RegExp.escape(key.slice(wildcardIndex + 1))}$`);
+	return wildcardIndex === -1 ? key : new RegExp(`^${RegExp.escape(key.slice(0, wildcardIndex))}.*${RegExp.escape(key.slice(wildcardIndex + 1))}$`);
 };
 
 export const externalModulesPlugin = ({ dependencies = [], noExternal = [], paths = {} }: ExternalModulesPluginOptions): Plugin => {
+	const external = true;
+	const matchNoExternal = createPatternMatcher(noExternal);
+	const matchDependencies = createPatternMatcher(dependencies);
+	const matchPathAlias = createPatternMatcher(Object.keys(paths).map(createPathAliasPattern), false);
+
 	return {
 		name: 'esbuild:external-modules',
-		/**
-		 * Configure the plugin to handle external modules
+		/** Configure the plugin to handle external modules
 		 * @param build The esbuild build instance
 		 */
 		setup(build) {
-			const external = true;
-			const matchNoExternal = createPatternMatcher(noExternal);
-			const matchDependencies = createPatternMatcher(dependencies);
-			const matchPathAlias = createPatternMatcher(Object.keys(paths).map(createPathAliasPattern), false);
-
 			build.onResolve({ filter: /.*/ }, ({ path }): OnResolveResult | undefined => {
 				switch (true) {
 					case matchNoExternal(path): return;
 					case matchPathAlias(path): return;
 					case matchDependencies(path): return { external };
-					case !Paths.isPath(path): return { path, external };
+					case !Paths.isLocalSpecifier(path): return { path, external };
 					default: return;
 				}
 			});

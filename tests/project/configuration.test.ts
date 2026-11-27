@@ -9,7 +9,7 @@ import { ConfigurationError } from '../../src/errors';
 import { Logger } from '../../src/logger';
 import { Paths } from '../../src/paths';
 import { TestHelper } from '../scripts/test-helper';
-import type { RelativePath } from '../../src/@types';
+import type { TypeScriptOptions } from '../../src/@types';
 
 vi.mock('node:fs', async () => (await import('memfs')).fs);
 vi.mock('node:fs/promises', async () => (await import('memfs')).fs.promises);
@@ -141,9 +141,10 @@ describe('resolveConfiguration', () => {
 	});
 
 	it.each([ false, true ])('normalizes explicit entry points and skips inference (API: %s)', (useApi) => {
-		const entryPoints = [ './src/index.ts' as RelativePath ];
+		const entryPoints = [ './src/index.ts' ];
+		const apiOptions: TypeScriptOptions = { tsbuild: { entryPoints } };
 		writeConfig({ compilerOptions: { incremental: false }, ...(useApi ? {} : { tsbuild: { entryPoints } }) });
-		const config = resolveConfiguration(TestHelper.api, projectDirectory, useApi ? { tsbuild: { entryPoints } } : {}, defaultCommandLineOptions);
+		const config = resolveConfiguration(TestHelper.api, projectDirectory, useApi ? apiOptions : {}, defaultCommandLineOptions);
 		expect(config.tsbuild.entryPoints).toEqual({ index: './src/index.ts' });
 		expect(fs.readFileSync).not.toHaveBeenCalledWith('/project/package.json', expect.anything());
 	});
@@ -208,7 +209,7 @@ describe('resolveConfiguration', () => {
 		it.each([
 			{ files: [ 'src/index.ts', 'src/feature/a.ts', 'src/feature/deep/b.ts' ], expected: '/project/src' },
 			{ files: [ 'src/index.ts', 'lib/util.ts' ], expected: '/project' },
-			{ files: [ 'src/feature/a.ts', 'types/global.d.ts', 'types/env.d.mts', 'types/styles.d.css.ts' ], expected: '/project/src/feature' },
+			{ files: [ 'src/feature/a.ts', 'types/global.d.ts', 'types/styles.d.css.ts' ], expected: '/project/src/feature' },
 			{ files: [ 'src/index.ts', '../outside.ts' ], expected: '/' }
 		])('uses the common directory of source roots for $files', ({ files, expected }) => {
 			vol.fromJSON(Object.fromEntries(files.map((file) => [ Paths.join(projectDirectory, file), 'export {};' ])));

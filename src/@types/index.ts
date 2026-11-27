@@ -27,9 +27,7 @@ type Mutable<T> = Expand<{
 }>;
 
 type VoidFunction = () => void;
-type Fn<P = any, R = any> = (...args: P[]) => R;
 type TypedFunction<T extends (...args: any[]) => any> = (...args: Parameters<T>) => ReturnType<T>;
-type InferredFunction<T = Fn> = T extends (...args: infer P) => infer R ? (...args: P) => R : never;
 /**
  * Type representing a method function signature with typed this, arguments, and return type.
  * Used to avoid inlining the method signature type repeatedly in decorator code.
@@ -91,13 +89,17 @@ type RelativePath = Brand<string, 'RelativePath'>;
 /** A file system path that can be either absolute or relative */
 type Path = AbsolutePath | RelativePath;
 
+type PathDescriptor = string | AbsolutePath | RelativePath;
+
 /** A module specifier loaded by Node rather than treated as a filesystem path, usually a package name. */
 type PackageSpecifier = Brand<string, 'PackageSpecifier'>;
 
 /** A plugin location: either a bare module specifier or a filesystem path. */
 type PluginSpecifier = PackageSpecifier | Path;
 
-type ConditionalPath<T extends string | Path> = T extends AbsolutePath ? AbsolutePath : T extends RelativePath ? RelativePath : Path;
+type ConditionalPath<T extends PathDescriptor> = T extends AbsolutePath ? AbsolutePath : T extends RelativePath ? RelativePath : string;
+type JoinedPath<T extends PathDescriptor> = T extends AbsolutePath ? AbsolutePath : T extends RelativePath ? Path : string;
+type AppendedPath<T extends PathDescriptor> = T extends AbsolutePath ? AbsolutePath : T extends RelativePath ? Path : string;
 
 // JSON types
 type JsonString<T> = Brand<string, T>;
@@ -122,9 +124,7 @@ type JsxRenderingMode = NonNullable<Required<TsconfigRaw>['compilerOptions']['js
 
 /** User-facing tsbuild configuration (excludes TypeScript compiler options like target, outDir, sourceMap) */
 type BuildOptions = {
-	/** Project directory (relative or absolute). Defaults to the current directory. Resolved to absolute internally. */
-	project?: Path;
-	entryPoints?: EntryPoints<RelativePath> | RelativePath[];
+	entryPoints?: EntryPoints | string[];
 	/** Platform target. Auto-detected from tsconfig lib (DOM = browser, no DOM = node) */
 	platform?: 'browser' | 'node' | 'neutral';
 	bundle?: boolean;
@@ -165,9 +165,9 @@ type CommandLineOptions = {
 	outputStyle?: string;
 };
 
-type BuildConfiguration = ExpandedModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
+type BuildConfiguration = ExpandedModify<MarkRequired<BuildOptions, 'entryPoints' | 'splitting' | 'bundle' | 'noExternal' | 'sourceMap'>, { entryPoints: EntryPoints<Path>, minify: boolean, watch: WatchConfiguration, dts: DtsConfiguration }>;
 
-type EntryPoints<out T extends Path> = Record<string, T>;
+type EntryPoints<out T extends string = string> = Record<string, T>;
 
 /** Project build options used internally (includes values from both tsbuild config and compiler options) */
 type ProjectBuildConfiguration = Expand<Readonly<Modify<BuildConfiguration, { entryPoints?: Promise<EntryPoints<AbsolutePath>> }> & {
@@ -243,10 +243,9 @@ type FormatSupplier = (text: string) => string;
 type LogEntryType = 'info' | 'success' | 'done' | 'error' | 'warn';
 
 export type {
+	Expand,
 	VoidFunction,
-	Fn,
 	TypedFunction,
-	InferredFunction,
 	Brand,
 	MethodFunction,
 	OptionalReturn,
@@ -273,9 +272,12 @@ export type {
 	Path,
 	AbsolutePath,
 	RelativePath,
+	PathDescriptor,
 	PackageSpecifier,
 	PluginSpecifier,
 	ConditionalPath,
+	JoinedPath,
+	AppendedPath,
 	LogEntryType,
 	EsTarget,
 	CachedDeclaration,

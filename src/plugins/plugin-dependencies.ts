@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isExportDeclaration, isImportDeclaration, isStringLiteral } from 'typescript/ast';
-import { nodeModulesPathPattern } from '../constants';
+import { Encoding, nodeModulesPathPattern } from '../constants';
 import type { Node } from 'typescript/ast';
 import type { API, CompilerOptions } from 'typescript/sync';
 import type { AbsolutePath } from '../@types';
@@ -26,7 +26,7 @@ function collectModuleSpecifiers(node: Node, specifiers: string[]) {
  * @param file Absolute file path
  */
 function readSource(file: AbsolutePath): string | undefined {
-	try { return readFileSync(file, 'utf8') } catch { return undefined }
+	try { return readFileSync(file, Encoding.utf8) } catch { return undefined }
 }
 
 /**
@@ -50,10 +50,11 @@ export function discoverLocalDependencies(api: API, entryFile: AbsolutePath, com
 		dependencies.add(file);
 		if (!parseableSourceExtensionPattern.test(file)) { continue }
 
+		// Create a lexical block scope for the retained source file to ensure it is disposed after use
 		const specifiers: string[] = [];
 		{
-			using retained = api.createSourceFile(file, source);
-			collectModuleSpecifiers(retained.sourceFile, specifiers);
+			using retainedSourceFile = api.createSourceFile(file, source);
+			collectModuleSpecifiers(retainedSourceFile.sourceFile, specifiers);
 		}
 
 		const containingDirectory = dirname(file);

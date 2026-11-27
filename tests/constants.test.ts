@@ -146,7 +146,8 @@ describe('constants', () => {
 
 		it('exports correct file extensions', () => {
 			expect(FileExtension.JS).toBe('.js');
-			expect(FileExtension.DTS).toBe('.d.ts');
+			expect(FileExtension.D_TS).toBe('.d.ts');
+			expect(FileExtension.D_TSX).toBe('.d.tsx');
 			expect(FileExtension.CSS).toBe('.css');
 			expect(FileExtension.JSON).toBe('.json');
 		});

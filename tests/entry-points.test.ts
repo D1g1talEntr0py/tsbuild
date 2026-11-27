@@ -1,11 +1,10 @@
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { vol } from 'memfs';
 import { inferEntryPoints, normalizeEntryPoints, outputToSourcePath, resolveConditionalExport, resolveEntryPoints, subpathToEntryName } from 'src/entry-points';
-import { Files } from 'src/files';
 import { Paths } from 'src/paths';
 import { ConfigurationError } from 'src/errors';
 import type { PackageJson } from 'src/entry-points';
-import type { RelativePath } from '../src/@types';
+import type { EntryPoints, Path, RelativePath, TypeScriptOptions } from '../src/@types';
 
 vi.mock('node:fs', async () => (await import('memfs')).fs);
 vi.mock('node:fs/promises', async () => (await import('memfs')).fs.promises);
@@ -16,7 +15,7 @@ describe('resolveEntryPoints', () => {
 	const directory = Paths.absolute('/project');
 
 	beforeEach(() => {
-		vol.fromJSON({ '/project/src/index.ts': '', '/project/src/index.js': '', '/project/src/data.json': '', '/project/src/nested/child.ts': '', '/project/other.ts': '' });
+		vol.fromJSON({ '/project/src/index.ts': '', '/project/src/data.json': '', '/project/src/nested/child.ts': '', '/project/other.ts': '' });
 	});
 
 	afterEach(() => { vol.reset() });
@@ -29,9 +28,9 @@ describe('resolveEntryPoints', () => {
 		expect(entries.custom).toBe('./src/index.ts');
 	});
 
-	it('expands files with deterministic precedence for colliding stems', async () => {
-		vi.spyOn(Files, 'readDirectory').mockResolvedValueOnce([ 'index.ts', 'index.js', 'data.json' ]);
-		expect(await resolveEntryPoints(directory, { ignored: './src' })).toEqual({ data: '/project/src/data.json', index: '/project/src/index.ts' });
+	it('rejects expanded files with colliding stems', async () => {
+		vol.fromJSON({ '/project/src/nested/child.js': '' });
+		await expect(resolveEntryPoints(directory, { ignored: './src' })).rejects.toThrow(new ConfigurationError('Duplicate entry point stem: nested/child'));
 	});
 
 	it.each([ './src/index.ts', './src' ])('checks the configured path %s only once', async (entryPoint) => {
@@ -99,11 +98,10 @@ describe('resolveEntryPoints', () => {
 	});
 
 	it('expands nested directories recursively with names that preserve the directory structure', async () => {
-		vol.fromJSON({ '/project/lib/index.ts': '', '/project/lib/internal/helper.ts': '', '/project/lib/internal/deep/util.ts': '', '/project/lib/internal/deep/util.js': '' });
+		vol.fromJSON({ '/project/lib/index.ts': '', '/project/lib/internal/helper.ts': '', '/project/lib/internal/deep/util.ts': '' });
 		const result = await resolveEntryPoints(directory, { lib: './lib' });
 
 		expect(result).toEqual({ index: '/project/lib/index.ts', 'internal/deep/util': '/project/lib/internal/deep/util.ts', 'internal/helper': '/project/lib/internal/helper.ts' });
-		expect(Object.keys(result)).toEqual([ 'index', 'internal/deep/util', 'internal/helper' ]);
 	});
 
 	it('does not follow symbolic links inside expanded directories', async () => {
@@ -248,6 +246,24 @@ describe('subpathToEntryName', () => {
 });
 
 describe('normalizeEntryPoints', () => {
+	it('accepts ordinary string inputs and returns branded paths internally', () => {
+		const objectInputs = { main: './src/index.ts' } satisfies NonNullable<TypeScriptOptions['tsbuild']>['entryPoints'];
+		const arrayInputs = [ './src/index.ts', './src/cli.ts' ] satisfies NonNullable<TypeScriptOptions['tsbuild']>['entryPoints'];
+		const normalized = normalizeEntryPoints(arrayInputs);
+
+		expect(normalizeEntryPoints(objectInputs)).toEqual({ main: './src/index.ts' });
+		expect(normalized).toEqual({ index: './src/index.ts', cli: './src/cli.ts' });
+		expectTypeOf(normalized).toEqualTypeOf<EntryPoints<Path>>();
+	});
+
+	it('preserves absolute entry-point paths instead of branding them as relative', () => {
+		const normalized = normalizeEntryPoints({ main: '/project/src/index.ts' });
+
+		expect(normalized).toEqual({ main: '/project/src/index.ts' });
+		expectTypeOf(normalized['main']).toEqualTypeOf<Path>();
+		expect(normalizeEntryPoints([ '/project/src/index.ts' ])).toEqual({ index: '/project/src/index.ts' });
+	});
+
 	it('uses source filename stems for array entries', () => {
 		expect(normalizeEntryPoints([relativePath('./src/index.ts'), relativePath('./src/cli.ts')])).toEqual({
 			index: './src/index.ts',

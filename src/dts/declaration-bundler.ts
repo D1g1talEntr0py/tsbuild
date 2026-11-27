@@ -275,17 +275,17 @@ class DeclarationBundler implements Disposable {
 
 			if (dtsEntryPoint === undefined) { continue }
 
-			const outputPath = Paths.join(this.#options.compilerOptions.outDir, `${entryName}${FileExtension.DTS}`);
+			const outputPath = Paths.join(this.#options.compilerOptions.outDir, `${entryName}${FileExtension.D_TS}`);
 			graphs.set(entryName, { entryPoint: dtsEntryPoint, outputPath, graph: await this.#buildModuleGraph(dtsEntryPoint, entryName) });
 		}
 
 		const graphCounts = new Map<AbsolutePath, number>();
-		const sharedSourceFiles = new Map<string, SourceFile>();
+		const sharedSourceFiles = new Map<AbsolutePath, SourceFile>();
 
 		for (const { graph } of graphs.values()) {
-			for (const [ path, module ] of graph.modules) {
+			for (const [ path, { sourceFile } ] of graph.modules) {
 				graphCounts.set(path, (graphCounts.get(path) ?? 0) + 1);
-				sharedSourceFiles.set(path, module.sourceFile);
+				sharedSourceFiles.set(path, sourceFile);
 			}
 		}
 
@@ -397,12 +397,12 @@ class DeclarationBundler implements Disposable {
 	 */
 	#resolveEntryPoint(entryPoint: AbsolutePath, compilerOptions: DtsCompilerOptions) {
 		// Convert source path to declaration path and normalize to POSIX format (TypeScript expects forward slashes)
-		const dtsEntryPoint = Paths.absolute(entryPoint.endsWith(FileExtension.DTS) ? entryPoint : this.#sourceToDeclarationPath(entryPoint));
+		const dtsEntryPoint = Paths.absolute(entryPoint.endsWith(FileExtension.D_TS) ? entryPoint : this.#sourceToDeclarationPath(entryPoint));
 
 		if (this.#declarationFiles.has(dtsEntryPoint)) { return dtsEntryPoint }
 
 		// Source entry points with no declaration file have no exportable API (e.g. CLI scripts)
-		if (!entryPoint.endsWith(FileExtension.DTS)) { return undefined }
+		if (!entryPoint.endsWith(FileExtension.D_TS)) { return undefined }
 
 		// A .d.ts was passed directly but not found — this is a real error
 		const availableFiles = Array.from(this.#declarationFiles.keys());
@@ -462,7 +462,7 @@ class DeclarationBundler implements Disposable {
 	#hasDeclaration(path: AbsolutePath) {
 		if (this.#declarationFiles.has(path) || this.#externalDeclarationFiles.has(path)) { return true }
 
-		if (!this.#options.resolve || !path.endsWith(FileExtension.DTS)) { return false }
+		if (!this.#options.resolve || !path.endsWith(FileExtension.D_TS)) { return false }
 
 		let rawContent: string;
 		try { rawContent = readFileSync(path, Encoding.utf8) } catch { return false }
@@ -490,7 +490,7 @@ class DeclarationBundler implements Disposable {
 		if (rootDir) {
 			// With explicit rootDir, calculate relative path and append to outDir.
 			// Paths.Posix.normalize is required because TypeScript internally uses POSIX-style forward slashes for module resolution paths regardless of the host platform
-			const dtsPath = Paths.Posix.normalize(Paths.join(outDir, Paths.relative(rootDir, sourceWithoutExt) + FileExtension.DTS));
+			const dtsPath = Paths.Posix.normalize(Paths.join(outDir, Paths.relative(rootDir, sourceWithoutExt) + FileExtension.D_TS));
 			result = this.#declarationFiles.has(dtsPath) ? dtsPath : sourcePath;
 		} else {
 			// Without rootDir, find .d.ts file by stripping outDir and matching the suffix
@@ -504,13 +504,13 @@ class DeclarationBundler implements Disposable {
 			let bestRelativeLength = Infinity;
 
 			for (const dtsPath of this.#declarationFiles.keys()) {
-				if (!dtsPath.endsWith(FileExtension.DTS)) { continue }
+				if (!dtsPath.endsWith(FileExtension.D_TS)) { continue }
 
 				// Strip outDir prefix from declaration path: /path/to/project/dist/foo/bar.d.ts -> foo/bar.d.ts
 				const withoutOutDir = dtsPath.startsWith(outDir + '/') ? dtsPath.slice(outDir.length + 1) : dtsPath;
 
 				// Remove .d.ts extension to get relative path: foo/bar.d.ts -> foo/bar
-				const relativeDtsPath = withoutOutDir.slice(0, -FileExtension.DTS.length);
+				const relativeDtsPath = withoutOutDir.slice(0, -FileExtension.D_TS.length);
 
 				// Check if source path ends with the same relative path structure
 				// Ensure it's a complete path segment match by checking for '/' before the match
@@ -1438,6 +1438,24 @@ class DeclarationBundler implements Disposable {
 }
 
 /**
+ * Writes a bundled declaration file, creating its parent directory first
+ * @param outPath - Absolute output path of the declaration file
+ * @param content - Declaration file content
+ * @param currentDirectory - Directory the written file path is reported relative to
+ * @returns The pending write, already guarded against unhandled rejection
+ */
+function writeDeclarationFile(outPath: AbsolutePath, content: string, currentDirectory: AbsolutePath): Promise<WrittenFile> {
+	const task = mkdir(Paths.parse(outPath).dir, defaultDirOptions)
+		.then(() => writeFile(outPath, content, Encoding.utf8))
+		.then(() => ({ path: Paths.relative(currentDirectory, outPath), size: content.length }));
+
+	// Writes settle while later entry points are still bundling; Promise.all below reports the failure
+	void task.catch(alwaysUndefined);
+
+	return task;
+}
+
+/**
  * Bundle TypeScript declaration files into a single output
  * @param options Bundling options
  * @returns The bundled declaration file content
@@ -1458,26 +1476,14 @@ export async function bundleDeclarations(options: DtsBundleOptions): Promise<Wri
 
 	for (const [ outPath, content ] of sharedFiles) {
 		if (content.length > 0) {
-			const task = mkdir(Paths.parse(outPath).dir, defaultDirOptions)
-				.then(() => writeFile(outPath, content, Encoding.utf8))
-				.then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length }));
-
-			// Writes settle while later entry points are still bundling; Promise.all below reports the failure
-			void task.catch(alwaysUndefined);
-			bundleTasks.push(task);
+			bundleTasks.push(writeDeclarationFile(outPath, content, options.currentDirectory));
 		}
 	}
 
 	for (const [ entryName, content ] of entries) {
 		if (content.length > 0) {
-			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}${FileExtension.DTS}`);
-			const task = mkdir(Paths.parse(outPath).dir, defaultDirOptions)
-				.then(() => writeFile(outPath, content, Encoding.utf8))
-				.then(() => ({ path: Paths.relative(options.currentDirectory, outPath), size: content.length }));
-
-			// Writes settle while later entry points are still bundling; Promise.all below reports the failure
-			void task.catch(alwaysUndefined);
-			bundleTasks.push(task);
+			const outPath = Paths.join(options.compilerOptions.outDir, `${entryName}${FileExtension.D_TS}`);
+			bundleTasks.push(writeDeclarationFile(outPath, content, options.currentDirectory));
 		}
 	}
 

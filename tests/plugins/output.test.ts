@@ -105,6 +105,32 @@ describe('outputPlugin', () => {
 		expect(await memfs.promises.readFile(indexPath, 'utf8')).toBe('import "./dep.js";');
 	});
 
+	it('resolves extensionless relative imports with query and fragment suffixes', async () => {
+		const indexPath = join(outputDir, 'index.js');
+		const depPath = join(outputDir, 'dep.js');
+		const otherPath = join(outputDir, 'other.js');
+		const pluginBuild: Partial<PluginBuild> = {
+			onEnd: vi.fn((callback) => { onEndCallback = callback })
+		};
+		createWriteOutputPlugin(outputDir, onWritten, { resolveImports: true }).setup(pluginBuild as PluginBuild);
+
+		const validationResult = await onEndCallback(buildResultWith(
+			[
+				outputFile(indexPath, 'import "./dep?raw#section";\nimport "./other#section?mode";'),
+				outputFile(depPath, 'export const value = 1;'),
+				outputFile(otherPath, 'export const other = 2;')
+			],
+			{
+				'index.js': { entryPoint: 'src/index.ts', imports: [outputImport('./dep?raw#section'), outputImport('./other#section?mode')] },
+				'dep.js': { entryPoint: 'src/dep.ts' },
+				'other.js': { entryPoint: 'src/other.ts' }
+			}
+		));
+
+		expect(validationResult).toBeUndefined();
+		expect(await memfs.promises.readFile(indexPath, 'utf8')).toBe('import "./dep.js?raw#section";\nimport "./other.js#section?mode";');
+	});
+
 	it('does not resolve relative directory specifiers as files', async () => {
 		const indexPath = join(outputDir, 'index.js');
 		const pluginBuild: Partial<PluginBuild> = {
@@ -321,6 +347,27 @@ describe('outputPlugin', () => {
 			expect(rewritten).toContain('import("./lazy/module.js")');
 		});
 
+		it('rewrites imports without changing comments, strings, or import attributes', async () => {
+			const filePath = join(outputDir, 'index.js');
+			const code = [
+				`const message = 'from "./not-an-import"';`,
+				'// import "./also-not-an-import";',
+				'import "./real-import";',
+				'const data = await import("./config", { with: { type: "json" } });'
+			].join('\n');
+			await onEndCallback(buildResultWith(
+				[outputFile(filePath, code)],
+				{ 'index.js': { entryPoint: 'src/index.ts', imports: [outputImport('./real-import'), outputImport('./config')] } }
+			));
+
+			expect(await memfs.promises.readFile(filePath, 'utf8')).toBe([
+				`const message = 'from "./not-an-import"';`,
+				'// import "./also-not-an-import";',
+				'import "./real-import.js";',
+				'const data = await import("./config.js", { with: { type: "json" } });'
+			].join('\n'));
+		});
+
 		it('does not rewrite bare specifiers or already-extended relative specifiers', async () => {
 			const filePath = join(outputDir, 'index.js');
 			await onEndCallback(buildResultWith(
@@ -343,6 +390,35 @@ describe('outputPlugin', () => {
 			expect(rewritten).toContain('from "./dep.js"');
 			expect(rewritten).toContain('from "./style.css"');
 			expect(rewritten).toContain('import("./chunk.mjs")');
+		});
+
+		it('preserves other specifiers when an extensionless relative import is rewritten', async () => {
+			const filePath = join(outputDir, 'index.js');
+			const code = [
+				'import "./local?raw#section";',
+				'import "pkg";',
+				'import "./dep.js";',
+				'import "./style.css?raw";',
+				'import "./dir/#section";'
+			].join('\n');
+			await onEndCallback(buildResultWith(
+				[outputFile(filePath, code)],
+				{ [filePath]: { entryPoint: 'src/index.ts', imports: [
+					outputImport('./local?raw#section'),
+					outputImport('pkg'),
+					outputImport('./dep.js'),
+					outputImport('./style.css?raw'),
+					outputImport('./dir/#section')
+				] } }
+			));
+
+			expect(await memfs.promises.readFile(filePath, 'utf8')).toBe([
+				'import "./local.js?raw#section";',
+				'import "pkg";',
+				'import "./dep.js";',
+				'import "./style.css?raw";',
+				'import "./dir/#section";'
+			].join('\n'));
 		});
 
 		it('rewrites chunk outputs too', async () => {

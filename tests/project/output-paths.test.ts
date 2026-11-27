@@ -47,6 +47,10 @@ describe('OutputPathValidator', () => {
 		await expect(validator('/outside', [], Paths.absolute('/outside/custom.json')).validateOutputDirectory()).rejects.toThrow(ConfigurationError);
 	});
 
+	it('resolves relative source roots against the project directory before protection checks', async () => {
+		await expect(validator('/project/src', [ 'src/index.ts' ]).validateOutputDirectory()).rejects.toThrow(ConfigurationError);
+	});
+
 	it('does not confuse sibling path prefixes with containment', async () => {
 		await expect(validator('/project/src-other').validateOutputDirectory()).resolves.toBe('/project/src-other');
 	});
