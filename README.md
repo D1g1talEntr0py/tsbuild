@@ -536,7 +536,19 @@ await project.build();
 
 Projects are registered for automatic process-shutdown cleanup when they are constructed, so callers do not have to call `close()` for normal process termination. `await using` closes the project when its scope ends, including when the scope throws. It is supported by the project's Node.js and TypeScript requirements. For deterministic cleanup before the process terminates, call `await project.close()` in a `finally` block or use `await using`. Keep watch projects alive until watching is no longer needed; leaving an `await using` scope stops the watcher.
 
-`close()` stops watcher scheduling and releases in-memory resources immediately, then waits for pending cache writes and esbuild disposal. It is idempotent, uses a 5-second default timeout (overridable with `close(timeoutMs)`), and rejects when cleanup fails or exceeds that timeout. The CLI awaits it automatically for non-watch builds. `shutdown()` remains a deprecated alias for compatibility.
+Set `compilerOptions.noEmit` in configuration or constructor options to check a project without validating, cleaning or writing build outputs:
+
+```typescript
+await using project = await new TypeScriptProject(process.cwd(), { compilerOptions: { noEmit: true } }).build();
+```
+
+`build()` takes no arguments and reads `compilerOptions.noEmit` from the resolved configuration. It returns the project for async disposal outside watch mode, or `null` to keep a watch project alive, so the pattern above also works in watch mode. Type-check-only watch rebuilds never run the output phases. Configuration is resolved at construction; create a new project to change emission mode or pick up configuration changes. The CLI applies `--noEmit` through constructor options and calls `build()`, using the resolved configuration.
+
+`build()` is the single entry point for builds and type-checks; replace previous `typeCheck()` calls with `build()` on a project configured with `compilerOptions.noEmit: true`.
+
+`close()` stops watcher scheduling immediately, waits for active builds, then drains esbuild disposal before releasing compiler and in-memory resources. It is idempotent, uses a 5-second default timeout (overridable with `close(timeoutMs)`), and rejects when asynchronous cleanup or synchronous resource disposal fails, or when cleanup exceeds that timeout. A timeout does not cancel I/O or release resources still in use; cleanup continues after the rejection. The CLI awaits it automatically for non-watch builds.
+
+The reported **Build** duration measures `build()`, not end-to-end CLI time. It excludes project construction/configuration and final shutdown. To measure a complete non-watch invocation, time construction, `await project.build()` and `await project.close()` together; whole-process CLI timing additionally includes module loading, process startup and exit.
 
 `@closeOnExit` registers the project with the process manager. On `SIGINT` (Ctrl+C), the process manager automatically calls `close()`, waits for registered asynchronous cleanup to settle, and then exits with code 0. The synchronous Node.js `exit` event also calls `close()` as a final fallback, but cannot await asynchronous cleanup. Use `await using` or `await project.close()` only when cleanup must complete before your code continues or the process terminates.
 
@@ -586,6 +598,7 @@ tsbuild is designed for speed:
 - **In-memory declarations** - No intermediate disk I/O for `.d.ts` files
 - **Parallel processing** - Declaration bundling and transpilation run in parallel after type checking completes
 - **Full non-watch builds** - Always type-check and emit, ensuring outputs reflect current inputs
+- **Native compiler** - Type-checking runs on the TypeScript 7 native compiler
 
 Typical build times for the tsbuild project itself:
 - Full build: ~200ms
@@ -614,7 +627,6 @@ The TypeScript declaration bundling system was originally inspired by rollup-plu
 - **Windows** - Watch mode is not supported on Windows because the `@d1g1tal/watchr` dependency supports Linux and macOS only. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) and run tsbuild inside the Linux environment.
 - **Personal project** - Works well for my use cases, but hasn't been tested across every environment or edge case
 - **Config plugins need a default export** - Plugins referenced in `tsconfig.json` must be modules whose default export is a plugin factory or esbuild `Plugin` object; anything else requires the programmatic API
-- **tsBuildInfoFile Path Changes** - When changing the `tsBuildInfoFile` path in `tsconfig.json`, the old `.tsbuildinfo` file at the previous location will not be automatically cleaned up and must be manually removed
 
 ## Comparison with Other Tools
 

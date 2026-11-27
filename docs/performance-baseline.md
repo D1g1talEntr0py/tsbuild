@@ -83,7 +83,7 @@ current reference, not a claimed watch speedup.
   final CLI table.
 - **AST reuse:** on a 1,000-module watch fixture, declaration-phase median was
   124.1 → 63.2 ms and edit-to-output latency 593.1 → 535.1 ms. Median live
-  heap increased by about 12 MiB in that earlier watch measurement. Later
+  heap increased by about 12 MB in that earlier watch measurement. Later
   60-edit forced-GC diagnostics found a bounded project cache and no
   demonstrated unbounded retention; they do not prove the absence of all
   workload-specific leaks.
